@@ -72,3 +72,15 @@ export async function fetchJson<T = unknown>(url: string, opts: FetchOptions): P
   }
   throw lastErr;
 }
+
+/** Download bytes from an authenticated API (e.g. Google Drive file content). */
+export async function fetchBinary(url: string, opts: { provider: string; headers?: Record<string, string>; timeoutMs?: number; maxBytes?: number; signal?: AbortSignal }) {
+  const timeout = AbortSignal.timeout(opts.timeoutMs ?? 120_000);
+  const res = await fetch(url, { headers: { 'user-agent': env().HTTP_USER_AGENT, ...opts.headers }, signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout });
+  if (!res.ok) throw new ProviderError(opts.provider, `HTTP ${res.status} downloading file`, { status: res.status });
+  const len = Number(res.headers.get('content-length') ?? 0);
+  if (opts.maxBytes && len > opts.maxBytes) throw new ProviderError(opts.provider, `File too large (${len} bytes)`, { transient: false });
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (opts.maxBytes && buf.length > opts.maxBytes) throw new ProviderError(opts.provider, `File too large (${buf.length} bytes)`, { transient: false });
+  return { body: buf, contentType: res.headers.get('content-type') ?? 'application/octet-stream' };
+}

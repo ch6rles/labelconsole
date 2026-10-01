@@ -37,6 +37,9 @@ const EnvSchema = z.object({
   AGENT_CONCURRENCY_PER_ORG: z.coerce.number().int().positive().default(4),
   WORKER_HEALTH_PORT: z.coerce.number().int().default(9091),
   SENTRY_DSN: z.string().optional(),
+  /** clamd for upload virus scanning; files are marked "skipped" when unset. */
+  CLAMAV_HOST: z.string().optional(),
+  CLAMAV_PORT: z.coerce.number().int().default(3310),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
