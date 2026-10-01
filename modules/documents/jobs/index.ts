@@ -20,6 +20,8 @@ export const jobs = [
   defineJob('documents.extract', async (job, data) => {
     const doc = await job.withOrg(async (ctx) => {
       const [d] = await ctx.tx.update(documents).set({ extractionStatus: 'running', extractionError: null }).where(eq(documents.id, data.documentId)).returning();
+      // Nothing to read (the file was removed): don't leave the document looking busy.
+      if (d && !d.fileId) await ctx.tx.update(documents).set({ extractionStatus: 'none' }).where(eq(documents.id, d.id));
       return d;
     });
     if (!doc?.fileId) return;
@@ -51,6 +53,8 @@ export const jobs = [
   defineJob('documents.parse-statement', async (job, data) => {
     const doc = await job.withOrg(async (ctx) => {
       const [d] = await ctx.tx.update(documents).set({ extractionStatus: 'running', extractionError: null }).where(eq(documents.id, data.documentId)).returning();
+      // Nothing to read (the file was removed): don't leave the document looking busy.
+      if (d && !d.fileId) await ctx.tx.update(documents).set({ extractionStatus: 'none' }).where(eq(documents.id, d.id));
       return d;
     });
     if (!doc?.fileId) return;

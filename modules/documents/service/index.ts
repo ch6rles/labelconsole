@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { ForbiddenError, NotFoundError, ValidationError } from '@labelconsole/core/errors';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
-import { releaseArtists, releases, releaseTracks, trackArtists, tracks } from '@labelconsole/catalogue/schema';
+import { releaseArtists, releases, trackArtists, tracks } from '@labelconsole/catalogue/schema';
 import { artists } from '@labelconsole/people/schema';
 import { downloadUrl, ensureSystemFolder, getFilesByIds, storeFile } from '@labelconsole/drive/service';
 import { CONTRACT_STATUSES, DOCUMENT_TYPES, documentAccessLog, documentLinks, documents, keyDates, statementLines, type ContractTerms, type Document, type StatementSummary } from '../schema';
@@ -335,46 +335,98 @@ export async function statementLinesFor(ctx: ServiceContext, documentId: string,
   return ctx.tx.select().from(statementLines).where(eq(statementLines.documentId, documentId)).orderBy(desc(statementLines.netCents)).limit(limit);
 }
 
-/** Booked revenue by month and source, and top releases, from imported statements. */
+/** The release a statement line belongs to: its own UPC match, else one release carrying the track (never both, so nothing is counted twice). */
+// Qualified by hand: drizzle renders columns unqualified in single-table queries, which inside the subquery would bind to release_tracks.
+const releaseOfLine = sql<string | null>`coalesce("statement_lines"."release_id", (select rt.release_id from release_tracks rt where rt.track_id = "statement_lines"."track_id" order by rt.release_id limit 1))`;
+const sumNet = sql<number>`sum(${statementLines.netCents})::bigint`;
+const sumGross = sql<number>`sum(${statementLines.grossCents})::bigint`;
+const sumUnits = sql<number>`sum(${statementLines.units})::bigint`;
+
+/**
+ * Booked revenue from imported statements: 12 months by month, and for the
+ * latest booked month the split by source, top releases and the artist/label
+ * shares the confirmed contracts give. Revenue on releases without confirmed
+ * terms is reported as uncovered rather than guessed.
+ */
 export async function royalties(ctx: ServiceContext, months = 12) {
   ctx.assert('documents:read_financial');
-  const from = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - months + 1, 1)).toISOString().slice(0, 10);
+  const now = new Date();
+  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - months + 1, 1)).toISOString().slice(0, 10);
   const latestDocs = ctx.tx.select({ id: documents.id }).from(documents).where(and(eq(documents.type, 'statement'), eq(documents.isLatest, true)));
   const base = and(inArray(statementLines.documentId, latestDocs), isNotNull(statementLines.periodStart), gte(statementLines.periodStart, from));
-  const [byMonth, bySource, byRelease, latestPeriod] = await Promise.all([
-    ctx.tx.select({ month: sql<string>`to_char(${statementLines.periodStart}, 'YYYY-MM')`, net: sql<number>`sum(${statementLines.netCents})::bigint`, units: sql<number>`sum(${statementLines.units})::bigint` }).from(statementLines).where(base).groupBy(sql`1`).orderBy(sql`1`),
-    ctx.tx.select({ source: statementLines.source, net: sql<number>`sum(${statementLines.netCents})::bigint` }).from(statementLines).where(base).groupBy(statementLines.source).orderBy(sql`2 desc`),
-    ctx.tx
-      .select({ releaseId: sql<string | null>`coalesce(${statementLines.releaseId}, ${releaseTracks.releaseId})`, net: sql<number>`sum(${statementLines.netCents})::bigint`, gross: sql<number>`sum(${statementLines.grossCents})::bigint`, units: sql<number>`sum(${statementLines.units})::bigint` })
-      .from(statementLines)
-      .leftJoin(releaseTracks, eq(releaseTracks.trackId, statementLines.trackId))
-      .where(base)
-      .groupBy(sql`1`)
-      .orderBy(sql`2 desc`)
-      .limit(10),
+  const [byMonth, latestPeriod] = await Promise.all([
+    ctx.tx.select({ month: sql<string>`to_char(${statementLines.periodStart}, 'YYYY-MM')`, net: sumNet, units: sumUnits }).from(statementLines).where(base).groupBy(sql`1`).orderBy(sql`1`),
     ctx.tx.select({ end: sql<string | null>`max(${statementLines.periodEnd})` }).from(statementLines).where(inArray(statementLines.documentId, latestDocs)),
   ]);
+  const period = byMonth.at(-1)?.month ?? null;
+  const inPeriod = and(base, sql`to_char(${statementLines.periodStart}, 'YYYY-MM') = ${period ?? ''}`);
+  const [bySource, byRelease] = period
+    ? await Promise.all([
+        ctx.tx.select({ source: statementLines.source, net: sumNet }).from(statementLines).where(inPeriod).groupBy(statementLines.source).orderBy(sql`2 desc`),
+        ctx.tx.select({ releaseId: releaseOfLine, net: sumNet, gross: sumGross, units: sumUnits }).from(statementLines).where(inPeriod).groupBy(sql`1`).orderBy(sql`2 desc`),
+      ])
+    : [[], []];
+
   const releaseIds = byRelease.map((r) => r.releaseId).filter((x): x is string => Boolean(x));
   const relRows = releaseIds.length
     ? await ctx.tx.select({ id: releases.id, title: releases.title, artistId: releaseArtists.artistId, artistName: artists.name }).from(releases).leftJoin(releaseArtists, and(eq(releaseArtists.releaseId, releases.id), eq(releaseArtists.position, 0))).leftJoin(artists, eq(artists.id, releaseArtists.artistId)).where(inArray(releases.id, releaseIds))
     : [];
   const contracts = await contractsForArtists(ctx, relRows.map((r) => r.artistId).filter((x): x is string => Boolean(x)));
-  const top = byRelease.map((r) => {
+  const rows = byRelease.map((r) => {
     const rel = relRows.find((x) => x.id === r.releaseId);
     const terms = contracts.find((c) => c.artistId === rel?.artistId && c.terms?.royaltyArtistPct != null)?.terms ?? null;
     const net = Number(r.net);
+    const artistPct = terms?.royaltyArtistPct ?? null;
     return {
       releaseId: r.releaseId,
-      title: rel?.title ?? 'Unmatched lines',
+      title: rel?.title ?? 'Not matched to the catalogue',
       artist: rel?.artistName ?? '—',
       units: Number(r.units),
       grossCents: Number(r.gross),
       netCents: net,
-      artistShareCents: terms?.royaltyArtistPct != null ? Math.round((net * terms.royaltyArtistPct) / 100) : null,
-      labelShareCents: terms?.royaltyArtistPct != null ? Math.round((net * (100 - terms.royaltyArtistPct)) / 100) : null,
+      artistShareCents: artistPct != null ? Math.round((net * artistPct) / 100) : null,
+      labelShareCents: artistPct != null ? Math.round((net * (terms?.royaltyLabelPct ?? 100 - artistPct)) / 100) : null,
     };
   });
-  return { byMonth: byMonth.map((m) => ({ month: m.month, netCents: Number(m.net), units: Number(m.units) })), bySource: bySource.map((s) => ({ source: s.source, netCents: Number(s.net) })), top, bookedThrough: latestPeriod[0]?.end ?? null };
+  const sum = (f: (r: (typeof rows)[number]) => number | null) => rows.reduce((a, r) => a + (f(r) ?? 0), 0);
+  const totals = {
+    grossCents: sum((r) => r.grossCents),
+    netCents: sum((r) => r.netCents),
+    artistShareCents: sum((r) => r.artistShareCents),
+    labelShareCents: sum((r) => r.labelShareCents),
+    uncoveredCents: sum((r) => (r.artistShareCents == null ? r.netCents : 0)),
+    unmatchedCents: sum((r) => (r.releaseId ? 0 : r.netCents)),
+  };
+  return {
+    period,
+    byMonth: byMonth.map((m) => ({ month: m.month, netCents: Number(m.net), units: Number(m.units) })),
+    bySource: bySource.map((s) => ({ source: s.source, netCents: Number(s.net) })),
+    top: rows.slice(0, 10),
+    totals,
+    bookedThrough: latestPeriod[0]?.end ?? null,
+  };
+}
+
+/** Every statement line in the window as CSV, for accountants. */
+export async function royaltiesCsv(ctx: ServiceContext, months = 12) {
+  ctx.assert('documents:read_financial');
+  const now = new Date();
+  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - months + 1, 1)).toISOString().slice(0, 10);
+  const lines = await ctx.tx
+    .select({ periodStart: statementLines.periodStart, periodEnd: statementLines.periodEnd, source: statementLines.source, territory: statementLines.territory, isrc: statementLines.isrc, upc: statementLines.upc, trackTitle: statementLines.trackTitle, units: statementLines.units, grossCents: statementLines.grossCents, netCents: statementLines.netCents, currency: statementLines.currency, release: releases.title })
+    .from(statementLines)
+    .innerJoin(documents, and(eq(documents.id, statementLines.documentId), eq(documents.isLatest, true)))
+    .leftJoin(releases, eq(releases.id, releaseOfLine))
+    .where(gte(statementLines.periodStart, from))
+    .orderBy(asc(statementLines.periodStart), desc(statementLines.netCents))
+    .limit(200_000);
+  const esc = (v: unknown) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ['period_start', 'period_end', 'source', 'territory', 'isrc', 'upc', 'track', 'release', 'units', 'gross', 'net', 'currency'];
+  const body = lines.map((l) => [l.periodStart, l.periodEnd, l.source, l.territory, l.isrc, l.upc, l.trackTitle, l.release, l.units, (l.grossCents / 100).toFixed(2), (l.netCents / 100).toFixed(2), l.currency].map(esc).join(','));
+  return [header.join(','), ...body].join('\n') + '\n';
 }
 
 /** Net revenue per artist over the last 12 months (People's "earned" column). */

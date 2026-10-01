@@ -83,7 +83,15 @@ export const jobs = [
     const roots = await systemDb()
       .select({ id: folders.id, orgId: folders.orgId })
       .from(folders)
-      .where(and(eq(folders.externalProvider, 'google_drive'), eq(folders.syncMode, 'mirror'), isNotNull(folders.externalId), sql`${folders.parentId} is null or not exists (select 1 from drive_folders p where p.id = ${folders.parentId} and p.external_provider = 'google_drive')`));
+      .where(
+        and(
+          eq(folders.externalProvider, 'google_drive'),
+          eq(folders.syncMode, 'mirror'),
+          isNotNull(folders.externalId),
+          // Roots only: no parent, or a parent that isn't itself synced. Outer column qualified by hand so it doesn't bind to the alias p.
+          sql`("drive_folders"."parent_id" is null or not exists (select 1 from drive_folders p where p.id = "drive_folders"."parent_id" and p.external_provider = 'google_drive'))`,
+        ),
+      );
     for (const r of roots) await enqueue('drive.sync-folder', r.orgId, { folderId: r.id }, { jobId: `sync-${r.id}-${new Date().toISOString().slice(0, 13)}` });
   }),
 ];

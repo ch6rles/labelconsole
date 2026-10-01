@@ -30,6 +30,7 @@ export const routes = defineRoutes('documents', [
     },
   }),
   route({ method: 'GET', path: '/documents/:id', permission: 'documents:read', handler: (ctx, req) => svc.getDocument(ctx, req.params.id) }),
+  route({ method: 'GET', path: '/documents/:id/status', permission: 'documents:read', handler: async (ctx, req) => ({ status: (await svc.getDocumentRow(ctx, req.params.id)).extractionStatus }) }),
   route({ method: 'PATCH', path: '/documents/:id', permission: 'documents:write', body: svc.DocumentPatch, handler: (ctx, req) => svc.updateDocument(ctx, req.params.id, req.body) }),
   route({ method: 'DELETE', path: '/documents/:id', permission: 'documents:delete', handler: (ctx, req) => svc.deleteDocument(ctx, req.params.id) }),
   route({
@@ -52,6 +53,13 @@ export const routes = defineRoutes('documents', [
   route({ method: 'GET', path: '/documents-key-dates', permission: 'documents:read', handler: (ctx) => svc.upcomingKeyDates(ctx) }),
   route({ method: 'POST', path: '/documents-key-dates/:id/dismiss', permission: 'documents:write', handler: (ctx, req) => svc.dismissKeyDate(ctx, req.params.id) }),
   route({ method: 'GET', path: '/finance/royalties', permission: 'documents:read_financial', query: z.object({ months: z.coerce.number().int().min(1).max(36).default(12) }), handler: (ctx, req) => svc.royalties(ctx, req.query.months) }),
+  route({
+    method: 'GET',
+    path: '/finance/royalties/export',
+    permission: 'documents:read_financial',
+    query: z.object({ months: z.coerce.number().int().min(1).max(36).default(12) }),
+    handler: async (ctx, req) => new Response(await svc.royaltiesCsv(ctx, req.query.months), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="royalties-${new Date().toISOString().slice(0, 10)}.csv"` } }),
+  }),
   route({ method: 'GET', path: '/finance/statements', permission: 'documents:read_financial', handler: (ctx) => svc.listStatements(ctx) }),
   route({ method: 'GET', path: '/finance/statements/:id/lines', permission: 'documents:read_financial', handler: (ctx, req) => svc.statementLinesFor(ctx, req.params.id) }),
 ]);
