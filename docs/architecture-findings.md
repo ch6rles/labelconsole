@@ -69,5 +69,7 @@ Turning a module off for a label (or a plan that lacks it) removes its nav, its 
 - **PATCH schemas must use `patchOf()`** from `@labelconsole/core/zod`. Zod 4's `.partial()` keeps defaults, so a partial update would silently reset fields.
 - **Tenant data goes through `withOrg`.** The system connection bypasses RLS; it's only for the cross-tenant cases listed above. Module metrics hooks receive it as an argument and must return aggregates only.
 - **Long work goes in jobs.** Route handlers write, enqueue (after commit) and return.
+- **Audit entries for sensitive records set `readPermission`** (for example `documents:read_confidential`), so the activity feed only shows them to people who could open the record. Settings entries need `settings:audit`.
+- **Role changes stay within the actor's own access.** Nobody can assign, change or remove a role that holds permissions they don't have.
 - **Every permission key must be declared by a module.** A unit test fails on undeclared keys, because a typo silently hides a feature.
 - **Agent tools never see secrets or raw Spotify responses.** They receive credential handles and derived numbers.

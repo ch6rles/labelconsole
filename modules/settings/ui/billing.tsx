@@ -3,7 +3,7 @@ import { Card, Page, PageHeader, Progress, StatCard, fmt } from '@labelconsole/u
 import * as svc from '../service';
 
 const GB = 1024 ** 3;
-const bytes = (n: number) => (n >= GB ? `${(n / GB).toFixed(n >= 10 * GB ? 0 : 1)} GB` : `${Math.round(n / 1024 ** 2)} MB`);
+const bytes = (n: number) => (n >= GB ? `${(n / GB).toFixed(n >= 10 * GB ? 0 : 1)} GB` : n >= 1024 ** 2 ? `${Math.round(n / 1024 ** 2)} MB` : `${Math.ceil(n / 1024)} KB`);
 
 export default async function BillingPage({ run }: PageProps) {
   const u = await run((ctx) => svc.planUsage(ctx));
