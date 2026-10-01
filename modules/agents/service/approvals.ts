@@ -3,6 +3,7 @@ import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { ConflictError, NotFoundError, ValidationError } from '@labelconsole/core/errors';
+import { users } from '@labelconsole/core/db/schema';
 import { toolByName } from '@labelconsole/core/modules';
 import { publish } from '@labelconsole/core/realtime';
 import { agents, approvals, runs } from '../schema';
@@ -18,10 +19,11 @@ export const DecisionInput = z.object({
 export async function listApprovals(ctx: ServiceContext, q: { status?: string } = {}) {
   ctx.assert('agents:read');
   return ctx.tx
-    .select({ approval: approvals, agentName: agents.name, agentType: agents.type, runTask: runs.task })
+    .select({ approval: approvals, agentName: agents.name, agentType: agents.type, runTask: runs.task, decidedByName: users.name })
     .from(approvals)
     .innerJoin(agents, eq(agents.id, approvals.agentId))
     .innerJoin(runs, eq(runs.id, approvals.runId))
+    .leftJoin(users, eq(users.id, approvals.decidedBy))
     .where(q.status ? eq(approvals.status, q.status) : undefined)
     .orderBy(sql`case ${approvals.status} when 'pending' then 0 else 1 end`, desc(approvals.createdAt))
     .limit(300);

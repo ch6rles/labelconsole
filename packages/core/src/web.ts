@@ -27,6 +27,8 @@ export type PageDef = {
   /** Route pattern under the console root, e.g. `catalog/releases/:id`. */
   path: string;
   permission?: string;
+  /** Used only when no enabled module registers the same path (e.g. a "not on your plan" placeholder). */
+  fallback?: boolean;
   component: (props: PageProps) => Promise<ReactNode> | ReactNode;
 };
 

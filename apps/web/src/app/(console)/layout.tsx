@@ -53,6 +53,7 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
       unread={counts.unread}
       runningAgents={counts.runningAgents}
       pendingApprovals={counts.pendingApprovals}
+      agentsEnabled={active.some((m) => m.manifest.id === 'agents')}
     >
       {children}
     </ConsoleShell>

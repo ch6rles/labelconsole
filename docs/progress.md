@@ -1,6 +1,6 @@
 # Label Console — build progress
 
-> **Current position:** Phases 1–5 are done. Phase 6 (the agent system) is next.
+> **Current position:** Phases 1–6 are done. Phase 7 (hardening, docs, deploy) is next.
 > If work pauses again, resume from **"Next steps"** below and carry on through the phases in order.
 
 ## Phase status
@@ -12,8 +12,8 @@
 | 3 | People, Drive, Documents (contracts with AI term review, statements, royalties, key dates) | Done |
 | 4 | Streams (YouTube Data API adapter, statement-import adapter, licensed-provider interface, snapshots, rollups, alerts) | Done |
 | 5 | Network (contacts, interactions, playlists) + Marketing (campaigns, pipeline boards, outreach, sketchboards) | Done |
-| 6 | Agent system (orchestrator, checkpointed runtime, tools, memory, triggers, approvals, budgets, delegation, kill switch, 8 agent types) + Inbox approvals page | **Next** (schema, manifest and 33 module tools exist; Inbox and Settings are done) |
-| 7 | Hardening: dev seed, docs (`label-console-plan.md`, `architecture-findings.md`, README), Dockerfiles, full test run, screenshots, push | Not started |
+| 6 | Agent system (orchestrator, checkpointed runtime, tools, memory, triggers, approvals, budgets, delegation, kill switch, 8 agent types) + Inbox approvals page | Done |
+| 7 | Hardening: dev seed, docs (`label-console-plan.md`, `architecture-findings.md`, README), Dockerfiles, full test run, screenshots, push | **Next** |
 
 ## Phase 3 acceptance
 
@@ -57,28 +57,58 @@
 - **Bug fixed across modules:** Zod's `.partial()` keeps defaults, so PATCH requests silently reset fields such as release status or artist payout method. Every patch schema now uses `patchOf()` from `@labelconsole/core/zod`, with regression tests.
 - **Tests:** 74 passing.
 
+## Phase 6 acceptance
+
+- **Agent types:** 8 types (Label Manager, Playlist & Editor Outreach, Creator Outreach, Trend & Social Monitor, A&R Scout, Stream Watch, Release Ops, Contract & Statement Watch). Each sets the tools, role, approval policy, budget, step limit, default triggers and what the final answer must cover. Agents are created from a type and then edited in the builder.
+- **Permissions:** an agent acts as a role, capped by its owner's permissions and, for delegated work, its parent run's. Permissions are frozen when the run starts, so later role changes don't widen a run in flight.
+- **Runtime (`agents.run` on the `agents` queue):**
+  - A run claims a lease under a per-org advisory lock, which enforces the concurrency limit. It heartbeats and checkpoints after every step.
+  - A crashed worker's run is picked up by the next attempt, or by the tick's stalled-run recovery. It resumes from the checkpoint.
+  - The system prompt and tool list are frozen per run.
+  - Tool calls carry idempotency keys, so a side effect never repeats after a crash. A non-idempotent call that was in flight is reported back to the agent as "may already have run".
+  - Calls are rate-limited and time out, and transient errors are retried.
+  - Context is compacted when it grows large. Claude's web search is offered only when the agent allows web research.
+- **Approvals:** risk policy (`read`/`write`/`external`/`destructive`/`spend` → do / ask / deny), per-tool overrides, and tools that always ask (sending outreach, roster status). Staff approve, edit then approve (the edit is validated against the tool's schema), or reject with a reason the agent reads. Approvals expire, and the run resumes either way. The queue is on Inbox → Approvals and on the run page, with a live count in the top bar.
+- **Budgets:** per run (summed across the delegation tree), per agent per day, and a label-wide monthly cap (Settings → Workspace). Checked before each model call, so a run stops before overspending (`budget_exceeded`).
+- **Delegation:** `agents_delegate_task` starts a child run and parks the parent in `waiting_child` until the child finishes. The child can only do what both agents may do. The plan tree is shown on the run page.
+- **Memory:** facts, outcomes and preferences per agent or shared by all agents. Recall is Postgres full-text rank × 4 + importance + recency, and duplicates bump importance. Staff can add, correct and delete memories on Agents → Memory. The pgvector column stays empty until an embedding provider is chosen.
+- **Triggers:**
+  - Cron schedules with timezone, fired by `agents.tick` every minute. The tick also recovers stalled runs and expires approvals.
+  - Domain events, through a `*` listener that ignores agent and inbox events and an agent's own actions.
+  - Signed inbound webhooks at `/api/webhooks/agents/[token]`. The token is stored hashed and shown once, and requests are rate-limited and capped at 64KB.
+- **Control:** pause, resume and stop per run (stop cascades to child runs and aborts in-flight work via Redis control messages), plus a label-wide kill switch.
+- **UI:**
+  - Agents list with the kill switch, and a "no API key" banner when no model key is configured.
+  - New-agent type gallery.
+  - Agent page with triggers, recent runs and the builder (model, effort, role, approvals, tools, budgets, limits).
+  - Runs list with cost per day, and a live run view (steps, reasoning summaries, tool inputs and results, approvals, plan tree, controls).
+  - Memory and Usage pages (month vs cap, projection, per-agent cost).
+  - Inbox → Approvals, with a placeholder when Agents isn't on the plan. The page router now matches only enabled modules, and fallback pages lose ties.
+- **Without a model key:** runs fail at their first step with "No Anthropic API key is configured…". Nothing is simulated.
+- **Tests:** 88 passing. Prompt tests check that webhook payloads are fenced as untrusted data. `modules/agents/agents.int.test.ts` uses a stub provider (test-only, via `setLlmProviderFactory`) to cover:
+  - the loop, memory and the frozen prompt
+  - approve, edit and reject
+  - crash recovery with the lease and idempotency
+  - budgets, the step limit, the kill switch, and pause/resume
+  - delegation
+  - cron and event triggers
+  - the owner permission cap
+
 ## Next steps (resume here)
 
-1. **Phase 6 Agents.**
-   - Agent type registry (8 types: Label Manager, Playlist and Editor Outreach, Creator Outreach, Trend and Social Monitor, A&R Scout, Stream Watch, Contract and Rights, Release Ops).
-   - Orchestrator: start, pause, resume, stop, per-org concurrency, and the kill switch (`organizations.agentsPaused`).
-   - Runtime job `agents.run`:
-     - lease and heartbeat, with a checkpoint after every step
-     - tools filtered by permission and frozen per run
-     - approval policy by risk level
-     - idempotency through `idempotency_keys`
-     - budgets, compaction, delegation with `waiting_child`, memory, and the web search server tool
-   - Triggers: cron (via `agents.tick`), events (`*` listener) and webhooks (`/api/webhooks/agents/[token]`).
-   - Approvals service and the Inbox approvals page.
-   - Agents UI: list, builder, live run view, plan tree, memory and usage.
-   - Tests with the stubbed provider (`setLlmProviderFactory`): the loop, approvals, crash recovery, budgets and the kill switch.
-2. **Phase 7**: dev seed, docs, Dockerfiles, full verification.
+1. **Phase 7 hardening.**
+   - Dev seed behind `LC_DEV_SEED=1` (sample label, releases, contacts, campaigns, agents). Never runs in production.
+   - Write `docs/label-console-plan.md`, `docs/architecture-findings.md` and the README.
+   - Dockerfiles for web and worker, plus deploy notes.
+   - Full test run, typecheck and `next build`; desktop and mobile screenshots.
+   - Final progress update and push.
 
 ## Open questions for the owner
 
 - The licensed stream-data vendor hasn't been chosen yet. Only the provider interface exists (`modules/streams/sources/licensed.ts`); the plan says to ask before adding a paid service.
 - YouTube polling needs a YouTube Data API key: either the label's own (Settings → Integrations) or a platform `YOUTUBE_API_KEY`. The default quota is 10,000 units per day per Google project.
 - No paid embedding provider is used. Memory uses a pgvector column with a Postgres full-text-search fallback.
+- Agents need an Anthropic API key, either the label's own (Settings → Integrations) or a platform `ANTHROPIC_API_KEY`. Contract term extraction and statement PDF reading need it too.
 
 ## Running locally
 

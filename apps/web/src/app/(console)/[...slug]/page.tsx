@@ -7,10 +7,12 @@ import { getEnabledModules, requireSession, runAs } from '@/server/session';
 
 type Match = { moduleId: string; page: PageDef; params: Record<string, string> };
 
-function matchPage(path: string): Match | null {
+/** Best match among enabled modules: static segments outrank params; fallback pages lose ties. */
+function matchPage(path: string, enabled: Set<string>): Match | null {
   const segs = path.split('/').filter(Boolean);
   let best: (Match & { score: number }) | null = null;
   for (const m of webModules) {
+    if (!enabled.has(m.manifest.id)) continue;
     for (const page of m.pages) {
       const pat = page.path.split('/').filter(Boolean);
       if (pat.length !== segs.length) continue;
@@ -25,6 +27,7 @@ function matchPage(path: string): Match | null {
           break;
         }
       }
+      if (page.fallback) score -= 1;
       if (ok && (!best || score > best.score)) best = { moduleId: m.manifest.id, page, params, score };
     }
   }
@@ -45,8 +48,8 @@ export default async function ModulePage({ params, searchParams }: { params: Pro
   const session = await requireSession();
   const enabled = await getEnabledModules(session);
   const path = slug.join('/');
-  const match = matchPage(path);
-  if (!match || !enabled.has(match.moduleId)) notFound();
+  const match = matchPage(path, enabled);
+  if (!match) notFound();
   if (match.page.permission && !session.permissions.has(match.page.permission)) {
     return (
       <Page>

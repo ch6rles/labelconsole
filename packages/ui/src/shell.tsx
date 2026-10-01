@@ -21,6 +21,8 @@ export type ShellProps = {
   unread: number;
   runningAgents: number;
   pendingApprovals: number;
+  /** False when the label doesn't have the Agents module; hides the agent indicator. */
+  agentsEnabled?: boolean;
   children: ReactNode;
 };
 
@@ -47,7 +49,7 @@ export function ConsoleShell(props: ShellProps) {
   );
 }
 
-function ShellInner({ nav, org, orgs, user, widgets, unread, runningAgents, pendingApprovals, children }: ShellProps) {
+function ShellInner({ nav, org, orgs, user, widgets, unread, runningAgents, pendingApprovals, agentsEnabled = true, children }: ShellProps) {
   const pathname = usePathname();
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -91,7 +93,7 @@ function ShellInner({ nav, org, orgs, user, widgets, unread, runningAgents, pend
                   View site
                 </a>
               )}
-              <AgentIndicator initialRunning={runningAgents} pendingApprovals={pendingApprovals} />
+              {agentsEnabled && <AgentIndicator initialRunning={runningAgents} pendingApprovals={pendingApprovals} />}
               <NotificationsTray userId={user.id} initialUnread={unread} />
               <button type="button" className="lc-search-trigger" onClick={() => setPaletteOpen(true)} aria-label="Search">
                 <Icon name="search" />
@@ -394,9 +396,12 @@ function AgentIndicator({ initialRunning, pendingApprovals }: { initialRunning: 
     else if (status !== 'running' && wasRunning) setRunning((n) => Math.max(0, n - 1));
     else if (delta) setRunning((n) => Math.max(0, n + delta));
   });
+  // A new approval request adds one; a decision (or expiry) takes one away.
+  useRealtime('agents.approval.requested', () => setApprovals((n) => n + 1));
   useRealtime('agents.approval.updated', (e) => {
-    const { pending } = e.data as { pending?: number };
+    const { pending, status } = e.data as { pending?: number; status?: string };
     if (typeof pending === 'number') setApprovals(pending);
+    else if (status && status !== 'pending') setApprovals((n) => Math.max(0, n - 1));
   });
   const warn = approvals > 0;
   return (

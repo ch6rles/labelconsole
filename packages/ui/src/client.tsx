@@ -386,11 +386,12 @@ export function EntityForm({ fields, endpoint, method = 'POST', initial = {}, ex
           }
         }
         for (const [k, v] of Object.entries(extra ?? {})) form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
-        res = await api<Values>(endpoint, { method, form });
+        res = await api<Values>(fill(endpoint, { ...extra, ...values }), { method, form });
       } else {
         const body: Values = { ...extra };
         for (const f of fields) body[f.name] = fromInput(f, values[f.name]);
-        res = await api<Values>(endpoint, { method, body });
+        // `{field}` in the endpoint is filled from the form, e.g. /agents/{agentId}/run.
+        res = await api<Values>(fill(endpoint, { ...extra, ...values }), { method, body });
       }
       if (success) toast(success);
       onDone?.();

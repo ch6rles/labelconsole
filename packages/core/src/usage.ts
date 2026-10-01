@@ -4,7 +4,7 @@ import { usageCounters } from './db/schema';
 import { env } from './env';
 import { ValidationError } from './errors';
 import { AnthropicProvider, type LlmProvider } from './llm';
-import { readSecret } from './vault';
+import { getCredentialHandle, readSecret } from './vault';
 
 /** Add to this month's usage counter (agent spend, tokens, runs) for plan and budget views. */
 export async function recordUsage(ctx: ServiceContext, metric: string, value: number) {
@@ -28,6 +28,12 @@ let override: ProviderFactory | null = null;
 /** Tests swap in a stub provider here; production always uses Claude. */
 export function setLlmProviderFactory(f: ProviderFactory | null) {
   override = f;
+}
+
+/** Whether agents can call a model at all, without decrypting anything (safe in the web process). */
+export async function llmConfigured(ctx: ServiceContext): Promise<boolean> {
+  if (override || env().ANTHROPIC_API_KEY) return true;
+  return Boolean(await getCredentialHandle(ctx, 'anthropic'));
 }
 
 /** The label's own Anthropic key from the vault if set, else the platform key. Worker only. */

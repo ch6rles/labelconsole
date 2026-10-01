@@ -116,7 +116,7 @@ export async function listAgents(ctx: ServiceContext, opts: { includeArchived?: 
   const since = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
   const [latest, spend, next] = await Promise.all([
     ctx.tx
-      .selectDistinctOn([runs.agentId], { agentId: runs.agentId, id: runs.id, status: runs.status, currentTask: runs.currentTask, createdAt: runs.createdAt, endedAt: runs.endedAt, endReason: runs.endReason })
+      .selectDistinctOn([runs.agentId], { agentId: runs.agentId, id: runs.id, status: runs.status, currentTask: runs.currentTask, result: runs.result, createdAt: runs.createdAt, endedAt: runs.endedAt, endReason: runs.endReason })
       .from(runs)
       .where(inArray(runs.agentId, ids))
       .orderBy(runs.agentId, desc(runs.createdAt)),
