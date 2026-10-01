@@ -8,6 +8,7 @@ import { env } from './env';
 import { RateLimitedError } from './errors';
 import { OUTBOX_WAKE_CHANNEL, type StoredEvent } from './events';
 import { logger } from './logger';
+import { clearHeartbeat, heartbeat, recordJob } from './metrics';
 import { enabledModuleIds, type EventListener, type ModuleServer } from './modules';
 import { makeJobContext, queue, queuePrefix, QUEUE_NAMES, type JobDefinition, type QueueName } from './queue';
 import { publish } from './realtime';
@@ -127,9 +128,27 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerRuntime> {
     await withSystemOrg(orgId, (ctx) => listener.handle(ctx, event as never), `listener:${listener.id}`);
   }
 
+  let active = 0;
+  /** Run a job and count it (by listener for events) so /api/metrics can show throughput and failures. */
+  async function timed(name: QueueName, job: Job, token?: string) {
+    const label = name === 'events' && job.name === 'event' ? `event:${(job.data as { data: EventJobData }).data.listenerId}` : job.name;
+    const started = Date.now();
+    active++;
+    try {
+      const out = await (name === 'events' && job.name === 'event' ? processEvent(job) : processJob(job, token));
+      void recordJob(name, label, 'completed', Date.now() - started);
+      return out;
+    } catch (err) {
+      void recordJob(name, label, err instanceof DelayedError ? 'delayed' : 'failed', Date.now() - started);
+      throw err;
+    } finally {
+      active--;
+    }
+  }
+
   const workers = QUEUE_NAMES.map(
     (name) =>
-      new Worker(name, async (job, token) => (name === 'events' && job.name === 'event' ? processEvent(job) : processJob(job, token)), {
+      new Worker(name, (job, token) => timed(name, job, token), {
         connection,
         prefix: queuePrefix(),
         concurrency: conc[name],
@@ -158,6 +177,12 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerRuntime> {
   sub.on('message', () => void dispatchOutbox().catch((err) => log.error({ err }, 'outbox dispatch failed')));
   const poll = setInterval(() => void dispatchOutbox().catch((err) => log.error({ err }, 'outbox dispatch failed')), opts.outboxPollMs ?? 2000);
 
+  /* -------------------------------------------------------- heartbeat -- */
+  const startedAt = new Date().toISOString();
+  const beat = () => heartbeat({ startedAt, active, concurrency: conc }).catch((err) => log.warn({ err: (err as Error).message }, 'heartbeat failed'));
+  await beat();
+  const beating = setInterval(() => void beat(), 15_000);
+
   /* ----------------------------------------------------------- health -- */
   let server: Server | undefined;
   const port = opts.healthPort === undefined ? env().WORKER_HEALTH_PORT : opts.healthPort;
@@ -183,6 +208,8 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerRuntime> {
     dispatchOutbox,
     async stop() {
       clearInterval(poll);
+      clearInterval(beating);
+      await clearHeartbeat();
       await sub.quit().catch(() => undefined);
       await Promise.all(workers.map((w) => w.close()));
       await connection.quit().catch(() => undefined);

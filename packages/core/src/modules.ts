@@ -3,6 +3,7 @@ import type { ServiceContext } from './context';
 import type { DbLike } from './db/client';
 import { orgModules } from './db/schema';
 import type { EventType, StoredEvent } from './events';
+import type { Metric } from './metrics';
 import { registerPermissions, type PermissionDef } from './permissions';
 import type { JobDefinition, ScheduleDefinition } from './queue';
 import type { ApiRoute } from './router';
@@ -68,6 +69,8 @@ export interface ModuleServer {
   attention?: (ctx: ServiceContext) => Promise<AttentionItem[]>;
   stats?: (ctx: ServiceContext) => Promise<HealthStat[]>;
   search?: (ctx: ServiceContext, q: string) => Promise<SearchResult[]>;
+  /** Platform-wide operational metrics (aggregates only, via the system connection) for /api/metrics. */
+  metrics?: () => Promise<Metric[]>;
   /** Setup steps for the dashboard's getting-started checklist. */
   onboarding?: (ctx: ServiceContext) => Promise<OnboardingStep[]>;
   /** Counts for the console shell (notification badge, agent indicator). */

@@ -1,0 +1,56 @@
+groups:
+  - name: labelconsole
+    rules:
+      - alert: NoWorkerRunning
+        expr: lc_workers == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: No worker heartbeat
+          description: Agents, stream polling, statement parsing and event listeners have stopped. Check the worker service.
+
+      - alert: OutboxBacklog
+        expr: lc_outbox_oldest_seconds > 300
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: Domain events waiting more than 5 minutes
+          description: Listeners (stream registration, inbox notifications, agent event triggers) are behind.
+
+      - alert: JobFailureRate
+        expr: sum(rate(lc_jobs_total{result="failed"}[15m])) / clamp_min(sum(rate(lc_jobs_total[15m])), 0.001) > 0.2
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: More than 20% of background jobs are failing
+          description: See lc_jobs_total by job to find which one, then the worker logs.
+
+      - alert: QueueBacklog
+        expr: sum by (queue) (lc_queue_jobs{state="waiting"}) > 500
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: '{{ $labels.queue }} queue backing up'
+          description: Add worker processes or raise WORKER_CONCURRENCY.
+
+      - alert: AgentRunsStalled
+        expr: lc_agent_runs_stalled > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: Agent runs stuck after a worker died
+          description: The minute tick should re-queue them; if this persists the agents.tick schedule isn't running.
+
+      - alert: StreamPollsOverdue
+        expr: lc_stream_polls_overdue > 0
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: Tracked tracks are overdue for a stream poll
+          description: Usually YouTube quota exhaustion or a missing API key. Check streams.poll-org job logs.
+
+      - alert: AgentSpendHigh
+        expr: lc_agent_cost_usd_today > 500
+        labels: { severity: info }
+        annotations:
+          summary: Agent model spend today is over $500 across all labels

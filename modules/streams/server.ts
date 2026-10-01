@@ -1,20 +1,35 @@
 import './types';
 import '@labelconsole/catalogue/types';
 import '@labelconsole/documents/types';
+import { sql } from 'drizzle-orm';
+import { systemDb } from '@labelconsole/core/db/client';
+import { env } from '@labelconsole/core/env';
 import { defineListener, defineModule } from '@labelconsole/core/modules';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
+import { getCredentialHandle } from '@labelconsole/core/vault';
 import { fmt } from '@labelconsole/ui';
 import { tools } from './agent-tools';
 import { routes } from './api';
 import { jobs } from './jobs';
 import { manifest } from './manifest';
 import * as svc from './service';
-import { env } from '@labelconsole/core/env';
-import { getCredentialHandle } from '@labelconsole/core/vault';
 
 export default defineModule({
   manifest,
   routes,
+  metrics: async () => {
+    const db = systemDb();
+    const [byStatus, [overdue], [snaps]] = (await Promise.all([
+      db.execute(sql`select status, count(*)::int as n from stream_tracks group by status`),
+      db.execute(sql`select count(*)::int as n from stream_tracks where status = 'tracking' and next_poll_at < now() - interval '1 hour'`),
+      db.execute(sql`select count(*)::int as n from stream_snapshots where captured_at > now() - interval '24 hours'`),
+    ])) as unknown as [Array<{ status: string; n: number }>, Array<{ n: number }>, Array<{ n: number }>];
+    return [
+      { name: 'lc_stream_tracks', help: 'Tracks in the stream registry, by status.', type: 'gauge', samples: byStatus.map((r) => ({ labels: { status: r.status }, value: r.n })) },
+      { name: 'lc_stream_polls_overdue', help: 'Tracked tracks more than an hour past their next poll (quota or worker trouble).', type: 'gauge', samples: [{ value: overdue?.n ?? 0 }] },
+      { name: 'lc_stream_snapshots_24h', help: 'Stream readings stored in the last 24 hours.', type: 'gauge', samples: [{ value: snaps?.n ?? 0 }] },
+    ];
+  },
   onboarding: async (ctx) => [
     { id: 'youtube', title: 'Connect YouTube for stream tracking', sub: 'A YouTube Data API key lets the tracker poll view counts every few hours', done: Boolean(env().YOUTUBE_API_KEY) || Boolean(await getCredentialHandle(ctx, 'youtube')), href: '/settings/integrations', order: 60 },
   ],

@@ -38,7 +38,8 @@ const EnvSchema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(8),
   AGENT_CONCURRENCY_PER_ORG: z.coerce.number().int().positive().default(4),
   WORKER_HEALTH_PORT: z.coerce.number().int().default(9091),
-  SENTRY_DSN: z.string().optional(),
+  /** Bearer token for GET /api/metrics (Prometheus). Unset means the endpoint is off. */
+  METRICS_TOKEN: z.string().min(24).optional().or(z.literal('').transform(() => undefined)),
   /** clamd for upload virus scanning; files are marked "skipped" when unset. */
   CLAMAV_HOST: z.string().optional(),
   CLAMAV_PORT: z.coerce.number().int().default(3310),
