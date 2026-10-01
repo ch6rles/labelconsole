@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import type { PageProps } from '@labelconsole/core/web';
-import { DataTable, Meter, Page, PageHeader, Summary, fmt, type Column } from '@labelconsole/ui';
+import { Banner, DataTable, Meter, Page, PageHeader, Summary, fmt, type Column } from '@labelconsole/ui';
 import { ActionButton, FilterSelect, FormModal, SearchInput, type FieldSpec } from '@labelconsole/ui/client';
-import { MEMORY_KINDS, type Memory } from '../schema';
+import { MEMORY_KINDS, type MemoryRow } from '../schema';
 import * as svc from '../service';
 
 const KIND_LABEL: Record<(typeof MEMORY_KINDS)[number], string> = { fact: 'Fact', outcome: 'Outcome', preference: 'Preference' };
@@ -17,12 +17,12 @@ const editFields: FieldSpec[] = [
 /** What agents remember between runs, and what staff told them to. Staff can correct or delete any of it. */
 export default async function MemoryPage({ run, searchParams, session }: PageProps) {
   const agentFilter = searchParams.agent;
-  const [rows, agentRows] = await run((ctx) => Promise.all([svc.listMemories(ctx, { agentId: agentFilter, search: searchParams.q }), svc.listAgents(ctx)]));
+  const [rows, agentRows, stats] = await run((ctx) => Promise.all([svc.listMemories(ctx, { agentId: agentFilter, search: searchParams.q }), svc.listAgents(ctx), svc.memoryStats(ctx)]));
   const names = new Map(agentRows.map((a) => [a.id, a.name]));
   const canManage = session.permissions.has('agents:manage');
   const orgWide = rows.filter((m) => !m.agentId).length;
 
-  const columns: Column<Memory>[] = [
+  const columns: Column<MemoryRow>[] = [
     {
       key: 'content',
       header: 'Memory',
@@ -82,12 +82,18 @@ export default async function MemoryPage({ run, searchParams, session }: PagePro
         }
       />
       <Summary>
-        {rows.length} memories shown · {orgWide} shared by all agents
+        {rows.length} memories shown · {orgWide} shared by all agents ·{' '}
+        {stats.configured ? `semantic recall on (${stats.model}, ${stats.embedded} of ${stats.total} embedded)` : 'semantic recall off'}
       </Summary>
+      {!stats.configured && (
+        <Banner icon="hub">
+          Agents recall memories by matching words only. Add a Voyage AI key under {session.permissions.has('settings:credentials') ? <Link href="/settings/integrations">Settings → Integrations</Link> : 'Settings → Integrations'} so they recall by meaning too; existing memories are embedded automatically.
+        </Banner>
+      )}
       <div className="lc-toolbar">
         <FilterSelect param="agent" allLabel="All agents and shared" options={[{ value: 'org', label: 'Shared by all agents' }, ...agentRows.map((a) => ({ value: a.id, label: a.name }))]} minWidth={200} />
         <SearchInput placeholder="Search memories" />
-        <span className="lc-toolbar-end">Recall ranks by relevance, importance, then recency</span>
+        <span className="lc-toolbar-end">Recall ranks by meaning and words, then importance and recency</span>
       </div>
       <DataTable rows={rows} rowKey={(m) => m.id} columns={columns} minWidth={980} empty={searchParams.q || agentFilter ? 'No memories match.' : 'Nothing remembered yet. Agents save what they learn as they work; you can add preferences for them here.'} />
     </Page>

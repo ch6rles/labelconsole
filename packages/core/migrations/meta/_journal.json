@@ -15,6 +15,13 @@
       "when": 1790875815977,
       "tag": "0001_audit_read_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790893064630,
+      "tag": "0002_memory_embedding_model",
+      "breakpoints": true
     }
   ]
 }

@@ -83,7 +83,12 @@
 - **Approvals:** risk policy (`read`/`write`/`external`/`destructive`/`spend` → do / ask / deny), per-tool overrides, and tools that always ask (sending outreach, roster status). Staff approve, edit then approve (the edit is validated against the tool's schema), or reject with a reason the agent reads. Approvals expire, and the run resumes either way. The queue is on Inbox → Approvals and on the run page, with a live count in the top bar.
 - **Budgets:** per run (summed across the delegation tree), per agent per day, and a label-wide monthly cap (Settings → Workspace). Checked before each model call, so a run stops before overspending (`budget_exceeded`).
 - **Delegation:** `agents_delegate_task` starts a child run and parks the parent in `waiting_child` until the child finishes. The child can only do what both agents may do. The plan tree is shown on the run page.
-- **Memory:** facts, outcomes and preferences per agent or shared by all agents. Recall is Postgres full-text rank × 4 + importance + recency, and duplicates bump importance. Staff can add, correct and delete memories on Agents → Memory. The pgvector column stays empty until an embedding provider is chosen.
+- **Memory:** facts, outcomes and preferences per agent or shared by all agents. Duplicates bump importance. Staff can add, correct and delete memories on Agents → Memory.
+  - **Hybrid recall:** semantic similarity × 4 + full-text rank × 4 + importance + recency.
+  - **Embeddings:** Voyage AI (`voyage-4`, 1024 dimensions), using the label's own key from Settings → Integrations or the platform `VOYAGE_API_KEY`. New and corrected memories are embedded by a background job (`agents.embed-memories`) shortly after commit, with a 15-minute sweep as backstop.
+  - **Model changes:** each vector records the model that made it (migration `0002`). After a model change everything is re-embedded, and vectors from another model are never compared.
+  - **Fallback:** without a key, or when Voyage fails, recall falls back to full-text search.
+  - **Status:** the Memory page shows whether semantic recall is on and how much is embedded.
 - **Triggers:**
   - Cron schedules with timezone, fired by `agents.tick` every minute. The tick also recovers stalled runs and expires approvals.
   - Domain events, through a `*` listener that ignores agent and inbox events and an agent's own actions.
@@ -125,7 +130,7 @@
   - Plan tiers gate modules.
   - Per-plan limits on seats (invitations count), tracked tracks and file storage are checked when something is added, under an advisory lock so concurrent adds can't both take the last slot.
   - Over the tracking limit, new tracks wait and are added automatically once there is room.
-  - Settings → Plan & usage shows each limit. Taking payment is an open decision.
+  - Settings → Plan & usage shows each limit. No payment provider: the owner is the only user for now.
 - **Onboarding:**
   - New labels get a getting-started checklist on the dashboard. Each module contributes its own step: label details, team, artists, a release, a contract or statement, YouTube, an agent.
   - The checklist can be hidden, and brought back from Settings.
@@ -145,22 +150,26 @@
   - **Doomed runs:** runs were queued with no model key configured and could only fail.
   - **Permission typo:** a page checked a permission no module declares. A test now scans for undeclared permission keys.
   - **Broken links:** some links pointed at `/settings/workspace`.
-- **Tests:** 117 passing (new integration tests for People, Network, Drive, Inbox and Settings), plus the load test and the restore drill.
+- **Anthropic workspace keys:** personal keys that span several workspaces need a workspace to bill. Set `ANTHROPIC_WORKSPACE_ID` (platform), or the Workspace ID field on the label's Anthropic integration, and every request carries the `anthropic-workspace-id` header.
+- **Tests:** 125 passing, including semantic memory (embedding, re-embedding, fallback, stale-write protection) and the Voyage client contract. Also the load test and the restore drill.
 
 ## Next steps
 
-1. Decide the open items below; each has its integration point ready.
-2. Run the restore drill and the load test against staging infrastructure, and record the numbers in `docs/operations.md`.
-3. Set real plan limits in `packages/core/src/plans.ts` once pricing is decided.
+1. Allow `spotscraper.readme.io`, `api.spotscraper.com` and `api.voyageai.com` in the environment's network access, then build the SpotScraper integration from its docs.
+2. Decide the open items below; each has its integration point ready.
+3. Run the restore drill and the load test against staging infrastructure, and record the numbers in `docs/operations.md`.
+4. Set real plan limits in `packages/core/src/plans.ts` once pricing is decided.
 
 ## Open decisions
 
 These need the owner. Nothing paid was added without asking.
 
-- **Licensed stream-data vendor** for Spotify counts (Chartmetric, Songstats, Soundcharts, …). The adapter interface is ready (`modules/streams/sources/licensed.ts`).
-- **API keys:** an Anthropic key (agents, contract reading) and a YouTube Data API key (stream polling, 10,000 units/day by default), either platform-wide or per label.
-- **Payment provider** (for example Stripe) to take payment for plans, and **real plan limits and prices**. Limits today are placeholders in `packages/core/src/plans.ts`.
-- **Embedding provider** for agent memory. Memory uses full-text search plus importance and recency; the pgvector column is ready.
+- **Spotify data: SpotScraper (decided by the owner).** It will supply play counts, track credits and ISRC lookup through the licensed-source adapter (`modules/streams/sources/licensed.ts`) and metadata resolution. **Blocked:** the environment's network policy denies `spotscraper.readme.io` and `api.spotscraper.com`, so neither the docs nor the API can be read, and nothing is built from guesses.
+- **API keys:**
+  - **Anthropic:** the key is in place but needs a workspace ID (`wrkspc_…`), or a workspace-scoped key.
+  - **Voyage AI:** needed for semantic memory, and `api.voyageai.com` must be allowed.
+  - **YouTube Data API:** needed for stream polling.
+- **Real plan limits.** No payment provider is needed while the owner is the only user. Limits are placeholders in `packages/core/src/plans.ts`.
 - **Error tracking and tracing** (Sentry, or an OpenTelemetry backend such as Grafana Tempo or Honeycomb). Metrics, dashboards and alerts are in place.
 - **Spotify Web API extended access**, or rely on Deezer, MusicBrainz and Apple for metadata (current default).
 - **Outreach channels for agents** beyond email; most social platforms restrict automated DMs.

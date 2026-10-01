@@ -72,8 +72,12 @@ export class AnthropicProvider implements LlmProvider {
   readonly id = 'anthropic';
   private readonly client: Anthropic;
 
-  constructor(apiKey: string) {
-    this.client = new Anthropic({ apiKey, maxRetries: 2 });
+  /**
+   * `workspaceId` is for personal or service-account keys that aren't scoped to a
+   * workspace: the API then needs the `anthropic-workspace-id` header on every request.
+   */
+  constructor(apiKey: string, opts: { workspaceId?: string | null } = {}) {
+    this.client = new Anthropic({ apiKey, maxRetries: 2, defaultHeaders: opts.workspaceId ? { 'anthropic-workspace-id': opts.workspaceId } : undefined });
   }
 
   /** Request fields that depend on what the model supports. */

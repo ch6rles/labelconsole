@@ -28,6 +28,12 @@ const EnvSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   /** Platform default LLM key. Orgs may override with their own vault credential. */
   ANTHROPIC_API_KEY: z.string().optional(),
+  /** Only for a personal or service-account key not scoped to a workspace (wrkspc_…): sent as anthropic-workspace-id. */
+  ANTHROPIC_WORKSPACE_ID: z.string().regex(/^wrkspc_[A-Za-z0-9]+$/, 'must look like wrkspc_…').optional().or(z.literal('').transform(() => undefined)),
+  /** Voyage AI key for semantic agent memory (embeddings), used when a label hasn't added its own. */
+  VOYAGE_API_KEY: z.string().optional().or(z.literal('').transform(() => undefined)),
+  /** Voyage embedding model; changing it re-embeds existing memories in the background. */
+  VOYAGE_MODEL: z.string().default('voyage-4'),
   /** Platform YouTube Data API key, used when a label hasn't added its own. */
   YOUTUBE_API_KEY: z.string().optional(),
   /** Descriptive User-Agent required by MusicBrainz and polite for every public API. */

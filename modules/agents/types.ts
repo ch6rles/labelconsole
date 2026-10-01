@@ -14,5 +14,7 @@ declare module '@labelconsole/core/queue' {
   interface JobMap {
     'agents.run': { runId: string };
     'agents.tick': Record<string, never>;
+    /** orgId null: find labels with memories to embed and fan out; with an org: embed its pending memories. */
+    'agents.embed-memories': Record<string, never>;
   }
 }

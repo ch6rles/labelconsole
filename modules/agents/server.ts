@@ -1,6 +1,7 @@
 import './types';
 import { and, eq, gte, sql } from 'drizzle-orm';
 import { defineListener, defineModule } from '@labelconsole/core/modules';
+import { embeddingModel, embeddingsConfigured } from '@labelconsole/core/embeddings';
 import { llmConfigured } from '@labelconsole/core/usage';
 import { tools } from './agent-tools';
 import { routes } from './api';
@@ -44,13 +45,14 @@ export default defineModule({
   routes,
   // Aggregates across labels for operators; nothing tenant-identifying.
   metrics: async (db) => {
-    const [byStatus, finished, [today], [pending], [stalled]] = (await Promise.all([
+    const [byStatus, finished, [today], [pending], [stalled], [unembedded]] = (await Promise.all([
       db.execute(sql`select status, count(*)::int as n from agent_runs where status in ('queued', 'running', 'waiting_approval', 'waiting_child', 'paused') group by status`),
       db.execute(sql`select status, count(*)::int as n, coalesce(sum(tokens_in), 0)::bigint as tin, coalesce(sum(tokens_out), 0)::bigint as tout from agent_runs where ended_at > now() - interval '24 hours' group by status`),
       db.execute(sql`select coalesce(sum(cost_usd), 0)::float as usd from agent_runs where created_at >= date_trunc('day', now())`),
       db.execute(sql`select count(*)::int as n from approvals where status = 'pending'`),
       db.execute(sql`select count(*)::int as n from agent_runs where status = 'running' and lease_expires_at < now() - interval '1 minute'`),
-    ])) as unknown as [Array<{ status: string; n: number }>, Array<{ status: string; n: number; tin: string; tout: string }>, Array<{ usd: number }>, Array<{ n: number }>, Array<{ n: number }>];
+      db.execute(sql`select count(*)::int as n from agent_memories where (embedding is null or embedding_model is distinct from ${embeddingModel()}) and (expires_at is null or expires_at > now())`),
+    ])) as unknown as [Array<{ status: string; n: number }>, Array<{ status: string; n: number; tin: string; tout: string }>, Array<{ usd: number }>, Array<{ n: number }>, Array<{ n: number }>, Array<{ n: number }>];
     return [
       { name: 'lc_agent_runs', help: 'Agent runs not yet finished, by status.', type: 'gauge', samples: byStatus.map((r) => ({ labels: { status: r.status }, value: r.n })) },
       { name: 'lc_agent_runs_finished_24h', help: 'Agent runs that ended in the last 24 hours, by outcome.', type: 'gauge', samples: finished.map((r) => ({ labels: { status: r.status }, value: r.n })) },
@@ -58,16 +60,25 @@ export default defineModule({
       { name: 'lc_agent_cost_usd_today', help: 'Model spend of agent runs started today (UTC), all labels.', type: 'gauge', samples: [{ value: Number(today?.usd ?? 0) }] },
       { name: 'lc_agent_approvals_pending', help: 'Agent actions waiting for a person.', type: 'gauge', samples: [{ value: pending?.n ?? 0 }] },
       { name: 'lc_agent_runs_stalled', help: 'Runs marked running whose worker lease expired (the tick re-queues them).', type: 'gauge', samples: [{ value: stalled?.n ?? 0 }] },
+      { name: 'lc_agent_memories_unembedded', help: 'Live agent memories without an embedding from the current model (all labels, including those without a key).', type: 'gauge', samples: [{ value: unembedded?.n ?? 0 }] },
     ];
   },
   onboarding: async (ctx) => {
     const [[r], hasModel] = await Promise.all([ctx.tx.select({ n: sql<number>`count(*)::int` }).from(agents), llmConfigured(ctx)]);
-    return [{ id: 'agent', title: 'Put an agent to work', sub: hasModel ? 'Start from a type: briefings, outreach, stream watch and more' : 'Add an Anthropic API key under Integrations first, then start from a type', done: (r?.n ?? 0) > 0 && hasModel, href: hasModel ? '/agents/new' : '/settings/integrations', order: 70 }];
+    const semantic = await embeddingsConfigured(ctx);
+    return [
+      { id: 'agent', title: 'Put an agent to work', sub: hasModel ? 'Start from a type: briefings, outreach, stream watch and more' : 'Add an Anthropic API key under Integrations first, then start from a type', done: (r?.n ?? 0) > 0 && hasModel, href: hasModel ? '/agents/new' : '/settings/integrations', order: 70 },
+      { id: 'memory', title: 'Give agents semantic memory', sub: 'A Voyage AI key lets agents recall what they learned by meaning, not just matching words', done: semantic, href: '/settings/integrations', order: 75 },
+    ];
   },
   jobs,
   tools,
   listeners: [eventTriggers],
-  schedules: [{ id: 'agents-tick', job: 'agents.tick', everyMs: 60_000 }],
+  schedules: [
+    { id: 'agents-tick', job: 'agents.tick', everyMs: 60_000 },
+    // Safety net for the embed-after-write jobs, and re-embedding after a model change.
+    { id: 'agents-embed-memories', job: 'agents.embed-memories', everyMs: 15 * 60_000 },
+  ],
   shell: async (ctx) => ({
     runningAgents: ctx.can('agents:read') ? await svc.activeRunCount(ctx) : 0,
     pendingApprovals: ctx.can('agents:approve') ? await svc.pendingApprovalCount(ctx) : 0,

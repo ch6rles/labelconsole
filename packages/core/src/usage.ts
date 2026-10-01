@@ -42,5 +42,8 @@ export async function llmProviderFor(ctx: ServiceContext): Promise<LlmProvider> 
   const own = await readSecret(ctx, 'anthropic');
   const key = own?.secret.apiKey ?? env().ANTHROPIC_API_KEY;
   if (!key) throw new ValidationError('No Anthropic API key is configured. Add one under Settings → Integrations, or set ANTHROPIC_API_KEY for the platform.');
-  return new AnthropicProvider(key);
+  // The workspace goes with the key it was set for: a label's own key uses the label's
+  // workspace ID, the platform key uses ANTHROPIC_WORKSPACE_ID.
+  const workspaceId = own ? own.secret.workspaceId : env().ANTHROPIC_WORKSPACE_ID;
+  return new AnthropicProvider(key, { workspaceId });
 }

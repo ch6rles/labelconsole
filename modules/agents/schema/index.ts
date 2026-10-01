@@ -166,6 +166,8 @@ export const memories = pgTable(
     kind: text('kind').notNull().default('fact'),
     content: text('content').notNull(),
     embedding: vector('embedding', { dimensions: 1024 }),
+    /** Model that produced `embedding`; memories made with another model are re-embedded. */
+    embeddingModel: text('embedding_model'),
     tsv: tsvector('tsv').generatedAlwaysAs((): SQL => sql`to_tsvector('english', ${memories.content})`),
     importance: real('importance').notNull().default(0.5),
     sourceRunId: uuid('source_run_id'),
@@ -206,4 +208,6 @@ export type Trigger = typeof triggers.$inferSelect;
 export type Run = typeof runs.$inferSelect;
 export type Step = typeof steps.$inferSelect;
 export type Memory = typeof memories.$inferSelect;
+/** A memory as services return it: without the embedding vector or the tsvector. */
+export type MemoryRow = Omit<Memory, 'embedding' | 'tsv'>;
 export type Approval = typeof approvals.$inferSelect;

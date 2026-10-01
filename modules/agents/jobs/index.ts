@@ -2,15 +2,46 @@ import '../types';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { withSystemOrg } from '@labelconsole/core/context';
 import { systemDb } from '@labelconsole/core/db/client';
-import { defineJob } from '@labelconsole/core/queue';
+import { embeddingModel, embeddingProviderFor } from '@labelconsole/core/embeddings';
+import { env } from '@labelconsole/core/env';
+import { defineJob, enqueue } from '@labelconsole/core/queue';
 import { approvals, runs, triggers } from '../schema';
 import { executeRun } from '../runtime/runtime';
 import { nextCronRun } from '../service/agents';
 import { expireApprovals } from '../service/approvals';
+import { pendingEmbeddings, saveEmbeddings } from '../service/memory';
 import { queueRun, startRun } from '../service/runs';
 
 export const jobs = [
   defineJob('agents.run', (job, data) => executeRun(job, data.runId), 'agents'),
+
+  /**
+   * Embed agent memories for semantic recall. Without an org: find labels that
+   * have memories to embed and an embedding key, and fan out. With an org: embed
+   * a batch (the HTTP call happens outside any transaction) and continue if more wait.
+   */
+  defineJob('agents.embed-memories', async (job) => {
+    const bucket = Math.floor(Date.now() / 30_000);
+    if (!job.orgId) {
+      const rows = (await systemDb().execute(sql`
+        select distinct m.org_id from agent_memories m
+        where (m.embedding is null or m.embedding_model is distinct from ${embeddingModel()})
+          and (m.expires_at is null or m.expires_at > now())
+          and (${Boolean(env().VOYAGE_API_KEY)} or exists (select 1 from credentials c where c.org_id = m.org_id and c.provider = 'voyage' and c.revoked_at is null))
+        limit 500`)) as unknown as Array<{ org_id: string }>;
+      for (const r of rows) await enqueue('agents.embed-memories', r.org_id, {}, { jobId: `embed-${r.org_id}-${bucket}`, attempts: 3 });
+      return { labels: rows.length };
+    }
+    const provider = await job.withOrg((ctx) => embeddingProviderFor(ctx));
+    if (!provider) return { skipped: 'no embedding key' };
+    const rows = await job.withOrg((ctx) => pendingEmbeddings(ctx, provider.model));
+    if (rows.length === 0) return { embedded: 0 };
+    const { vectors, tokens } = await provider.embed(rows.map((r) => r.content), 'document');
+    await job.withOrg((ctx) => saveEmbeddings(ctx, provider.model, rows.map((r, i) => ({ ...r, vector: vectors[i] })), tokens));
+    // A full batch means more may be waiting.
+    if (rows.length === 128) await enqueue('agents.embed-memories', job.orgId, {}, { jobId: `embed-${job.orgId}-more-${Date.now()}`, attempts: 3 });
+    return { embedded: rows.length, model: provider.model };
+  }),
 
   /**
    * Every minute: fire due cron triggers, re-queue runs whose worker died,

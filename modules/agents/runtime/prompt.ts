@@ -1,6 +1,6 @@
 import type { OrgSettings } from '@labelconsole/core/db/schema';
 import type { AgentType } from '../agent-types';
-import type { Agent, Memory, Run } from '../schema';
+import type { Agent, MemoryRow, Run } from '../schema';
 
 /**
  * The system prompt is built once per run and then frozen: changing it
@@ -26,7 +26,7 @@ export function buildSystemPrompt(agent: Agent, type: AgentType | undefined, org
   return parts.filter(Boolean).join('\n\n');
 }
 
-export function buildFirstMessage(run: Run, memories: Memory[]) {
+export function buildFirstMessage(run: Run, memories: MemoryRow[]) {
   const lines: string[] = [];
   if (run.task) lines.push(`Task: ${run.task}`);
   else lines.push('Task: work toward your goal now (scheduled run).');

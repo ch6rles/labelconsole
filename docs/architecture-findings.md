@@ -55,7 +55,7 @@ Turning a module off for a label (or a plan that lacks it) removes its nav, its 
 |---|---|---|
 | Auth.js or Clerk if starting fresh | Own session auth | Org-aware sessions and permission sets are central; avoids a paid dependency |
 | Stream snapshots "partitioned by month or stored in TimescaleDB" | Native Postgres monthly partitions, maintained by a daily job | No extra extension to operate |
-| Long-term memories "stored with embeddings (pgvector), retrieved by relevance" | The pgvector column exists; retrieval uses Postgres full-text rank combined with importance and recency | No embedding provider was chosen (asking before adding paid services). Embeddings can fill the column later without schema changes |
+| Long-term memories "stored with embeddings (pgvector), retrieved by relevance" | Memories are embedded in the background with Voyage AI. Recall ranks by cosine similarity plus full-text rank, then importance and recency | Embedding outside the write transaction keeps writes fast and never blocks on the provider. Without a key, or when Voyage fails, recall falls back to full-text search, so memory always works |
 | Licensed stream-data provider adapter | Interface and registry only | The vendor isn't chosen; the plan says to ask first |
 | Spotify Web API in metadata lookup | Adapter present, used only with the label's own credentials | Commercial use needs extended access; Deezer, MusicBrainz and Apple cover ISRC/UPC |
 | Observability: OpenTelemetry traces, Sentry | Structured logs (pino), Prometheus metrics, Grafana dashboard, alert rules, deep health check | Sentry is a paid service and a tracing backend is a choice to make; metrics cover dashboards and alerting now |

@@ -8,9 +8,21 @@ export const INTEGRATIONS: Integration[] = [
     name: 'Anthropic (Claude)',
     icon: 'smart_toy',
     description: 'Runs agents and contract-term extraction. Without a label key, the platform key is used and billed on your plan.',
-    fields: [{ name: 'apiKey', label: 'API key', secret: true }],
+    fields: [
+      { name: 'apiKey', label: 'API key', secret: true },
+      { name: 'workspaceId', label: 'Workspace ID', optional: true, hint: 'Only for a personal key that isn’t scoped to one workspace (wrkspc_…, from Console → Settings → Workspaces)' },
+    ],
     usedBy: ['Agents', 'Documents'],
     docs: 'https://platform.claude.com/settings/keys',
+  },
+  {
+    provider: 'voyage',
+    name: 'Voyage AI (embeddings)',
+    icon: 'hub',
+    description: 'Embeddings for agent memory, so agents recall what they learned by meaning and not only by matching words. Anthropic’s recommended embedding provider. Existing memories are embedded in the background once a key is added.',
+    fields: [{ name: 'apiKey', label: 'API key', secret: true }],
+    usedBy: ['Agents'],
+    docs: 'https://dash.voyageai.com',
   },
   {
     provider: 'youtube',
