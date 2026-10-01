@@ -39,6 +39,9 @@ export type HealthStat = { label: string; icon: string; value: string; delta?: s
 export type WidgetData = { value: string; unit: string; line: string; cta: string; href: string };
 export type WidgetDef = { id: string; name: string; icon: string; desc: string; permission?: string; load(ctx: ServiceContext): Promise<WidgetData> };
 
+/** One step of a new label's setup checklist, contributed by the module that owns it. */
+export type OnboardingStep = { id: string; title: string; sub: string; done: boolean; href: string; order: number };
+
 export type ShellCounts = { unread: number; runningAgents: number; pendingApprovals: number };
 
 export type SearchResult = { type: string; title: string; sub?: string; href: string; icon?: string };
@@ -65,6 +68,8 @@ export interface ModuleServer {
   attention?: (ctx: ServiceContext) => Promise<AttentionItem[]>;
   stats?: (ctx: ServiceContext) => Promise<HealthStat[]>;
   search?: (ctx: ServiceContext, q: string) => Promise<SearchResult[]>;
+  /** Setup steps for the dashboard's getting-started checklist. */
+  onboarding?: (ctx: ServiceContext) => Promise<OnboardingStep[]>;
   /** Counts for the console shell (notification badge, agent indicator). */
   shell?: (ctx: ServiceContext, userId: string) => Promise<Partial<ShellCounts>>;
   enrich?: Record<string, Enricher>;

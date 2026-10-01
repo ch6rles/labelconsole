@@ -1,5 +1,5 @@
 import './types';
-import { and, eq, ilike, ne, or } from 'drizzle-orm';
+import { and, eq, ilike, ne, or, sql } from 'drizzle-orm';
 import { defineModule } from '@labelconsole/core/modules';
 import { fmt } from '@labelconsole/ui';
 import { tools } from './agent-tools';
@@ -12,6 +12,10 @@ import * as svc from './service';
 export default defineModule({
   manifest,
   routes,
+  onboarding: async (ctx) => {
+    const [r] = await ctx.tx.select({ n: sql<number>`count(*)::int` }).from(documents);
+    return [{ id: 'documents', title: 'Upload a contract or a distributor statement', sub: 'Contract terms are read for you to confirm; statements fill in royalties', done: (r?.n ?? 0) > 0, href: '/documents', order: 50 }];
+  },
   jobs,
   tools,
   schedules: [{ id: 'documents-reminders', job: 'documents.reminders', cron: '0 7 * * *' }],

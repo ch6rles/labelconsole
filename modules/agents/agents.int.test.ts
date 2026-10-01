@@ -5,7 +5,7 @@ import { allModules } from '../../test/modules';
 import { withSystemOrg } from '@labelconsole/core/context';
 import { closeDb, systemDb } from '@labelconsole/core/db/client';
 import { domainEvents, idempotencyKeys, memberships, users } from '@labelconsole/core/db/schema';
-import { ConflictError, ProviderError } from '@labelconsole/core/errors';
+import { ConflictError, ProviderError, ValidationError } from '@labelconsole/core/errors';
 import type { LlmContentBlock, LlmProvider, LlmRequest } from '@labelconsole/core/llm';
 import { closeQueues } from '@labelconsole/core/queue';
 import { closeRedis } from '@labelconsole/core/redis';
@@ -247,6 +247,7 @@ describe('agent runtime', () => {
   });
 
   it('starts runs from cron and event triggers, never from its own events', async () => {
+    useStub(new StubProvider(() => [say('ok')]));
     const a = await makeOrg();
     const agent = await agentWith(a);
     await a.as((ctx) => svc.addTrigger(ctx, agent.id, { kind: 'cron', cron: '0 8 * * 1' }));
@@ -263,12 +264,28 @@ describe('agent runtime', () => {
     expect(cronTrigger.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
 
     const listener = allModules.find((m) => m.manifest.id === 'agents')!.listeners!.find((l) => l.id === 'agents.event-triggers')!;
-    const fire = (actor: string | null) => withSystemOrg(a.org.id, (ctx) => listener.handle(ctx, { id: 1, orgId: a.org.id, type: 'catalogue.demo.submitted', payload: { demoId: 'd1', title: 'Late Bloom' }, actor, createdAt: new Date() } as never));
+    const fire = (actor: string | null, createdAt = new Date()) => withSystemOrg(a.org.id, (ctx) => listener.handle(ctx, { id: 1, orgId: a.org.id, type: 'catalogue.demo.submitted', payload: { demoId: 'd1', title: 'Late Bloom' }, actor, createdAt } as never));
     await fire(null);
     await fire(`agent:${agent.id}`);
+    // Delivered late, but it happened before the trigger existed: not this trigger's business.
+    await fire(null, new Date(Date.now() - 3_600_000));
     const eventRuns = await a.as((ctx) => ctx.tx.select().from(runs).where(and(eq(runs.agentId, agent.id), eq(runs.triggerKind, 'event'))));
     expect(eventRuns).toHaveLength(1);
     expect(eventRuns[0]).toMatchObject({ task: 'Score the demo', input: { event: 'catalogue.demo.submitted', demoId: 'd1', title: 'Late Bloom' } });
+  });
+
+  it('starts nothing without a model key: manual runs say why, triggers skip quietly', async () => {
+    setLlmProviderFactory(null);
+    const a = await makeOrg();
+    const agent = await agentWith(a);
+    await expect(a.as((ctx) => svc.startRun(ctx, { agentId: agent.id, triggerKind: 'manual', task: 'Go' }))).rejects.toBeInstanceOf(ValidationError);
+    await a.as((ctx) => svc.addTrigger(ctx, agent.id, { kind: 'cron', cron: '0 8 * * 1' }));
+    await systemDb().update(triggers).set({ nextRunAt: new Date(Date.now() - 1000) }).where(eq(triggers.agentId, agent.id));
+    await runJob(jobs, 'agents.tick', null);
+    expect(await a.as((ctx) => ctx.tx.select().from(runs).where(eq(runs.agentId, agent.id)))).toHaveLength(0);
+    // The schedule still moves on, so it fires normally once a key is added.
+    const [t] = await systemDb().select().from(triggers).where(eq(triggers.agentId, agent.id));
+    expect(t.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
   });
 
   it('caps an agent at its owner\'s permissions and freezes them on the run', async () => {

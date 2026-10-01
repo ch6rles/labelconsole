@@ -59,6 +59,15 @@ export async function updateWorkspace(ctx: ServiceContext, patch: z.infer<typeof
   return after;
 }
 
+/** Hide (or bring back) the getting-started checklist on the dashboard for everyone in the label. */
+export async function setOnboardingHidden(ctx: ServiceContext, hidden: boolean) {
+  ctx.assert('settings:manage');
+  const org = await getWorkspace(ctx);
+  const settings: OrgSettings = { ...org.settings, onboardingHiddenAt: hidden ? new Date().toISOString() : null };
+  await ctx.tx.update(organizations).set({ settings }).where(eq(organizations.id, ctx.orgId));
+  return { hidden };
+}
+
 export async function updateProfile(ctx: ServiceContext, patch: z.infer<typeof ProfilePatch>) {
   if (ctx.actor.type !== 'user') throw new ForbiddenError('Only people have profiles');
   const [before] = await ctx.tx.select({ name: users.name }).from(users).where(eq(users.id, ctx.actor.id));

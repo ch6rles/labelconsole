@@ -9,10 +9,15 @@ import { routes } from './api';
 import { jobs } from './jobs';
 import { manifest } from './manifest';
 import * as svc from './service';
+import { env } from '@labelconsole/core/env';
+import { getCredentialHandle } from '@labelconsole/core/vault';
 
 export default defineModule({
   manifest,
   routes,
+  onboarding: async (ctx) => [
+    { id: 'youtube', title: 'Connect YouTube for stream tracking', sub: 'A YouTube Data API key lets the tracker poll view counts every few hours', done: Boolean(env().YOUTUBE_API_KEY) || Boolean(await getCredentialHandle(ctx, 'youtube')), href: '/settings/integrations', order: 60 },
+  ],
   jobs,
   tools,
   schedules: [

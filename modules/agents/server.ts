@@ -1,6 +1,7 @@
 import './types';
 import { and, eq, gte, sql } from 'drizzle-orm';
 import { defineListener, defineModule } from '@labelconsole/core/modules';
+import { llmConfigured } from '@labelconsole/core/usage';
 import { tools } from './agent-tools';
 import { routes } from './api';
 import { jobs } from './jobs';
@@ -13,7 +14,7 @@ const eventTriggers = defineListener({
   id: 'agents.event-triggers',
   event: '*' as never,
   handle: async (ctx, event) => {
-    const e = event as unknown as { type: string; actor: string | null; payload: unknown };
+    const e = event as unknown as { type: string; actor: string | null; payload: unknown; createdAt: Date };
     if (e.type.startsWith('agents.') || e.type.startsWith('inbox.')) return;
     const rows = await ctx.tx
       .select({ trigger: triggers, agent: agents })
@@ -25,6 +26,8 @@ const eventTriggers = defineListener({
       const config = trigger.config as Extract<TriggerConfig, { kind: 'event' }>;
       // An agent's own actions never re-trigger it.
       if (e.actor === `agent:${agent.id}`) continue;
+      // Events are delivered asynchronously; one that happened before the trigger existed doesn't fire it.
+      if (new Date(e.createdAt) < trigger.createdAt) continue;
       if (config.filter && Object.entries(config.filter).some(([k, v]) => String(payload[k] ?? '') !== v)) continue;
       try {
         await svc.startRun(ctx, { agentId: agent.id, triggerKind: 'event', triggerId: trigger.id, task: config.task ?? `Event: ${e.type}`, input: { event: e.type, ...payload } });
@@ -39,6 +42,10 @@ const eventTriggers = defineListener({
 export default defineModule({
   manifest,
   routes,
+  onboarding: async (ctx) => {
+    const [[r], hasModel] = await Promise.all([ctx.tx.select({ n: sql<number>`count(*)::int` }).from(agents), llmConfigured(ctx)]);
+    return [{ id: 'agent', title: 'Put an agent to work', sub: hasModel ? 'Start from a type: briefings, outreach, stream watch and more' : 'Add an Anthropic API key under Integrations first, then start from a type', done: (r?.n ?? 0) > 0 && hasModel, href: hasModel ? '/agents/new' : '/settings/integrations', order: 70 }];
+  },
   jobs,
   tools,
   listeners: [eventTriggers],

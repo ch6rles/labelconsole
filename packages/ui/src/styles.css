@@ -962,6 +962,43 @@ a.lc-stat:hover {
   text-decoration: none;
   color: var(--lc-ink);
 }
+/* Getting-started checklist on the dashboard. */
+.lc-onboarding-step {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--lc-divider);
+  color: var(--lc-ink);
+  text-decoration: none;
+}
+.lc-onboarding-step:last-child {
+  border-bottom: none;
+}
+.lc-onboarding-step:hover {
+  background: var(--lc-surface-hover);
+  color: var(--lc-ink);
+  text-decoration: none;
+}
+.lc-onboarding-step > .lc-icon:first-child {
+  color: var(--lc-muted);
+}
+.lc-onboarding-step > .lc-icon:last-child {
+  color: var(--lc-accent);
+}
+.lc-onboarding-title {
+  font-size: var(--lc-text-md);
+  font-weight: 500;
+}
+.lc-onboarding-step--done > .lc-icon:first-child {
+  color: var(--lc-accent);
+}
+.lc-onboarding-step--done .lc-onboarding-title {
+  color: var(--lc-muted);
+  text-decoration: line-through;
+  font-weight: 400;
+}
 .lc-list-row--wide {
   grid-template-columns: 110px minmax(0, 1fr) 24px;
   gap: 20px;

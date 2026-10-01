@@ -1,5 +1,5 @@
 import './types';
-import { and, eq, ilike, inArray, or } from 'drizzle-orm';
+import { and, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { fmt } from '@labelconsole/ui';
 import { defineModule } from '@labelconsole/core/modules';
 import { tools } from './agent-tools';
@@ -12,6 +12,10 @@ import * as svc from './service';
 export default defineModule({
   manifest,
   routes,
+  onboarding: async (ctx) => {
+    const [r] = await ctx.tx.select({ n: sql<number>`count(*)::int` }).from(releases);
+    return [{ id: 'release', title: 'Add a release', sub: 'Paste a Spotify, Apple or Deezer link, an ISRC or a UPC and the details are looked up for you', done: (r?.n ?? 0) > 0, href: '/catalog/releases', order: 40 }];
+  },
   jobs,
   tools,
   widgets: [

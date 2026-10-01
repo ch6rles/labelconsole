@@ -8,6 +8,7 @@ import { env } from '@labelconsole/core/env';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@labelconsole/core/errors';
 import { PermissionSet } from '@labelconsole/core/permissions';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
+import { llmConfigured } from '@labelconsole/core/usage';
 import { publish } from '@labelconsole/core/realtime';
 import { approvals, agents, runs, steps, TERMINAL_STATUSES, type Agent, type Run, type RunStatus } from '../schema';
 
@@ -41,6 +42,8 @@ export async function startRun(ctx: ServiceContext, input: StartRunInput) {
   if (agent.status !== 'active') throw new ConflictError(`${agent.name} is ${agent.status}`);
   const [org] = await ctx.tx.select({ paused: organizations.agentsPaused }).from(organizations).where(eq(organizations.id, ctx.orgId));
   if (org?.paused) throw new ConflictError('All agents are stopped by the kill switch');
+  // Refuse up front rather than queue a run that can only fail at its first model call.
+  if (!(await llmConfigured(ctx))) throw new ValidationError('No Anthropic API key is configured. Add one under Settings → Integrations, or set ANTHROPIC_API_KEY for the platform.');
   const parent = input.parentRunId ? (await ctx.tx.select().from(runs).where(eq(runs.id, input.parentRunId)))[0] : null;
   const perms = await effectivePermissions(ctx, agent, parent);
   if (!perms) throw new ForbiddenError(`${agent.name}'s owner is no longer a member of this label, so it can't run`);

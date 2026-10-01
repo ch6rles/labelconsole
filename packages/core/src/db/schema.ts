@@ -73,6 +73,8 @@ export type OrgSettings = {
   agentMonthlyBudgetUsd?: number | null;
   /** Months of audit log retained. */
   auditRetentionMonths?: number;
+  /** When someone hid the getting-started checklist on the dashboard. */
+  onboardingHiddenAt?: string | null;
 };
 
 export const organizations = pgTable('organizations', {

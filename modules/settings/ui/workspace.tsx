@@ -2,7 +2,7 @@ import { modules } from '@labelconsole/core/modules';
 import { ROLE_LABELS, type BuiltInRole } from '@labelconsole/core/permissions';
 import type { PageProps } from '@labelconsole/core/web';
 import { Card, KV, Page, PageHeader } from '@labelconsole/ui';
-import { AutoSaveFields } from '@labelconsole/ui/client';
+import { ActionButton, AutoSaveFields } from '@labelconsole/ui/client';
 import * as svc from '../service';
 import { SidebarApps } from './client';
 
@@ -59,6 +59,11 @@ export default async function WorkspacePage({ run, session, enabled }: PageProps
               { name: 'agentMonthlyBudgetUsd', label: 'Agent budget · USD per month', type: 'number', min: 0, hint: 'Empty means no label-wide cap; per-agent budgets still apply.' },
             ]}
           />
+        </Card>
+      )}
+      {canManage && s.onboardingHiddenAt && (
+        <Card title="Getting started" sub="The setup checklist is hidden from the dashboard.">
+          <ActionButton endpoint="/settings/onboarding" body={{ hidden: false }} label="Show it again" icon="checklist" success="The checklist is back on the dashboard" />
         </Card>
       )}
       <SidebarApps orgId={session.org.id} widgets={widgets} />

@@ -1,5 +1,5 @@
 import './types';
-import { ilike, or } from 'drizzle-orm';
+import { ilike, or, sql } from 'drizzle-orm';
 import { defineModule } from '@labelconsole/core/modules';
 import { tools } from './agent-tools';
 import { routes } from './api';
@@ -10,6 +10,10 @@ import { onboardingBoard } from './service';
 export default defineModule({
   manifest,
   routes,
+  onboarding: async (ctx) => {
+    const [r] = await ctx.tx.select({ n: sql<number>`count(*)::int` }).from(artists);
+    return [{ id: 'artist', title: 'Add your artists', sub: 'Roster, onboarding progress and payout details in one place', done: (r?.n ?? 0) > 0, href: '/people/artists', order: 30 }];
+  },
   tools,
   attention: async (ctx) => {
     if (!ctx.can('people:read')) return [];

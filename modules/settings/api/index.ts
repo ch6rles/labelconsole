@@ -6,6 +6,7 @@ import * as svc from '../service';
 export const routes = defineRoutes('settings', [
   route({ method: 'GET', path: '/settings/workspace', permission: 'settings:read', handler: (ctx) => svc.getWorkspace(ctx) }),
   route({ method: 'PATCH', path: '/settings/workspace', permission: 'settings:manage', body: svc.WorkspacePatch, handler: (ctx, req) => svc.updateWorkspace(ctx, req.body) }),
+  route({ method: 'POST', path: '/settings/onboarding', permission: 'settings:manage', body: z.object({ hidden: z.boolean() }), handler: (ctx, req) => svc.setOnboardingHidden(ctx, req.body.hidden) }),
   route({ method: 'PATCH', path: '/settings/profile', permission: null, body: svc.ProfilePatch, handler: (ctx, req) => svc.updateProfile(ctx, req.body) }),
 
   route({ method: 'GET', path: '/settings/members', permission: 'settings:read', handler: (ctx) => svc.listMembers(ctx) }),
