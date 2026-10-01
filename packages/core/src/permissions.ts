@@ -56,7 +56,7 @@ const ROLE_GRANTS: Record<BuiltInRole, string[]> = {
     'documents:read', 'inbox:*', 'agents:read', 'agents:run', 'agents:approve', 'settings:read',
   ],
   finance: [
-    'documents:*', 'catalogue:read', 'catalogue:write', 'people:read', 'streams:read', 'marketing:read', 'network:read',
+    'documents:*', 'documents:read_financial', 'documents:read_confidential', 'catalogue:read', 'catalogue:write', 'people:read', 'streams:read', 'marketing:read', 'network:read',
     'drive:read', 'drive:write', 'inbox:*', 'agents:read', 'settings:read', 'settings:audit',
   ],
   viewer: ['*:read', 'inbox:*'],

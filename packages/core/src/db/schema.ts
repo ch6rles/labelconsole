@@ -61,10 +61,10 @@ export const sessions = pgTable(
 
 export type OrgSettings = {
   shortCode?: string;
-  legalEntity?: string;
-  distributor?: string;
+  legalEntity?: string | null;
+  distributor?: string | null;
   currency?: string;
-  siteUrl?: string;
+  siteUrl?: string | null;
   timezone?: string;
   /** Hours between stream polls for tracks in an active campaign / back catalogue. */
   streamPollHoursActive?: number;

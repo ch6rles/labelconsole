@@ -52,7 +52,8 @@
     "drizzle-orm": "^0.45.3",
     "zod": "^4.6.5",
     "ioredis": "^5.11.1",
-    "@playwright/test": "1.63.0"
+    "@playwright/test": "1.63.0",
+    "@types/nodemailer": "^8.0.2"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

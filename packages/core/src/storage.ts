@@ -17,6 +17,8 @@ export interface StorageDriver {
   get(key: string): Promise<Readable>;
   head(key: string): Promise<{ size: number } | null>;
   delete(key: string): Promise<void>;
+  /** Remove every object under a prefix (org deletion). */
+  deletePrefix(prefix: string): Promise<void>;
   /** Short-lived download URL. */
   signedUrl(key: string, opts: { expiresInSec: number; filename?: string; inline?: boolean }): Promise<string>;
 }
@@ -65,6 +67,10 @@ export class LocalDiskDriver implements StorageDriver {
 
   async delete(key: string) {
     await rm(this.file(key), { force: true });
+  }
+
+  async deletePrefix(prefix: string) {
+    await rm(this.file(prefix.replace(/\/+$/, '')), { recursive: true, force: true });
   }
 
   async signedUrl(key: string, opts: { expiresInSec: number; filename?: string; inline?: boolean }) {
@@ -123,6 +129,17 @@ export class S3Driver implements StorageDriver {
   async delete(key: string) {
     const { client, sdk } = await this.s3();
     await client.send(new sdk.DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+
+  async deletePrefix(prefix: string) {
+    const { client, sdk } = await this.s3();
+    let token: string | undefined;
+    do {
+      const page = await client.send(new sdk.ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: token }));
+      const keys = (page.Contents ?? []).map((o) => ({ Key: o.Key! }));
+      if (keys.length) await client.send(new sdk.DeleteObjectsCommand({ Bucket: this.bucket, Delete: { Objects: keys } }));
+      token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token);
   }
 
   async signedUrl(key: string, opts: { expiresInSec: number; filename?: string; inline?: boolean }) {

@@ -39,6 +39,8 @@ export interface ToolDefinition<I extends z.ZodType = z.ZodType, O = unknown> {
   rateLimit?: { capacity: number; refillPerSec: number };
   /** True when repeating the call has no extra effect, so it can be retried freely. */
   idempotent?: boolean;
+  /** Always stop for a human, whatever the agent's policy says (e.g. asking for sign-off). */
+  requiresApproval?: boolean;
   /** Human-readable summary of what the call will do, shown in the approvals inbox. */
   preview?(input: z.infer<I>): string;
   execute(ctx: ToolContext, input: z.infer<I>): Promise<O>;

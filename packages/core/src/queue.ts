@@ -70,14 +70,16 @@ export interface JobContext {
 
 export type JobHandler<K extends JobName> = (ctx: JobContext, data: JobMap[K]) => Promise<unknown>;
 
-export type JobDefinition<K extends JobName = JobName> = {
-  name: K;
+/** Stored form of a job; `defineJob` checks the data type against JobMap at the definition site. */
+export type JobDefinition = {
+  name: JobName;
   queue?: QueueName;
-  handler: JobHandler<K>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handler: (ctx: JobContext, data: any) => Promise<unknown>;
 };
 
-export function defineJob<K extends JobName>(name: K, handler: JobHandler<K>, queueName: QueueName = 'jobs'): JobDefinition<K> {
-  return { name, handler, queue: queueName };
+export function defineJob<K extends JobName>(name: K, handler: JobHandler<K>, queueName: QueueName = 'jobs'): JobDefinition {
+  return { name, handler: handler as JobDefinition['handler'], queue: queueName };
 }
 
 /** A platform-wide repeatable job (fan-out jobs then enqueue per-org work). */
