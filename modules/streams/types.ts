@@ -14,5 +14,6 @@ declare module '@labelconsole/core/queue' {
     'streams.poll-org': { force?: boolean };
     'streams.import-statement': { documentId: string };
     'streams.maintain-partitions': Record<string, never>;
+    'streams.audience': Record<string, never>;
   }
 }

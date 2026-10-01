@@ -1,0 +1,42 @@
+{
+ "data": {
+  "copyright": "(P) 1987 Sony Music Entertainment UK Limited under exclusive license to BMG Rights Management (UK) Limited",
+  "credits": [
+   {
+    "name": "Rick Astley",
+    "role": "Main Artist"
+   },
+   {
+    "name": "Mike Stock",
+    "role": "Composer"
+   },
+   {
+    "name": "Matt Aitken",
+    "role": "Composer"
+   },
+   {
+    "name": "Pete Waterman",
+    "role": "Composer"
+   },
+   {
+    "name": "Mike Stock",
+    "role": "Lyricist"
+   },
+   {
+    "name": "Stock Aitken Waterman",
+    "role": "Producer"
+   },
+   {
+    "name": "Matt Aitken",
+    "role": "Lyricist"
+   },
+   {
+    "name": "Pete Waterman",
+    "role": "Lyricist"
+   }
+  ]
+ },
+ "type": "track_credits",
+ "success": true,
+ "status": 200
+}

@@ -26,7 +26,7 @@ export default async function StreamTracksPage({ run, session, searchParams, pat
     },
     { key: 'status', header: 'Status', width: '140px', render: (r) => <span className={STATUS_CHIP[r.status]?.className ?? 'lc-chip'}>{STATUS_CHIP[r.status]?.label ?? r.status}</span> },
     { key: 'tier', header: 'Polling', width: '110px', render: (r) => <span style={{ fontSize: 13, color: 'var(--lc-text-2)' }}>{r.status !== 'tracking' ? '—' : r.tier === 'active' ? 'Every 6 h' : 'Daily'}</span> },
-    { key: 'videos', header: 'Videos', width: '70px', align: 'right', render: (r) => <span className="lc-cell-num">{r.videos}</span> },
+    { key: 'sources', header: 'Sources', width: '130px', render: (r) => <span style={{ fontSize: 13, color: 'var(--lc-text-2)' }}>{[r.spotify ? 'Spotify' : null, r.videos ? `${r.videos} video${r.videos === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ') || '—'}</span> },
     { key: 'trend', header: '28 days', width: '100px', render: (r) => <Sparkline values={r.spark} /> },
     { key: 'plays', header: 'Plays 28d', width: '100px', align: 'right', render: (r) => <span className="lc-cell-num">{r.spark.length ? fmt.compact(r.plays28d) : '—'}</span> },
     { key: 'total', header: 'Total', width: '100px', align: 'right', render: (r) => <span className="lc-cell-num lc-muted">{r.total != null ? fmt.compact(r.total) : '—'}</span> },

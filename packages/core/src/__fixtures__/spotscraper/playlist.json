@@ -1,0 +1,100 @@
+{
+ "data": {
+  "id": "37i9dQZF1DXcBWIGoYBM5M",
+  "uri": "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M",
+  "name": "Today’s Top Hits",
+  "metadata": {
+   "description": "The hottest 50. Cover: ADÉLA",
+   "revisionId": "AAAAAMZfjN16Vl93tZp7uWQlu8Pr5E3g",
+   "format": "format-shows-shuffle",
+   "personalized": true
+  },
+  "statistics": {
+   "followers": 33754783,
+   "trackCount": 50
+  },
+  "owner": {
+   "id": "spotify",
+   "uri": "spotify:user:spotify",
+   "name": "Spotify"
+  },
+  "tracks": {
+   "total": 50,
+   "items": [
+    {
+     "id": "70cHKK8bHAfJrOGVnfRG9J",
+     "uri": "spotify:track:70cHKK8bHAfJrOGVnfRG9J",
+     "name": "Nicole Kidman",
+     "metadata": {
+      "explicit": true,
+      "durationMs": 181270,
+      "discNumber": 1,
+      "trackNumber": 2,
+      "addedAt": "2026-09-11T04:01:53.033Z"
+     },
+     "statistics": {
+      "playCount": 78943064
+     },
+     "addedBy": null,
+     "artists": [
+      {
+       "id": "2qanRMyA5bNuTvz1dK45OP",
+       "uri": "spotify:artist:2qanRMyA5bNuTvz1dK45OP",
+       "name": "ADÉLA"
+      }
+     ],
+     "album": {
+      "id": "2yDFVH9CeOHt0sc9eI0aBs",
+      "uri": "spotify:album:2yDFVH9CeOHt0sc9eI0aBs",
+      "name": "PRIMA",
+      "artists": [
+       {
+        "id": "2qanRMyA5bNuTvz1dK45OP",
+        "uri": "spotify:artist:2qanRMyA5bNuTvz1dK45OP",
+        "name": "ADÉLA"
+       }
+      ]
+     }
+    },
+    {
+     "id": "11hcBLPtbMp4aQI6zGQLub",
+     "uri": "spotify:track:11hcBLPtbMp4aQI6zGQLub",
+     "name": "Patient Zero",
+     "metadata": {
+      "explicit": false,
+      "durationMs": 225868,
+      "discNumber": 2,
+      "trackNumber": 1,
+      "addedAt": "2026-09-25T04:02:48.872Z"
+     },
+     "statistics": {
+      "playCount": 40462937
+     },
+     "addedBy": null,
+     "artists": [
+      {
+       "id": "06HL4z0CvFAxyc27GXpf02",
+       "uri": "spotify:artist:06HL4z0CvFAxyc27GXpf02",
+       "name": "Taylor Swift"
+      }
+     ],
+     "album": {
+      "id": "4hF2gTGuPYlykYuphDxi8J",
+      "uri": "spotify:album:4hF2gTGuPYlykYuphDxi8J",
+      "name": "The Life of a Showgirl: The Encore",
+      "artists": [
+       {
+        "id": "06HL4z0CvFAxyc27GXpf02",
+        "uri": "spotify:artist:06HL4z0CvFAxyc27GXpf02",
+        "name": "Taylor Swift"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "type": "playlist",
+ "success": true,
+ "status": 200
+}

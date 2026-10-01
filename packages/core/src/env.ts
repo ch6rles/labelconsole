@@ -36,6 +36,8 @@ const EnvSchema = z.object({
   VOYAGE_MODEL: z.string().default('voyage-4'),
   /** Platform YouTube Data API key, used when a label hasn't added its own. */
   YOUTUBE_API_KEY: z.string().optional(),
+  /** Platform SpotScraper key (Spotify play counts, credits, ISRC search), used when a label hasn't added its own. */
+  SPOTSCRAPER_API_KEY: z.string().optional().or(z.literal('').transform(() => undefined)),
   /** Descriptive User-Agent required by MusicBrainz and polite for every public API. */
   HTTP_USER_AGENT: z.string().default('LabelConsole/0.1 (+https://labelconsole.app)'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),

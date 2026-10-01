@@ -24,6 +24,10 @@ export const MemoryInput = z.object({
   expiresAt: z.coerce.date().nullable().optional(),
 });
 
+/** Cosine similarity below this is noise for Voyage embeddings; SPAN maps the useful range onto about 0–1. */
+const SIMILARITY_FLOOR = 0.2;
+const SIMILARITY_SPAN = 0.5;
+
 /** Every column except the vector and the tsvector: reads never need to ship 1024 floats per row. */
 const { embedding: _embedding, tsv: _tsv, ...memoryColumns } = getTableColumns(memories);
 
@@ -75,14 +79,18 @@ export async function recall(ctx: ServiceContext, agentId: string, query: string
   const q = query.trim().slice(0, 2000);
   const rank = q ? sql<number>`ts_rank(${memories.tsv}, websearch_to_tsquery('english', ${q.slice(0, 500)}))` : sql<number>`0`;
   const qv = await queryVector(ctx, q);
-  // Cosine similarity (Voyage vectors are unit length), only against vectors from the same model.
-  const semantic = qv ? sql<number>`case when ${memories.embedding} is not null and ${memories.embeddingModel} = ${qv.model} then 1 - (${memories.embedding} <=> ${qv.vector}::vector) else 0 end` : sql<number>`0`;
+  // Relevance from cosine similarity (Voyage vectors are unit length), only against vectors from the same model.
+  // Unrelated texts still score about 0.15–0.3 and related ones 0.4–0.75, so similarity is measured above
+  // that floor and scaled: a clearly relevant memory then outranks an unrelated one of any importance.
+  const semantic = qv
+    ? sql<number>`case when ${memories.embedding} is not null and ${memories.embeddingModel} = ${qv.model} then greatest(0, 1 - (${memories.embedding} <=> ${qv.vector}::vector) - ${SIMILARITY_FLOOR}) / ${SIMILARITY_SPAN} else 0 end`
+    : sql<number>`0`;
   const rows = await ctx.tx
     .select({ memory: memoryColumns, rank, semantic })
     .from(memories)
     .where(live)
     // Relevance (meaning, then words) first, then importance, then freshness.
-    .orderBy(desc(sql`${semantic} * 4 + ${rank} * 4 + ${memories.importance} + case when ${memories.lastUsedAt} > now() - interval '30 days' then 0.2 else 0 end`), desc(memories.createdAt))
+    .orderBy(desc(sql`${semantic} * 6 + ${rank} * 4 + ${memories.importance} + case when ${memories.lastUsedAt} > now() - interval '30 days' then 0.2 else 0 end`), desc(memories.createdAt))
     .limit(limit);
   if (rows.length) await ctx.tx.update(memories).set({ lastUsedAt: new Date() }).where(inArray(memories.id, rows.map((r) => r.memory.id)));
   return rows.map((r) => r.memory);

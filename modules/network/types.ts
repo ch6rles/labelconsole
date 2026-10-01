@@ -6,3 +6,9 @@ declare module '@labelconsole/core/events' {
     'network.interaction.logged': { interactionId: string; contactId: string; channel: string; direction: string; campaignId: string | null };
   }
 }
+
+declare module '@labelconsole/core/queue' {
+  interface JobMap {
+    'network.refresh-playlists': { playlistIds?: string[] };
+  }
+}

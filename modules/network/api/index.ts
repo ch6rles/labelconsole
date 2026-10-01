@@ -12,6 +12,7 @@ export const routes = defineRoutes('network', [
   route({ method: 'POST', path: '/network/contacts/:id/interactions', permission: 'network:write', body: svc.InteractionInput, handler: (ctx, req) => svc.logInteraction(ctx, req.params.id, req.body) }),
   route({ method: 'GET', path: '/network/playlists', permission: 'network:read', query: z.object({ q: z.string().max(100).optional(), platform: z.string().max(30).optional(), genre: z.string().max(40).optional() }), handler: (ctx, req) => svc.listPlaylists(ctx, req.query) }),
   route({ method: 'POST', path: '/network/playlists', permission: 'network:write', body: svc.PlaylistInput, handler: (ctx, req) => svc.createPlaylist(ctx, req.body) }),
+  route({ method: 'POST', path: '/network/playlists/refresh', permission: 'network:write', handler: (ctx) => svc.requestPlaylistRefresh(ctx) }),
   route({ method: 'PATCH', path: '/network/playlists/:id', permission: 'network:write', body: svc.PlaylistPatch, handler: (ctx, req) => svc.updatePlaylist(ctx, req.params.id, req.body) }),
   route({ method: 'DELETE', path: '/network/playlists/:id', permission: 'network:delete', handler: (ctx, req) => svc.deletePlaylist(ctx, req.params.id) }),
 ]);

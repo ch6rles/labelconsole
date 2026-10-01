@@ -22,6 +22,13 @@
       "when": 1790893064630,
       "tag": "0002_memory_embedding_model",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790894833919,
+      "tag": "0003_spotscraper",
+      "breakpoints": true
     }
   ]
 }

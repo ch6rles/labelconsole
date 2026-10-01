@@ -1,3 +1,4 @@
+import { env } from '@labelconsole/core/env';
 import type { PageProps } from '@labelconsole/core/web';
 import { Chip, Icon, Page, PageHeader, Summary, fmt } from '@labelconsole/ui';
 import { ActionButton, FormModal } from '@labelconsole/ui/client';
@@ -8,11 +9,14 @@ export default async function IntegrationsPage({ run, session }: PageProps) {
   const creds = await run((ctx) => svc.credentialsStatus(ctx));
   const canEdit = session.permissions.has('settings:credentials');
   const connected = INTEGRATIONS.filter((i) => creds.some((c) => c.provider === i.provider)).length;
+  // Only whether a platform key exists is read here; its value never leaves the server.
+  const platform = new Set(INTEGRATIONS.filter((i) => i.platformKey && env()[i.platformKey]).map((i) => i.provider));
+  const onPlatform = INTEGRATIONS.filter((i) => platform.has(i.provider) && !creds.some((c) => c.provider === i.provider)).length;
   return (
     <Page variant="narrow">
       <PageHeader title="Integrations" description="Keys and tokens are encrypted with a per-label key, decrypted only inside the worker that calls the API, and never shown again or sent to an agent." />
       <Summary>
-        {connected} of {INTEGRATIONS.length} connected
+        {connected} of {INTEGRATIONS.length} connected{onPlatform ? ` · ${onPlatform} using the platform key` : ''}
       </Summary>
       <section className="lc-card">
         {INTEGRATIONS.map((i) => {
@@ -25,12 +29,13 @@ export default async function IntegrationsPage({ run, session }: PageProps) {
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
                 <span className="lc-row" style={{ gap: 8 }}>
                   <span style={{ fontSize: 14, fontWeight: 600 }}>{i.name}</span>
-                  {cred ? <Chip tone="blue">Connected</Chip> : <Chip>Not connected</Chip>}
+                  {cred ? <Chip tone="blue">Connected</Chip> : platform.has(i.provider) ? <Chip tone="ink">Platform key</Chip> : <Chip>Not connected</Chip>}
                 </span>
                 <span style={{ fontSize: 13, color: 'var(--lc-text-3)', lineHeight: 1.5 }}>{i.description}</span>
                 <span className="lc-mono lc-muted" style={{ fontSize: 11 }}>
                   USED BY {i.usedBy.join(' · ').toUpperCase()}
                   {cred && ` · ADDED ${fmt.shortDate(cred.createdAt).toUpperCase()}${cred.lastUsedAt ? ` · LAST USED ${fmt.relative(cred.lastUsedAt).toUpperCase()}` : ''}`}
+                  {!cred && platform.has(i.provider) && ' · ON THE PLATFORM KEY UNTIL YOU ADD YOUR OWN'}
                 </span>
                 {cred && Object.keys(cred.metadata).length > 0 && (
                   <span className="lc-muted" style={{ fontSize: 12 }}>

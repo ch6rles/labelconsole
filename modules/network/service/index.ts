@@ -3,7 +3,9 @@ import { and, arrayOverlaps, asc, desc, eq, gte, ilike, inArray, isNull, or, sql
 import { z } from 'zod';
 import { patchOf } from '@labelconsole/core/zod';
 import type { ServiceContext } from '@labelconsole/core/context';
-import { ConflictError, NotFoundError } from '@labelconsole/core/errors';
+import { ConflictError, NotFoundError, ValidationError } from '@labelconsole/core/errors';
+import { enqueueAfterCommit } from '@labelconsole/core/queue';
+import { spotifyIdFrom, spotScraperConfigured, type SpotifyPlaylist } from '@labelconsole/core/spotscraper';
 import { CONTACT_STAGES, CONTACT_TYPES, contacts, interactions, playlists, type Contact } from '../schema';
 
 /* ----------------------------------------------------------- contacts --- */
@@ -226,9 +228,35 @@ export async function createPlaylist(ctx: ServiceContext, input: z.input<typeof 
   ctx.assert('network:write');
   const data = PlaylistInput.parse(input);
   if (data.contactId) await getContactRow(ctx, data.contactId);
-  const [row] = await ctx.tx.insert(playlists).values(data).returning();
+  // A Spotify link is enough: the ID is taken from it, and followers are filled in from Spotify.
+  const spotifyId = data.platform === 'spotify' ? (spotifyIdFrom(data.externalId, 'playlist') ?? spotifyIdFrom(data.url, 'playlist')) : null;
+  const [row] = await ctx.tx.insert(playlists).values({ ...data, externalId: spotifyId ?? data.externalId ?? null, url: data.url ?? (spotifyId ? `https://open.spotify.com/playlist/${spotifyId}` : null) }).returning();
   await ctx.audit({ action: 'playlist.created', module: 'network', targetType: 'playlist', targetId: row.id, targetLabel: row.name });
+  if (spotifyId && (await spotScraperConfigured(ctx))) enqueueAfterCommit(ctx, 'network.refresh-playlists', { playlistIds: [row.id] }, { jobId: `playlists-${row.id}`, attempts: 3 });
   return row;
+}
+
+/** Spotify playlists whose follower counts can be refreshed (any with a Spotify ID or link). */
+export async function spotifyPlaylists(ctx: ServiceContext, ids?: string[]) {
+  const rows = await ctx.tx
+    .select({ id: playlists.id, externalId: playlists.externalId, url: playlists.url })
+    .from(playlists)
+    .where(and(eq(playlists.platform, 'spotify'), ids?.length ? inArray(playlists.id, ids) : undefined));
+  return rows.map((r) => ({ id: r.id, spotifyId: spotifyIdFrom(r.externalId, 'playlist') ?? spotifyIdFrom(r.url, 'playlist') })).filter((r): r is { id: string; spotifyId: string } => Boolean(r.spotifyId));
+}
+
+/** Store Spotify's current follower count for a playlist. */
+export async function applySpotifyPlaylist(ctx: ServiceContext, id: string, p: SpotifyPlaylist) {
+  const [row] = await ctx.tx.update(playlists).set({ followers: p.followers ?? undefined, externalId: p.id, updatedAt: new Date() }).where(eq(playlists.id, id)).returning({ id: playlists.id });
+  return row ? { id, followers: p.followers } : null;
+}
+
+/** Staff "refresh followers": reads every Spotify playlist again through SpotScraper. */
+export async function requestPlaylistRefresh(ctx: ServiceContext) {
+  ctx.assert('network:write');
+  if (!(await spotScraperConfigured(ctx))) throw new ValidationError('Refreshing follower counts needs a SpotScraper key under Settings → Integrations');
+  enqueueAfterCommit(ctx, 'network.refresh-playlists', {}, { jobId: `playlists-${ctx.orgId}-${Math.floor(Date.now() / 60_000)}`, attempts: 3 });
+  return { queued: true };
 }
 
 export async function updatePlaylist(ctx: ServiceContext, id: string, patch: z.input<typeof PlaylistPatch>) {

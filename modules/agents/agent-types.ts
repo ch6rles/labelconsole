@@ -58,8 +58,8 @@ export const AGENT_TYPES: AgentType[] = [
     icon: 'queue_music',
     defaultGoal: 'For each new release or campaign, find the right playlist editors and curators and prepare personalised pitches.',
     instructions:
-      'Find curators and editors whose playlists genuinely fit the track (genre, mood, audience size). Check the network first, add new contacts only when you found them through research, and never pitch anyone marked gone or do-not-contact. Draft one short, specific pitch per contact that mentions why the track fits their playlist. Drafts are free; sending needs a person to approve each message.',
-    tools: ['catalogue_get_release', 'catalogue_get_track', 'catalogue_search', 'marketing_list_campaigns', 'network_find_contacts', 'network_add_contact', 'network_log_interaction', 'marketing_draft_outreach', 'marketing_send_outreach', 'streams_get_history', ...MEMORY],
+      'Find curators and editors whose playlists genuinely fit the track (genre, mood, audience size). Check the network first; the artist\'s Spotify "discovered on" playlists (streams_artist_audience) show where their listeners already are. Add new contacts only when you found them through research, and never pitch anyone marked gone or do-not-contact. Draft one short, specific pitch per contact that mentions why the track fits their playlist. Drafts are free; sending needs a person to approve each message.',
+    tools: ['catalogue_get_release', 'catalogue_get_track', 'catalogue_search', 'marketing_list_campaigns', 'network_find_contacts', 'network_add_contact', 'network_log_interaction', 'marketing_draft_outreach', 'marketing_send_outreach', 'streams_get_history', 'streams_artist_audience', ...MEMORY],
     role: 'marketing',
     approvalPolicy: policy({ external: 'approve' }),
     budget: { perRunUsd: 3, perDayUsd: 10 },
@@ -96,7 +96,7 @@ export const AGENT_TYPES: AgentType[] = [
     defaultGoal: 'Every few hours, check what is moving for the roster and in the label\'s genres, and flag anything worth acting on.',
     instructions:
       'Look for signals that matter to the label: tracks gaining fast, sounds or hashtags taking off in the roster\'s genres, editors or creators picking up a song. Use the stream tools for the label\'s own numbers and web research for the wider picture. Only notify people about things they can act on, with the evidence. You never post anything.',
-    tools: ['streams_top_movers', 'streams_get_history', 'people_list_roster', 'catalogue_search', 'inbox_notify_user', ...MEMORY],
+    tools: ['streams_top_movers', 'streams_get_history', 'streams_artist_audience', 'people_list_roster', 'catalogue_search', 'inbox_notify_user', ...MEMORY],
     role: 'viewer',
     approvalPolicy: policy({ write: 'auto' }, { inbox_notify_user: 'auto' }),
     budget: { perRunUsd: 1, perDayUsd: 5 },
@@ -112,8 +112,8 @@ export const AGENT_TYPES: AgentType[] = [
     icon: 'hearing',
     defaultGoal: 'Score every new demo against what the label signs, and surface the few worth a listen.',
     instructions:
-      'Score demos on fit with the label\'s roster and taste (use memories of past decisions), production readiness and audience signals. Be honest and specific. Record what you learn about the label\'s taste as memories. Recommend at most a few demos for a person to hear. You never contact artists.',
-    tools: ['catalogue_list_demos', 'catalogue_score_demo', 'people_list_roster', 'inbox_notify_user', ...MEMORY],
+      'Score demos on fit with the label\'s roster and taste (use memories of past decisions), production readiness and audience signals (when a demo links a Spotify artist profile, check it with streams_spotify_artist_lookup). Be honest and specific. Record what you learn about the label\'s taste as memories. Recommend at most a few demos for a person to hear. You never contact artists.',
+    tools: ['catalogue_list_demos', 'catalogue_score_demo', 'people_list_roster', 'streams_spotify_artist_lookup', 'inbox_notify_user', ...MEMORY],
     role: 'ar',
     approvalPolicy: policy(),
     budget: { perRunUsd: 2, perDayUsd: 6 },
@@ -133,7 +133,7 @@ export const AGENT_TYPES: AgentType[] = [
     defaultGoal: 'When a stream alert fires, work out what happened and tell the team in two sentences.',
     instructions:
       'Explain the movement using the label\'s own data: which platform, how big against the usual, whether a campaign, playlist add or release lines up with it. Say clearly when you cannot tell. Notify the people who manage streams with a short explanation and the numbers. You only read data.',
-    tools: ['streams_get_history', 'streams_top_movers', 'catalogue_get_track', 'marketing_list_campaigns', 'inbox_notify_user', ...MEMORY],
+    tools: ['streams_get_history', 'streams_top_movers', 'streams_artist_audience', 'catalogue_get_track', 'marketing_list_campaigns', 'inbox_notify_user', ...MEMORY],
     role: 'viewer',
     approvalPolicy: policy({ write: 'auto', external: 'deny', destructive: 'deny', spend: 'deny' }, { inbox_notify_user: 'auto' }),
     budget: { perRunUsd: 0.75, perDayUsd: 5 },

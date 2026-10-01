@@ -14,7 +14,14 @@ export default async function PlaylistsPage({ run, session, searchParams }: Page
       <PageHeader
         title="Playlists"
         description="Playlists and their curators, for playlist outreach. Pitches to them are tracked under Outreach."
-        actions={canWrite && <FormModal title="Add playlist" trigger={{ label: 'Add playlist', icon: 'playlist_add', variant: 'primary' }} endpoint="/network/playlists" fields={playlistFields(options)} initial={{ platform: 'spotify' }} success="Playlist added" />}
+        actions={
+          canWrite && (
+            <>
+              {rows.some((r) => r.playlist.platform === 'spotify') && <ActionButton endpoint="/network/playlists/refresh" label="Refresh followers" icon="refresh" title="Read follower counts from Spotify (SpotScraper)" success="Refresh queued" />}
+              <FormModal title="Add playlist" trigger={{ label: 'Add playlist', icon: 'playlist_add', variant: 'primary' }} endpoint="/network/playlists" fields={playlistFields(options)} initial={{ platform: 'spotify' }} success="Playlist added" />
+            </>
+          )
+        }
       />
       <div className="lc-toolbar">
         <SearchInput placeholder="Playlist or curator" />

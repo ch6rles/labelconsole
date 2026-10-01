@@ -51,7 +51,17 @@ export default async function TrackDetailPage({ run, params, session, panels }: 
           ))}
         </Card>
       </div>
-      <Card title="Credits" actions={canWrite && <FormModal title="Add credit" trigger={{ label: 'Add credit', icon: 'add', size: 'sm' }} endpoint={`/catalogue/tracks/${t.id}/credits`} fields={[{ name: 'name', label: 'Name', required: true }, { name: 'role', label: 'Role', type: 'select', required: true, options: ROLES.map((r) => ({ value: r, label: r })) }]} initial={{ role: 'Producer' }} />}>
+      <Card
+        title="Credits"
+        actions={
+          canWrite && (
+            <span className="lc-row" style={{ gap: 6 }}>
+              <ActionButton endpoint={`/catalogue/tracks/${t.id}/credits/import`} label="From Spotify" icon="download" size="sm" variant="ghost" success="Import queued: Spotify credits appear in a few seconds" />
+              <FormModal title="Add credit" trigger={{ label: 'Add credit', icon: 'add', size: 'sm' }} endpoint={`/catalogue/tracks/${t.id}/credits`} fields={[{ name: 'name', label: 'Name', required: true }, { name: 'role', label: 'Role', type: 'select', required: true, options: ROLES.map((r) => ({ value: r, label: r })) }]} initial={{ role: 'Producer' }} />
+            </span>
+          )
+        }
+      >
         {data.credits.length === 0 ? <p className="lc-note">No credits yet. DSPs and PROs need at least the writers and producers.</p> : data.credits.map((c) => (
           <div key={c.id} className="lc-kv">
             <span>{c.name} <span className="lc-muted">· {c.role}</span></span>

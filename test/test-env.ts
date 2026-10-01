@@ -13,5 +13,10 @@ export const TEST_ENV: Record<string, string> = {
   STORAGE_LOCAL_DIR: '.storage-test',
   LC_ALLOW_DECRYPT: '1',
   LOG_LEVEL: 'silent',
+  // Provider keys from a developer's .env must never reach tests: they would make real, billed calls.
   ANTHROPIC_API_KEY: '',
+  ANTHROPIC_WORKSPACE_ID: '',
+  VOYAGE_API_KEY: '',
+  SPOTSCRAPER_API_KEY: '',
+  YOUTUBE_API_KEY: '',
 };

@@ -1,6 +1,7 @@
 /** Third-party connections a label can configure. Secrets go to the vault, never back to the browser. */
 export type IntegrationField = { name: string; label: string; secret?: boolean; hint?: string; optional?: boolean };
-export type Integration = { provider: string; name: string; icon: string; description: string; fields: IntegrationField[]; usedBy: string[]; docs?: string };
+/** `platformKey` names the environment variable that serves labels without their own key. */
+export type Integration = { provider: string; name: string; icon: string; description: string; fields: IntegrationField[]; usedBy: string[]; docs?: string; platformKey?: 'ANTHROPIC_API_KEY' | 'VOYAGE_API_KEY' | 'YOUTUBE_API_KEY' | 'SPOTSCRAPER_API_KEY' };
 
 export const INTEGRATIONS: Integration[] = [
   {
@@ -14,6 +15,7 @@ export const INTEGRATIONS: Integration[] = [
     ],
     usedBy: ['Agents', 'Documents'],
     docs: 'https://platform.claude.com/settings/keys',
+    platformKey: 'ANTHROPIC_API_KEY',
   },
   {
     provider: 'voyage',
@@ -23,6 +25,7 @@ export const INTEGRATIONS: Integration[] = [
     fields: [{ name: 'apiKey', label: 'API key', secret: true }],
     usedBy: ['Agents'],
     docs: 'https://dash.voyageai.com',
+    platformKey: 'VOYAGE_API_KEY',
   },
   {
     provider: 'youtube',
@@ -32,12 +35,23 @@ export const INTEGRATIONS: Integration[] = [
     fields: [{ name: 'apiKey', label: 'API key', secret: true }],
     usedBy: ['Streams', 'Catalogue'],
     docs: 'https://console.cloud.google.com/apis/library/youtube.googleapis.com',
+    platformKey: 'YOUTUBE_API_KEY',
+  },
+  {
+    provider: 'spotscraper',
+    name: 'SpotScraper (Spotify data)',
+    icon: 'equalizer',
+    description: 'Spotify play counts for stream tracking, track credits, ISRC search, release details, artist monthly listeners and playlist follower counts. Billed by SpotScraper per request. Agents only see numbers the app derives, never SpotScraper responses.',
+    fields: [{ name: 'apiKey', label: 'API key', secret: true }],
+    usedBy: ['Streams', 'Catalogue', 'People', 'Network'],
+    docs: 'https://spotscraper.readme.io',
+    platformKey: 'SPOTSCRAPER_API_KEY',
   },
   {
     provider: 'spotify',
     name: 'Spotify Web API',
     icon: 'graphic_eq',
-    description: 'ISRC and UPC lookup for metadata, only where your access level allows (a commercial product needs extended access). Stream counts never come from Spotify, and Spotify responses are never sent to agents.',
+    description: 'ISRC and UPC lookup for metadata, only where your access level allows (a commercial product needs extended access). Not used for stream counts, and Spotify responses are never sent to agents.',
     fields: [
       { name: 'clientId', label: 'Client ID' },
       { name: 'clientSecret', label: 'Client secret', secret: true },

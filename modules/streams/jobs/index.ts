@@ -8,24 +8,90 @@ import { env } from '@labelconsole/core/env';
 import { isTransient, RateLimitedError } from '@labelconsole/core/errors';
 import { enabledModuleIds } from '@labelconsole/core/modules';
 import { defineJob, enqueue, type JobContext } from '@labelconsole/core/queue';
+import { pickIsrcMatch, spotifyIdFrom, spotScraperFor, type SpotScraperClient } from '@labelconsole/core/spotscraper';
+import { recordUsage } from '@labelconsole/core/usage';
 import { readSecret } from '@labelconsole/core/vault';
-import { trackArtists, tracks } from '@labelconsole/catalogue/schema';
+import { platformIdentities, trackArtists, tracks } from '@labelconsole/catalogue/schema';
 import { upsertIdentity } from '@labelconsole/catalogue/service';
 import { documents, statementLines } from '@labelconsole/documents/schema';
 import { artists } from '@labelconsole/people/schema';
 import { streamTracks } from '../schema';
 import { licensedAdapter, licensedStreamProvider, type LicensedStreamSecret } from '../sources/licensed';
+import { spotifyAdapter } from '../sources/spotify';
 import { statementPeriodTotals } from '../sources/statements';
 import type { Snapshot, TrackRef } from '../sources/types';
 import { AUTO_CONFIRM, REVIEW, scoreCandidates, searchVideos, youtubeAdapter } from '../sources/youtube';
-import { activeTrackIds, backfillRegistry, confirmedVideos, ensureDefaultRules, evaluateTrackAlerts, nextPollAt, recordSnapshots, registerTrack, rollupStatementCounts } from '../service';
+import {
+  activeTrackIds,
+  backfillRegistry,
+  confirmedVideos,
+  ensureDefaultRules,
+  evaluateTrackAlerts,
+  nextPollAt,
+  pollableTrackIds,
+  promoteSpotifyPrimaries,
+  recordArtistStats,
+  recordSnapshots,
+  registerTrack,
+  rollupStatementCounts,
+  spotifyPrimaries,
+  type ArtistStatsInput,
+} from '../service';
 
 export const NO_YOUTUBE_KEY = 'Add a YouTube Data API key under Settings → Integrations to track YouTube views';
+export const NO_SPOTSCRAPER_KEY = 'Add a SpotScraper key under Settings → Integrations to track Spotify plays';
 const POLL_SLOT_MS = 15 * 60_000;
+/** An ISRC with no Spotify match is searched again after this long. */
+const SPOTIFY_RECHECK_MS = 7 * 86400_000;
 
 async function youtubeKey(job: JobContext) {
   const s = await job.withOrg((ctx) => readSecret(ctx, 'youtube'));
   return s?.secret.apiKey || env().YOUTUBE_API_KEY || null;
+}
+
+/** Bill SpotScraper requests to the label's usage counters (SpotScraper charges per request). */
+async function countRequests(job: JobContext, client: SpotScraperClient) {
+  const n = client.requests;
+  client.requests = 0;
+  if (n > 0) await job.withOrg((ctx) => recordUsage(ctx, 'spotscraper_requests', n));
+}
+
+/**
+ * Find the Spotify ID to poll for tracks that have none: promote a confirmed
+ * ID the catalogue already knows (free), else search the track's ISRC (once a
+ * week at most for tracks with no match). IDs staff rejected are never picked.
+ * Requests run outside any transaction.
+ */
+async function matchSpotify(job: JobContext, client: SpotScraperClient, trackIds: string[]): Promise<TrackRef[]> {
+  if (trackIds.length === 0) return [];
+  const pending = await job.withOrg(async (ctx) => {
+    const have = await promoteSpotifyPrimaries(ctx, trackIds);
+    const rest = trackIds.filter((t) => !have.has(t));
+    if (rest.length === 0) return [];
+    const recheck = new Date(Date.now() - SPOTIFY_RECHECK_MS);
+    const rows = (await ctx.tx.select({ id: streamTracks.id, trackId: streamTracks.trackId, isrc: tracks.isrc, checkedAt: streamTracks.spotifyCheckedAt }).from(streamTracks).innerJoin(tracks, eq(tracks.id, streamTracks.trackId)).where(inArray(streamTracks.trackId, rest))).filter(
+      (r) => r.isrc && (!r.checkedAt || r.checkedAt < recheck),
+    );
+    if (rows.length === 0) return [];
+    const ids = rows.map((r) => r.trackId);
+    const [names, rejected] = await Promise.all([
+      ctx.tx.select({ trackId: trackArtists.trackId, name: artists.name }).from(trackArtists).innerJoin(artists, eq(artists.id, trackArtists.artistId)).where(and(inArray(trackArtists.trackId, ids), eq(trackArtists.role, 'primary'))),
+      ctx.tx.select({ trackId: platformIdentities.entityId, externalId: platformIdentities.externalId }).from(platformIdentities).where(and(eq(platformIdentities.entityType, 'track'), inArray(platformIdentities.entityId, ids), eq(platformIdentities.platform, 'spotify'), eq(platformIdentities.status, 'rejected'))),
+    ]);
+    return rows.map((r) => ({ ...r, isrc: r.isrc!, artists: names.filter((n) => n.trackId === r.trackId).map((n) => n.name), rejected: new Set(rejected.filter((x) => x.trackId === r.trackId).map((x) => x.externalId)) }));
+  });
+  const found: Array<(typeof pending)[number] & { spotifyId: string | null }> = [];
+  for (const p of pending) {
+    const results = await client.searchIsrc(p.isrc);
+    found.push({ ...p, spotifyId: pickIsrcMatch(results.filter((r) => !p.rejected.has(r.id)), p.isrc, p.artists)?.id ?? null });
+  }
+  return job.withOrg(async (ctx) => {
+    for (const f of found) {
+      if (f.spotifyId) await upsertIdentity(ctx, { entityType: 'track', entityId: f.trackId, platform: 'spotify', externalId: f.spotifyId, url: `https://open.spotify.com/track/${f.spotifyId}`, source: 'spotscraper', confidence: 1, status: 'confirmed', variant: 'primary' });
+      await ctx.tx.update(streamTracks).set({ spotifyCheckedAt: new Date() }).where(eq(streamTracks.id, f.id));
+    }
+    return (await spotifyPrimaries(ctx, trackIds)).map((p) => ({ trackId: p.trackId, platform: 'spotify', externalId: p.externalId }));
+  });
 }
 
 async function streamsEnabled(orgId: string) {
@@ -106,7 +172,10 @@ export const jobs = [
     job.log.info({ orgs: queued, resolves: stale.length }, 'streams scheduled');
   }),
 
-  /** Map a track to its YouTube videos: one search, scored; low confidence goes to review. */
+  /**
+   * Find what to poll for a track: its Spotify ID by ISRC (SpotScraper), and
+   * its YouTube videos by one search, scored; low-confidence videos go to review.
+   */
   defineJob('streams.resolve-track', async (job, data) => {
     const info = await job.withOrg(async (ctx) => {
       const [row] = await ctx.tx.select({ st: streamTracks, title: tracks.title, durationMs: tracks.durationMs }).from(streamTracks).innerJoin(tracks, eq(tracks.id, streamTracks.trackId)).where(eq(streamTracks.id, data.streamTrackId));
@@ -115,32 +184,55 @@ export const jobs = [
       return { ...row, artists: names.map((n) => n.name), videos: await confirmedVideos(ctx, [row.st.trackId]) };
     });
     if (!info || info.st.status === 'paused') return;
-    if (info.videos.length) {
-      await job.withOrg((ctx) => ctx.tx.update(streamTracks).set({ status: 'tracking', lastResolvedAt: new Date(), lastError: null, nextPollAt: new Date() }).where(eq(streamTracks.id, info.st.id)));
-      return;
-    }
-    const key = await youtubeKey(job);
-    if (!key) {
-      await job.withOrg((ctx) => ctx.tx.update(streamTracks).set({ lastResolvedAt: new Date(), lastError: NO_YOUTUBE_KEY }).where(eq(streamTracks.id, info.st.id)));
-      return;
-    }
-    const candidates = await searchVideos(key, `${info.artists[0] ?? ''} ${info.title}`.trim());
-    const verdicts = scoreCandidates({ title: info.title, artists: info.artists, durationMs: info.durationMs }, candidates);
-    const picks = [verdicts.find((v) => v.variant === 'topic'), verdicts.find((v) => v.variant === 'official')].filter((v): v is NonNullable<typeof v> => Boolean(v && v.confidence >= REVIEW));
-    await job.withOrg(async (ctx) => {
-      for (const v of picks) {
-        await upsertIdentity(ctx, { entityType: 'track', entityId: info.st.trackId, platform: 'youtube', externalId: v.videoId, url: `https://www.youtube.com/watch?v=${v.videoId}`, source: 'youtube-search', confidence: v.confidence, status: v.confidence >= AUTO_CONFIRM ? 'confirmed' : 'pending_review', variant: v.variant });
+    const trackId = info.st.trackId;
+
+    // Spotify: an exact ISRC match needs no review.
+    let spotifyNote: string | null = null;
+    const client = await job.withOrg((ctx) => spotScraperFor(ctx));
+    if (client) {
+      try {
+        const refs = await matchSpotify(job, client, [trackId]);
+        if (refs.length === 0) spotifyNote = 'No Spotify track found for this ISRC';
+      } finally {
+        await countRequests(job, client);
       }
-      const confirmed = (await confirmedVideos(ctx, [info.st.trackId])).length > 0;
+    }
+
+    // YouTube: one search (100 quota units) unless a video is already confirmed.
+    let youtubeNote: string | null = null;
+    let candidates = 0;
+    let picks: Array<{ variant: string; confidence: number }> = [];
+    if (info.videos.length === 0) {
+      const key = await youtubeKey(job);
+      if (!key) youtubeNote = NO_YOUTUBE_KEY;
+      else {
+        const found = await searchVideos(key, `${info.artists[0] ?? ''} ${info.title}`.trim());
+        candidates = found.length;
+        const verdicts = scoreCandidates({ title: info.title, artists: info.artists, durationMs: info.durationMs }, found);
+        const chosen = [verdicts.find((v) => v.variant === 'topic'), verdicts.find((v) => v.variant === 'official')].filter((v): v is NonNullable<typeof v> => Boolean(v && v.confidence >= REVIEW));
+        picks = chosen;
+        await job.withOrg(async (ctx) => {
+          for (const v of chosen) {
+            await upsertIdentity(ctx, { entityType: 'track', entityId: trackId, platform: 'youtube', externalId: v.videoId, url: `https://www.youtube.com/watch?v=${v.videoId}`, source: 'youtube-search', confidence: v.confidence, status: v.confidence >= AUTO_CONFIRM ? 'confirmed' : 'pending_review', variant: v.variant });
+          }
+        });
+        if (chosen.length === 0) youtubeNote = candidates ? 'No confident YouTube match; paste the video link on the Matching page' : 'No YouTube video found for this track';
+      }
+    }
+
+    await job.withOrg(async (ctx) => {
+      const pollable = (await pollableTrackIds(ctx, [trackId])).size > 0;
+      // Without a YouTube key and nothing else to poll, keep NO_YOUTUBE_KEY: the scheduler retries those daily.
+      const lastError = pollable ? null : youtubeNote === NO_YOUTUBE_KEY && !client ? NO_YOUTUBE_KEY : [youtubeNote, client ? spotifyNote : null].filter(Boolean).join('. ') || null;
       await ctx.tx
         .update(streamTracks)
-        .set({ status: confirmed ? 'tracking' : 'pending_match', nextPollAt: confirmed ? new Date() : null, lastResolvedAt: new Date(), lastError: picks.length ? null : candidates.length ? 'No confident YouTube match; paste the video link on the Matching page' : 'No YouTube video found for this track' })
+        .set({ status: pollable ? 'tracking' : 'pending_match', nextPollAt: pollable ? new Date() : null, lastResolvedAt: new Date(), lastError })
         .where(eq(streamTracks.id, info.st.id));
     });
-    job.log.info({ trackId: info.st.trackId, candidates: candidates.length, picks: picks.map((p) => `${p.variant}:${p.confidence}`) }, 'youtube resolved');
+    job.log.info({ trackId, spotify: client ? !spotifyNote : 'no key', candidates, picks: picks.map((p) => `${p.variant}:${p.confidence}`) }, 'track resolved');
   }),
 
-  /** Poll every due track in one org: YouTube in batches of 50, plus the licensed provider when one is configured. */
+  /** Poll every due track in one org: YouTube in batches of 50, Spotify play counts via SpotScraper, and the licensed provider when one is configured. */
   defineJob('streams.poll-org', async (job) => {
     const now = new Date();
     const due = await job.withOrg((ctx) =>
@@ -176,7 +268,29 @@ export const jobs = [
       }
     }
 
-    // Licensed provider (Spotify and other DSP counts), matched by ISRC. Skipped until a vendor is chosen and installed.
+    // Spotify play counts (SpotScraper): one request per track. Failures never stop YouTube readings being recorded.
+    const client = await job.withOrg((ctx) => spotScraperFor(ctx));
+    if (client) {
+      try {
+        const refs = await matchSpotify(job, client, trackIds);
+        if (refs.length) {
+          const res = await spotifyAdapter.fetch(client, refs);
+          snapshots.push(...res.snapshots);
+          for (const m of res.missing) if (!errors.has(m.trackId)) errors.set(m.trackId, `Spotify track ${m.externalId} is unavailable or shows no play count`);
+        }
+      } catch (err) {
+        const message = err instanceof RateLimitedError ? 'SpotScraper rate limit reached; Spotify plays resume at the next poll' : `Spotify: ${(err as Error).message.slice(0, 200)}`;
+        job.log.warn({ err: (err as Error).message }, 'spotify polling failed');
+        for (const id of trackIds) if (!errors.has(id)) errors.set(id, message);
+      } finally {
+        await countRequests(job, client);
+      }
+    } else {
+      const orphaned = await job.withOrg((ctx) => spotifyPrimaries(ctx, trackIds));
+      for (const o of orphaned) if (!errors.has(o.trackId) && !videos.some((v) => v.trackId === o.trackId)) errors.set(o.trackId, NO_SPOTSCRAPER_KEY);
+    }
+
+    // Licensed provider (DSP counts), matched by ISRC. Skipped until a vendor is chosen and installed.
     const licensed = await job.withOrg((ctx) => readSecret(ctx, 'licensed_streams'));
     const secret = licensed?.secret as LicensedStreamSecret | undefined;
     if (secret && licensedStreamProvider(secret.vendor)) {
@@ -236,6 +350,53 @@ export const jobs = [
     });
     await sendWebhook(job, result.items);
     job.log.info({ documentId: data.documentId, tracks: result.tracks, periods: result.periods }, 'statement counts imported');
+  }),
+
+  /**
+   * Daily: each artist's Spotify audience (monthly listeners, followers, world
+   * rank, top cities) and the playlists listeners discovered them on. Two
+   * SpotScraper requests per artist with a Spotify artist ID.
+   */
+  defineJob('streams.audience', async (job) => {
+    const day = new Date().toISOString().slice(0, 10);
+    if (!job.orgId) {
+      const rows = (await systemDb().execute(sql`
+        select distinct a.org_id from artists a
+        where a.spotify_artist_id is not null and a.spotify_artist_id <> ''
+          and (${Boolean(env().SPOTSCRAPER_API_KEY)} or exists (select 1 from credentials c where c.org_id = a.org_id and c.provider = 'spotscraper' and c.revoked_at is null))
+        limit 1000`)) as unknown as Array<{ org_id: string }>;
+      let queued = 0;
+      for (const r of rows) {
+        if (!(await streamsEnabled(r.org_id))) continue;
+        await enqueue('streams.audience', r.org_id, {}, { jobId: `audience-${r.org_id}-${day}`, attempts: 3, backoff: { type: 'exponential', delay: 300_000 } });
+        queued++;
+      }
+      return { labels: queued };
+    }
+    const client = await job.withOrg((ctx) => spotScraperFor(ctx));
+    if (!client) return { skipped: 'no SpotScraper key' };
+    const roster = await job.withOrg((ctx) => ctx.tx.select({ id: artists.id, spotifyArtistId: artists.spotifyArtistId }).from(artists).where(isNotNull(artists.spotifyArtistId)));
+    const rows: ArtistStatsInput[] = [];
+    try {
+      for (const a of roster) {
+        const spotifyId = spotifyIdFrom(a.spotifyArtistId, 'artist');
+        if (!spotifyId) continue;
+        const stats = await client.artist(spotifyId);
+        if (!stats) {
+          job.log.warn({ artistId: a.id, spotifyId }, 'spotify artist not found');
+          continue;
+        }
+        const discovered = await client.discoveredOn(spotifyId, 50).catch((err: Error) => {
+          job.log.warn({ err: err.message, artistId: a.id }, 'discovered-on failed');
+          return [];
+        });
+        rows.push({ artistId: a.id, spotifyArtistId: spotifyId, day, monthlyListeners: stats.monthlyListeners, followers: stats.followers, worldRank: stats.worldRank, topCities: stats.topCities, discoveredOn: discovered.map((p) => ({ id: p.id, name: p.name, owner: p.ownerName })) });
+      }
+    } finally {
+      if (rows.length) await job.withOrg((ctx) => recordArtistStats(ctx, rows));
+      await countRequests(job, client);
+    }
+    return { artists: rows.length };
   }),
 
   /** Keep monthly partitions three months ahead so inserts never land in the default partition. */

@@ -1,6 +1,7 @@
-import { bigint, boolean, date, index, integer, numeric, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, date, index, integer, jsonb, numeric, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { orgIdColumn, tenantColumns, ts } from '@labelconsole/core/db/columns';
 import { tracks } from '@labelconsole/catalogue/schema';
+import { artists } from '@labelconsole/people/schema';
 
 /** Track registry: every catalogue track the tracker polls, with its schedule tier. */
 export const streamTracks = pgTable(
@@ -18,12 +19,14 @@ export const streamTracks = pgTable(
     nextPollAt: ts('next_poll_at'),
     lastPolledAt: ts('last_polled_at'),
     lastResolvedAt: ts('last_resolved_at'),
+    /** Last ISRC search on Spotify (SpotScraper) that found nothing; retried weekly. */
+    spotifyCheckedAt: ts('spotify_checked_at'),
     lastError: text('last_error'),
   },
   (t) => [uniqueIndex('stream_tracks_track_idx').on(t.orgId, t.trackId), index('stream_tracks_due_idx').on(t.nextPollAt)],
 );
 
-export const STREAM_SOURCES = ['youtube-data-api', 'licensed-provider', 'statement-import'] as const;
+export const STREAM_SOURCES = ['youtube-data-api', 'spotscraper', 'licensed-provider', 'statement-import'] as const;
 export type StreamSource = (typeof STREAM_SOURCES)[number];
 
 /** Daily rollup per track/platform/source for charts and deltas. */
@@ -85,6 +88,34 @@ export const alerts = pgTable(
   (t) => [uniqueIndex('stream_alerts_dedupe_idx').on(t.orgId, t.trackId, t.kind, t.platform, t.day), index('stream_alerts_org_idx').on(t.orgId, t.createdAt)],
 );
 
+export type TopCity = { city: string; country: string | null; listeners: number };
+export type DiscoveredOn = { id: string; name: string; owner: string | null };
+
+/**
+ * One reading a day of an artist's Spotify audience (SpotScraper): monthly
+ * listeners, followers, world rank, top cities, and the playlists listeners
+ * discovered them on.
+ */
+export const artistSpotifyStats = pgTable(
+  'artist_spotify_stats',
+  {
+    orgId: orgIdColumn(),
+    artistId: uuid('artist_id')
+      .notNull()
+      .references(() => artists.id, { onDelete: 'cascade' }),
+    day: date('day').notNull(),
+    spotifyArtistId: text('spotify_artist_id').notNull(),
+    monthlyListeners: bigint('monthly_listeners', { mode: 'number' }),
+    followers: bigint('followers', { mode: 'number' }),
+    worldRank: integer('world_rank'),
+    topCities: jsonb('top_cities').$type<TopCity[]>().notNull().default([]),
+    discoveredOn: jsonb('discovered_on').$type<DiscoveredOn[]>().notNull().default([]),
+    capturedAt: ts('captured_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.artistId, t.day] })],
+);
+
 export type StreamTrack = typeof streamTracks.$inferSelect;
+export type ArtistSpotifyStats = typeof artistSpotifyStats.$inferSelect;
 export type StreamAlert = typeof alerts.$inferSelect;
 export type AlertRule = typeof alertRules.$inferSelect;

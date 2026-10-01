@@ -1,0 +1,36 @@
+{
+ "data": {
+  "playlists": {
+   "totalCount": 100,
+   "items": [
+    {
+     "id": "0A9tWS2qryvdrFJBObAque",
+     "name": "Mix 80's , 90's y 2000's en inglés",
+     "description": "",
+     "owner": {
+      "name": "fld5wrzio6qv6nus8yln7v71o"
+     }
+    },
+    {
+     "id": "37i9dQZF1DX4UtSsGT1Sbe",
+     "name": "All Out 80s",
+     "description": "The biggest songs of the 1980s. Cover: Madonna",
+     "owner": {
+      "name": "Spotify"
+     }
+    },
+    {
+     "id": "19RcUUR4b9oxhcREqD8Xoq",
+     "name": "Rick Astley | Greatest Hits",
+     "description": "",
+     "owner": {
+      "name": "martinalton12345"
+     }
+    }
+   ]
+  }
+ },
+ "type": "artist_discovered_on",
+ "success": true,
+ "status": 200
+}

@@ -25,12 +25,17 @@ export default async function StreamsOverviewPage({ run, session, searchParams, 
     <Page>
       <PageHeader
         title="Streams"
-        description="Plays per day from official YouTube views and a licensed provider, plus exact statement counts. Sources are never blended."
+        description="Plays per day from Spotify play counts (SpotScraper) and official YouTube views, plus exact statement counts. Sources are never blended."
         actions={canManage && <ActionButton endpoint="/streams/poll" body={{}} label="Refresh now" icon="refresh" success="Polling queued" />}
       />
       <Summary>
-        {o.tracking.tracking} tracks tracked · {o.tracking.pendingMatch} waiting for a YouTube match · {o.tracking.paused} paused{o.throughDay ? ` · through ${o.throughDay}` : ''} · licensed DSP counts {sources.licensed ? 'configured' : 'off (no vendor chosen yet)'}
+        {o.tracking.tracking} tracks tracked · {o.tracking.pendingMatch} waiting for a match · {o.tracking.paused} paused{o.throughDay ? ` · through ${o.throughDay}` : ''} · Spotify plays {sources.spotify ? 'on' : 'off'}{sources.licensed ? ' · licensed DSP counts configured' : ''}
       </Summary>
+      {!sources.spotify && (
+        <Banner icon="key" warn>
+          Spotify play counts need a SpotScraper key. {session.permissions.has('settings:credentials') ? <Link href="/settings/integrations">Add it under Settings → Integrations</Link> : 'Ask an admin to add one under Settings → Integrations'}. Tracks are matched by ISRC; each poll is one request per track.
+        </Banner>
+      )}
       {!sources.youtube && (
         <Banner icon="key" warn>
           YouTube views need a YouTube Data API key. {session.permissions.has('settings:credentials') ? <Link href="/settings/integrations">Add it under Settings → Integrations</Link> : 'Ask an admin to add one under Settings → Integrations'}. Polling uses videos.list, 1 quota unit per 50 videos.
@@ -39,7 +44,7 @@ export default async function StreamsOverviewPage({ run, session, searchParams, 
       <div className="lc-grid-stats">
         <StatCard label="PLAYS · 28D" icon="visibility" value={o.throughDay ? fmt.compact(o.plays28d) : '—'} delta={o.changePct != null ? fmt.pct(o.changePct, { signed: true, decimals: 1 }) : undefined} deltaDown={(o.changePct ?? 0) < 0} note="vs the 28 days before · polled sources" />
         {o.byPlatform.slice(0, 1).map((p) => (
-          <StatCard key={p.platform} label={`${platformLabel(p.platform).toUpperCase()} · 28D`} icon={p.platform === 'youtube' ? 'smart_display' : 'graphic_eq'} value={fmt.compact(p.current)} delta={p.previous > 0 ? fmt.pct(((p.current - p.previous) / p.previous) * 100, { signed: true }) : undefined} deltaDown={p.current < p.previous} note={p.platform === 'youtube' ? 'official view counts' : 'licensed provider'} />
+          <StatCard key={p.platform} label={`${platformLabel(p.platform).toUpperCase()} · 28D`} icon={p.platform === 'youtube' ? 'smart_display' : 'graphic_eq'} value={fmt.compact(p.current)} delta={p.previous > 0 ? fmt.pct(((p.current - p.previous) / p.previous) * 100, { signed: true }) : undefined} deltaDown={p.current < p.previous} note={p.platform === 'youtube' ? 'official view counts' : p.platform === 'spotify' ? 'Spotify play counts' : 'licensed provider'} />
         ))}
         {o.byPlatform.length === 0 && <StatCard label="YOUTUBE · 28D" icon="smart_display" value="—" note={sources.youtube ? 'first readings pending' : 'needs an API key'} />}
         <StatCard label="LATEST STATEMENT" icon="receipt_long" value={o.statement ? fmt.compact(o.statement.units) : '—'} note={o.statement ? `units, period ending ${fmt.date(o.statement.periodEnd)}` : 'import one under Finance'} href="/finance/statements" />

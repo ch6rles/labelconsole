@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { NotFoundError } from '@labelconsole/core/errors';
@@ -24,8 +24,8 @@ export async function upsertIdentity(ctx: ServiceContext, input: z.input<typeof 
     .values({ ...data, confidence: String(data.confidence), url: data.url ?? null })
     .onConflictDoUpdate({
       target: [platformIdentities.orgId, platformIdentities.entityType, platformIdentities.entityId, platformIdentities.platform, platformIdentities.externalId],
-      // Never downgrade a human decision.
-      set: { url: data.url ?? null, variant: data.variant ?? null },
+      // Never downgrade a human decision, and keep the variant (e.g. the Spotify ID Streams polls) unless one is given.
+      set: { url: data.url ?? null, variant: data.variant === undefined ? sql`${platformIdentities.variant}` : data.variant },
     })
     .returning();
   return row;

@@ -5,6 +5,7 @@ import { patchOf } from '@labelconsole/core/zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { credentials, organizations } from '@labelconsole/core/db/schema';
 import { env } from '@labelconsole/core/env';
+import { spotifyIdFrom, spotScraperConfigured } from '@labelconsole/core/spotscraper';
 import { NotFoundError, ValidationError } from '@labelconsole/core/errors';
 import { enabledModuleIds, enrich } from '@labelconsole/core/modules';
 import { assertWithinPlan, lockPlanLimit, planOf } from '@labelconsole/core/plans';
@@ -12,7 +13,7 @@ import { enqueueAfterCommit } from '@labelconsole/core/queue';
 import { platformIdentities, releaseTracks, releases, trackArtists, tracks } from '@labelconsole/catalogue/schema';
 import { setIdentityStatus, upsertIdentity } from '@labelconsole/catalogue/service';
 import { artists } from '@labelconsole/people/schema';
-import { alertRules, alerts, ALERT_KINDS, streamDaily, streamTracks, type AlertKind, type StreamSource } from '../schema';
+import { alertRules, alerts, ALERT_KINDS, artistSpotifyStats, streamDaily, streamTracks, type AlertKind, type DiscoveredOn, type StreamSource, type TopCity } from '../schema';
 import { streamSnapshots } from '../schema/snapshots';
 import { parseVideoId } from '../sources/youtube';
 import type { Snapshot } from '../sources/types';
@@ -21,8 +22,8 @@ import { DEFAULT_RULES, evaluateRules, nextPollAt, type DayPoint } from './alert
 export { DEFAULT_RULES, evaluateRules, nextPollAt } from './alerts';
 
 /** Sources that report running totals; their daily deltas are plays. Statements are period totals. */
-export const POLLED_SOURCES: StreamSource[] = ['youtube-data-api', 'licensed-provider'];
-const polled = sql.raw(`('youtube-data-api','licensed-provider')`);
+export const POLLED_SOURCES: StreamSource[] = ['youtube-data-api', 'spotscraper', 'licensed-provider'];
+const polled = sql.raw(`('youtube-data-api','spotscraper','licensed-provider')`);
 
 const today = () => new Date().toISOString().slice(0, 10);
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400_000).toISOString().slice(0, 10);
@@ -31,8 +32,8 @@ const daysAgo = (n: number) => new Date(Date.now() - n * 86400_000).toISOString(
 
 /**
  * Register a catalogue track with the tracker. Tracks that already have a
- * confirmed YouTube video start polling right away; the rest go to the
- * resolver, which searches YouTube once.
+ * confirmed YouTube video or Spotify ID start polling right away; the rest go
+ * to the resolver, which searches Spotify by ISRC and YouTube once.
  */
 export async function registerTrack(ctx: ServiceContext, trackId: string) {
   const [track] = await ctx.tx.select({ id: tracks.id, isrc: tracks.isrc }).from(tracks).where(eq(tracks.id, trackId));
@@ -45,8 +46,8 @@ export async function registerTrack(ctx: ServiceContext, trackId: string) {
   }
   const [row] = await ctx.tx.insert(streamTracks).values({ trackId, isrc: track.isrc }).onConflictDoUpdate({ target: [streamTracks.orgId, streamTracks.trackId], set: { isrc: track.isrc } }).returning();
   if (row.status === 'paused') return row;
-  const known = await confirmedVideos(ctx, [trackId]);
-  if (known.length) {
+  const known = await pollableTrackIds(ctx, [trackId]);
+  if (known.size) {
     if (row.status !== 'tracking') await ctx.tx.update(streamTracks).set({ status: 'tracking', nextPollAt: new Date() }).where(eq(streamTracks.id, row.id));
   } else if (!row.lastResolvedAt) {
     enqueueAfterCommit(ctx, 'streams.resolve-track', { streamTrackId: row.id }, { jobId: `resolve-${row.id}`, attempts: 3, backoff: { type: 'exponential', delay: 60_000 } });
@@ -68,6 +69,42 @@ export async function confirmedVideos(ctx: ServiceContext, trackIds: string[]) {
     .where(and(eq(platformIdentities.entityType, 'track'), inArray(platformIdentities.entityId, trackIds), eq(platformIdentities.platform, 'youtube'), eq(platformIdentities.status, 'confirmed')));
 }
 
+/** The Spotify ID each track is polled through (one per track, see sources/spotify.ts). */
+export async function spotifyPrimaries(ctx: ServiceContext, trackIds: string[]) {
+  if (trackIds.length === 0) return [];
+  return ctx.tx
+    .select({ id: platformIdentities.id, trackId: platformIdentities.entityId, externalId: platformIdentities.externalId })
+    .from(platformIdentities)
+    .where(and(eq(platformIdentities.entityType, 'track'), inArray(platformIdentities.entityId, trackIds), eq(platformIdentities.platform, 'spotify'), eq(platformIdentities.status, 'confirmed'), eq(platformIdentities.variant, 'primary')));
+}
+
+/** Tracks with something to poll: a confirmed YouTube video or a Spotify ID. */
+export async function pollableTrackIds(ctx: ServiceContext, trackIds: string[]) {
+  const [videos, spotify] = await Promise.all([confirmedVideos(ctx, trackIds), spotifyPrimaries(ctx, trackIds)]);
+  return new Set([...videos.map((v) => v.trackId), ...spotify.map((s) => s.trackId)]);
+}
+
+/**
+ * Make one confirmed Spotify identity per track the polled one, for tracks
+ * that have Spotify IDs (from a metadata lookup or import) but none chosen.
+ * No request is made. Returns the track IDs that now have a primary.
+ */
+export async function promoteSpotifyPrimaries(ctx: ServiceContext, trackIds: string[]) {
+  if (trackIds.length === 0) return new Set<string>();
+  const have = new Set((await spotifyPrimaries(ctx, trackIds)).map((p) => p.trackId));
+  const rows = await ctx.tx
+    .select({ id: platformIdentities.id, trackId: platformIdentities.entityId })
+    .from(platformIdentities)
+    .where(and(eq(platformIdentities.entityType, 'track'), inArray(platformIdentities.entityId, trackIds.filter((t) => !have.has(t))), eq(platformIdentities.platform, 'spotify'), eq(platformIdentities.status, 'confirmed')))
+    .orderBy(desc(platformIdentities.confidence), asc(platformIdentities.createdAt));
+  for (const r of rows) {
+    if (have.has(r.trackId)) continue;
+    await ctx.tx.update(platformIdentities).set({ variant: 'primary' }).where(eq(platformIdentities.id, r.id));
+    have.add(r.trackId);
+  }
+  return have;
+}
+
 export const TrackListQuery = z.object({ q: z.string().trim().max(100).optional(), status: z.enum(['pending_match', 'tracking', 'paused']).optional() });
 
 export async function listTracked(ctx: ServiceContext, q: z.infer<typeof TrackListQuery> = {}) {
@@ -84,9 +121,10 @@ export async function listTracked(ctx: ServiceContext, q: z.infer<typeof TrackLi
     .limit(1000);
   const ids = rows.map((r) => r.st.trackId);
   if (ids.length === 0) return [];
-  const [names, videos, daily] = await Promise.all([
+  const [names, videos, spotify, daily] = await Promise.all([
     primaryArtistNames(ctx, ids),
     confirmedVideos(ctx, ids),
+    spotifyPrimaries(ctx, ids),
     ctx.tx
       .select({ trackId: streamDaily.trackId, day: streamDaily.day, delta: sql<number>`sum(${streamDaily.delta})::bigint`, total: sql<number>`sum(${streamDaily.total})::bigint` })
       .from(streamDaily)
@@ -102,6 +140,7 @@ export async function listTracked(ctx: ServiceContext, q: z.infer<typeof TrackLi
       isrc: r.isrc,
       artists: names.get(r.st.trackId) ?? [],
       videos: videos.filter((v) => v.trackId === r.st.trackId).length,
+      spotify: spotify.some((p) => p.trackId === r.st.trackId),
       plays28d: days.reduce((a, d) => a + Number(d.delta), 0),
       total: days.length ? Number(days.at(-1)!.total) : null,
       spark: days.map((d) => Number(d.delta)),
@@ -122,12 +161,22 @@ export async function getTracked(ctx: ServiceContext, trackId: string) {
   ctx.assert('streams:read');
   const [row] = await ctx.tx.select({ st: streamTracks, track: tracks }).from(tracks).leftJoin(streamTracks, eq(streamTracks.trackId, tracks.id)).where(eq(tracks.id, trackId));
   if (!row) throw new NotFoundError('Track');
-  const [names, identities, openAlerts] = await Promise.all([
+  const [names, identities, openAlerts, spotScraper] = await Promise.all([
     primaryArtistNames(ctx, [trackId]),
-    ctx.tx.select().from(platformIdentities).where(and(eq(platformIdentities.entityType, 'track'), eq(platformIdentities.entityId, trackId), eq(platformIdentities.platform, 'youtube'))).orderBy(desc(platformIdentities.confidence)),
+    ctx.tx.select().from(platformIdentities).where(and(eq(platformIdentities.entityType, 'track'), eq(platformIdentities.entityId, trackId), inArray(platformIdentities.platform, ['youtube', 'spotify']))).orderBy(desc(platformIdentities.confidence)),
     ctx.tx.select().from(alerts).where(eq(alerts.trackId, trackId)).orderBy(desc(alerts.createdAt)).limit(20),
+    spotScraperConfigured(ctx),
   ]);
-  return { tracked: row.st, track: row.track, artists: names.get(trackId) ?? [], youtube: identities, alerts: openAlerts };
+  return {
+    tracked: row.st,
+    track: row.track,
+    artists: names.get(trackId) ?? [],
+    youtube: identities.filter((i) => i.platform === 'youtube'),
+    // The polled ID first.
+    spotify: identities.filter((i) => i.platform === 'spotify').sort((a, b) => Number(b.variant === 'primary') - Number(a.variant === 'primary')),
+    spotScraper,
+    alerts: openAlerts,
+  };
 }
 
 export async function setTrackStatus(ctx: ServiceContext, trackId: string, status: 'tracking' | 'paused') {
@@ -139,7 +188,7 @@ export async function setTrackStatus(ctx: ServiceContext, trackId: string, statu
       await assertWithinPlan(ctx, 'trackedTracks', await activeTrackCount(ctx));
     }
   }
-  const [row] = await ctx.tx.update(streamTracks).set({ status: status === 'tracking' ? ((await confirmedVideos(ctx, [trackId])).length ? 'tracking' : 'pending_match') : 'paused', nextPollAt: status === 'tracking' ? new Date() : null }).where(eq(streamTracks.trackId, trackId)).returning();
+  const [row] = await ctx.tx.update(streamTracks).set({ status: status === 'tracking' ? ((await pollableTrackIds(ctx, [trackId])).size ? 'tracking' : 'pending_match') : 'paused', nextPollAt: status === 'tracking' ? new Date() : null }).where(eq(streamTracks.trackId, trackId)).returning();
   if (!row) throw new NotFoundError('Tracked track');
   await ctx.audit({ action: status === 'paused' ? 'streams.tracking_paused' : 'streams.tracking_resumed', module: 'streams', targetType: 'track', targetId: trackId });
   return row;
@@ -153,12 +202,12 @@ export async function requestPoll(ctx: ServiceContext, trackId?: string) {
   return { queued: true };
 }
 
-/** Search YouTube again for a track (spends 100 quota units). */
+/** Search YouTube (100 quota units) and Spotify by ISRC again for a track. */
 export async function requestResolve(ctx: ServiceContext, trackId: string) {
   ctx.assert('streams:manage');
   const row = (await ctx.tx.select().from(streamTracks).where(eq(streamTracks.trackId, trackId)))[0] ?? (await registerTrack(ctx, trackId));
   if (!row) throw new NotFoundError('Track');
-  await ctx.tx.update(streamTracks).set({ lastResolvedAt: null, lastError: null }).where(eq(streamTracks.id, row.id));
+  await ctx.tx.update(streamTracks).set({ lastResolvedAt: null, spotifyCheckedAt: null, lastError: null }).where(eq(streamTracks.id, row.id));
   enqueueAfterCommit(ctx, 'streams.resolve-track', { streamTrackId: row.id }, { jobId: `resolve-${row.id}-${Date.now()}`, attempts: 2 });
   return { queued: true };
 }
@@ -214,13 +263,39 @@ export async function addVideo(ctx: ServiceContext, trackId: string, input: z.in
   return identity;
 }
 
+export const SpotifyTrackInput = z.object({ spotify: z.string().trim().min(10).max(300) });
+
+/**
+ * Staff paste the Spotify link of a track; it becomes the ID play counts are
+ * polled through, replacing any earlier choice. The series continues without
+ * a jump: the rollup reads one Spotify ID at a time.
+ */
+export async function setSpotifyTrack(ctx: ServiceContext, trackId: string, input: z.infer<typeof SpotifyTrackInput>) {
+  ctx.assert('streams:manage');
+  const id = spotifyIdFrom(input.spotify, 'track');
+  if (!id) throw new ValidationError('That is not a Spotify track link', { fieldErrors: { spotify: ['Paste an open.spotify.com/track/… link'] } });
+  const tracked = (await ctx.tx.select().from(streamTracks).where(eq(streamTracks.trackId, trackId)))[0] ?? (await registerTrack(ctx, trackId));
+  if (!tracked) throw new NotFoundError('Track');
+  await ctx.tx
+    .update(platformIdentities)
+    .set({ variant: null })
+    .where(and(eq(platformIdentities.entityType, 'track'), eq(platformIdentities.entityId, trackId), eq(platformIdentities.platform, 'spotify'), eq(platformIdentities.variant, 'primary')));
+  const identity = await upsertIdentity(ctx, { entityType: 'track', entityId: trackId, platform: 'spotify', externalId: id, url: `https://open.spotify.com/track/${id}`, source: 'manual', confidence: 1, status: 'confirmed', variant: 'primary' });
+  if (identity.status !== 'confirmed') await setIdentityStatus(ctx, identity.id, 'confirmed');
+  await ctx.tx.update(streamTracks).set({ status: tracked.status === 'paused' ? 'paused' : 'tracking', nextPollAt: new Date() }).where(eq(streamTracks.trackId, trackId));
+  await ctx.audit({ action: 'streams.spotify_set', module: 'streams', targetType: 'track', targetId: trackId, targetLabel: id });
+  enqueueAfterCommit(ctx, 'streams.poll-org', { force: true }, { jobId: `poll-${ctx.orgId}-spotify-${Math.floor(Date.now() / 60_000)}` });
+  return identity;
+}
+
 /* --------------------------------------------------------- recording --- */
 
 /**
  * Append snapshots and refresh the daily rollup of each affected series.
- * The rollup sums the latest reading of every video a track has, and counts
- * a video's growth only from its second reading, so adding a new video never
- * looks like a spike.
+ * YouTube sums the latest reading of every video a track has, and counts a
+ * video's growth only from its second reading, so adding a new video never
+ * looks like a spike. Other polled sources read one ID per track: the latest
+ * reading, with growth only while the ID stays the same.
  */
 export async function recordSnapshots(ctx: ServiceContext, snaps: Snapshot[]) {
   if (snaps.length === 0) return [];
@@ -237,6 +312,7 @@ export async function recordSnapshots(ctx: ServiceContext, snaps: Snapshot[]) {
 async function rollupDay(ctx: ServiceContext, trackId: string, platform: string, source: StreamSource, day: string) {
   const start = `${day}T00:00:00Z`;
   const end = new Date(Date.parse(start) + 86400_000).toISOString();
+  if (source !== 'youtube-data-api') return rollupSingle(ctx, trackId, platform, source, day, start, end);
   const [row] = (await ctx.tx.execute(sql`
     with cur as (
       select distinct on (coalesce(external_id, '')) coalesce(external_id, '') as ext, count
@@ -254,6 +330,33 @@ async function rollupDay(ctx: ServiceContext, trackId: string, platform: string,
     select coalesce(sum(cur.count), 0)::bigint as total,
            coalesce(sum(case when prev.count is null then 0 else greatest(cur.count - prev.count, 0) end), 0)::bigint as delta
     from cur left join prev using (ext)
+  `)) as unknown as Array<{ total: string; delta: string }>;
+  const total = Number(row?.total ?? 0);
+  const delta = Number(row?.delta ?? 0);
+  await ctx.tx
+    .insert(streamDaily)
+    .values({ trackId, platform, source, day, total, delta })
+    .onConflictDoUpdate({ target: [streamDaily.orgId, streamDaily.trackId, streamDaily.platform, streamDaily.source, streamDaily.day], set: { total, delta } });
+  return { total, delta };
+}
+
+/** One running total per track: the newest reading, growth counted only against a reading of the same ID. */
+async function rollupSingle(ctx: ServiceContext, trackId: string, platform: string, source: StreamSource, day: string, start: string, end: string) {
+  const [row] = (await ctx.tx.execute(sql`
+    with cur as (
+      select coalesce(external_id, '') as ext, count from stream_snapshots
+      where track_id = ${trackId} and platform = ${platform} and source = ${source}
+        and captured_at >= ${start}::timestamptz - interval '30 days' and captured_at < ${end}::timestamptz
+      order by captured_at desc limit 1
+    ), prev as (
+      select coalesce(external_id, '') as ext, count from stream_snapshots
+      where track_id = ${trackId} and platform = ${platform} and source = ${source}
+        and captured_at >= ${start}::timestamptz - interval '30 days' and captured_at < ${start}::timestamptz
+      order by captured_at desc limit 1
+    )
+    select coalesce(cur.count, 0)::bigint as total,
+           coalesce(case when prev.ext = cur.ext then greatest(cur.count - prev.count, 0) else 0 end, 0)::bigint as delta
+    from cur left join prev on true
   `)) as unknown as Array<{ total: string; delta: string }>;
   const total = Number(row?.total ?? 0);
   const delta = Number(row?.delta ?? 0);
@@ -332,18 +435,37 @@ function groupSeries(rows: SeriesRow[]) {
   return [...map.values()];
 }
 
+/**
+ * The first day each series has data. That day holds a running total but no
+ * plays figure (growth counts from the second reading), so charts and agents
+ * show it as "no figure" rather than 0.
+ */
+async function seriesStarts(ctx: ServiceContext, trackIds: string[] | ReturnType<typeof primaryTrackIds>) {
+  const rows = await ctx.tx
+    .select({ platform: streamDaily.platform, source: streamDaily.source, first: sql<string>`min(${streamDaily.day})::text` })
+    .from(streamDaily)
+    .where(inArray(streamDaily.trackId, trackIds))
+    .groupBy(streamDaily.platform, streamDaily.source);
+  return (platform: string, source: string) => rows.find((r) => r.platform === platform && r.source === source)?.first ?? null;
+}
+
+const primaryTrackIds = (ctx: ServiceContext, artistId: string) => ctx.tx.select({ id: trackArtists.trackId }).from(trackArtists).where(and(eq(trackArtists.artistId, artistId), eq(trackArtists.role, 'primary')));
+
 /** GET /v1/streams/tracks/:id — one series per platform and source; sources are never merged. */
 export async function trackHistory(ctx: ServiceContext, trackId: string, q: Partial<z.infer<typeof HistoryQuery>> = {}) {
   ctx.assert('streams:read');
   const granularity = q.granularity ?? 'day';
   const b = bucket(granularity);
-  const rows = await ctx.tx
-    .select({ platform: streamDaily.platform, source: streamDaily.source, day: b, total: sql<number>`max(${streamDaily.total})::bigint`, delta: sql<number>`sum(${streamDaily.delta})::bigint` })
-    .from(streamDaily)
-    .where(and(eq(streamDaily.trackId, trackId), gte(streamDaily.day, q.from ?? daysAgo(90)), lte(streamDaily.day, q.to ?? today()), q.platform ? eq(streamDaily.platform, q.platform) : undefined))
-    .groupBy(streamDaily.platform, streamDaily.source, b)
-    .orderBy(b);
-  return { trackId, granularity, series: groupSeries(rows) };
+  const [rows, start] = await Promise.all([
+    ctx.tx
+      .select({ platform: streamDaily.platform, source: streamDaily.source, day: b, total: sql<number>`max(${streamDaily.total})::bigint`, delta: sql<number>`sum(${streamDaily.delta})::bigint` })
+      .from(streamDaily)
+      .where(and(eq(streamDaily.trackId, trackId), gte(streamDaily.day, q.from ?? daysAgo(90)), lte(streamDaily.day, q.to ?? today()), q.platform ? eq(streamDaily.platform, q.platform) : undefined))
+      .groupBy(streamDaily.platform, streamDaily.source, b)
+      .orderBy(b),
+    seriesStarts(ctx, [trackId]),
+  ]);
+  return { trackId, granularity, series: groupSeries(rows).map((s) => ({ ...s, since: start(s.platform, s.source) })) };
 }
 
 /** GET /v1/streams/artists/:id — plays per day across the artist's tracks, plus their top tracks. */
@@ -353,7 +475,7 @@ export async function artistHistory(ctx: ServiceContext, artistId: string, q: Pa
   const b = bucket(granularity);
   const trackIds = ctx.tx.select({ id: trackArtists.trackId }).from(trackArtists).where(and(eq(trackArtists.artistId, artistId), eq(trackArtists.role, 'primary')));
   const where = and(inArray(streamDaily.trackId, trackIds), gte(streamDaily.day, q.from ?? daysAgo(90)), lte(streamDaily.day, q.to ?? today()), q.platform ? eq(streamDaily.platform, q.platform) : undefined);
-  const [rows, top] = await Promise.all([
+  const [rows, top, start] = await Promise.all([
     ctx.tx
       .select({ platform: streamDaily.platform, source: streamDaily.source, day: b, total: sql<number>`sum(${streamDaily.total})::bigint`, delta: sql<number>`sum(${streamDaily.delta})::bigint` })
       .from(streamDaily)
@@ -368,8 +490,9 @@ export async function artistHistory(ctx: ServiceContext, artistId: string, q: Pa
       .groupBy(streamDaily.trackId, tracks.title)
       .orderBy(sql`3 desc`)
       .limit(10),
+    seriesStarts(ctx, primaryTrackIds(ctx, artistId)),
   ]);
-  return { artistId, granularity, series: groupSeries(rows), topTracks: top.map((t) => ({ ...t, plays: Number(t.plays) })) };
+  return { artistId, granularity, series: groupSeries(rows).map((s) => ({ ...s, since: start(s.platform, s.source) })), topTracks: top.map((t) => ({ ...t, plays: Number(t.plays) })) };
 }
 
 export const MoversQuery = z.object({ window: z.enum(['7d', '28d']).default('7d'), limit: z.coerce.number().int().min(1).max(100).default(20) });
@@ -384,6 +507,7 @@ export async function movers(ctx: ServiceContext, q: Partial<z.infer<typeof Move
       title: tracks.title,
       current: sql<number>`coalesce(sum(${streamDaily.delta}) filter (where ${streamDaily.day} > ${daysAgo(days)}), 0)::bigint`,
       previous: sql<number>`coalesce(sum(${streamDaily.delta}) filter (where ${streamDaily.day} <= ${daysAgo(days)}), 0)::bigint`,
+      previousDays: sql<number>`count(*) filter (where ${streamDaily.day} <= ${daysAgo(days)})::int`,
     })
     .from(streamDaily)
     .innerJoin(tracks, eq(tracks.id, streamDaily.trackId))
@@ -393,7 +517,8 @@ export async function movers(ctx: ServiceContext, q: Partial<z.infer<typeof Move
   const all = rows.map((r) => {
     const current = Number(r.current);
     const previous = Number(r.previous);
-    return { trackId: r.trackId, title: r.title, artists: names.get(r.trackId) ?? [], current, previous, change: current - previous, changePct: previous > 0 ? ((current - previous) / previous) * 100 : null };
+    // No readings before this window: the "change" is the track starting to be tracked, not a real gain.
+    return { trackId: r.trackId, title: r.title, artists: names.get(r.trackId) ?? [], current, previous, change: current - previous, changePct: previous > 0 ? ((current - previous) / previous) * 100 : null, newlyTracked: r.previousDays === 0 };
   });
   const limit = q.limit ?? 20;
   return {
@@ -553,11 +678,14 @@ export async function acknowledgeAlert(ctx: ServiceContext, id: string) {
   return row ?? null;
 }
 
-/** Derived numbers for agents: never raw provider payloads (and never anything from Spotify's API). */
+/** Derived numbers for agents: never raw provider payloads, only the daily figures stored here. */
 export async function historyForAgent(ctx: ServiceContext, input: { trackId?: string; artistId?: string; days: number }) {
   const from = daysAgo(input.days);
   const h = input.trackId ? await trackHistory(ctx, input.trackId, { from }) : await artistHistory(ctx, input.artistId!, { from });
+  // The day tracking began has a running total but no plays figure yet; reporting it as 0 reads as a dead day.
+  const firstDay = await seriesStarts(ctx, input.trackId ? [input.trackId] : primaryTrackIds(ctx, input.artistId!));
   return h.series.map((s) => {
+    const first = firstDay(s.platform, s.source);
     const plays = s.points.reduce((a, p) => a + p.delta, 0);
     const last7 = s.points.filter((p) => p.day > daysAgo(7)).reduce((a, p) => a + p.delta, 0);
     const prev7 = s.points.filter((p) => p.day <= daysAgo(7) && p.day > daysAgo(14)).reduce((a, p) => a + p.delta, 0);
@@ -565,11 +693,12 @@ export async function historyForAgent(ctx: ServiceContext, input: { trackId?: st
       platform: s.platform,
       source: s.source,
       kind: s.source === 'statement-import' ? 'units per statement period' : 'plays per day',
+      trackedSince: first,
       total: s.points.at(-1)?.total ?? null,
       playsInWindow: plays,
       last7Days: last7,
       previous7Days: prev7,
-      points: s.points.slice(-60).map((p) => ({ day: p.day, value: s.source === 'statement-import' ? p.total : p.delta })),
+      points: s.points.slice(-60).map((p) => ({ day: p.day, value: s.source === 'statement-import' ? p.total : p.day === first ? null : p.delta })),
     };
   });
 }
@@ -580,7 +709,73 @@ export async function sourceStatus(ctx: ServiceContext) {
   return {
     youtube: rows.some((r) => r.provider === 'youtube') || Boolean(env().YOUTUBE_API_KEY),
     youtubePlatformKey: !rows.some((r) => r.provider === 'youtube') && Boolean(env().YOUTUBE_API_KEY),
+    spotify: await spotScraperConfigured(ctx),
     licensed: rows.some((r) => r.provider === 'licensed_streams'),
+  };
+}
+
+/* -------------------------------------------------- spotify audience --- */
+
+export type ArtistStatsInput = { artistId: string; spotifyArtistId: string; day: string; monthlyListeners: number | null; followers: number | null; worldRank: number | null; topCities: TopCity[]; discoveredOn: DiscoveredOn[] };
+
+/** One row per artist per day; a second reading the same day replaces the first. */
+export async function recordArtistStats(ctx: ServiceContext, rows: ArtistStatsInput[]) {
+  for (const r of rows) {
+    const values = { ...r, topCities: r.topCities.slice(0, 10), discoveredOn: r.discoveredOn.slice(0, 50), capturedAt: new Date() };
+    await ctx.tx
+      .insert(artistSpotifyStats)
+      .values(values)
+      .onConflictDoUpdate({ target: [artistSpotifyStats.orgId, artistSpotifyStats.artistId, artistSpotifyStats.day], set: values });
+  }
+}
+
+/** An artist's Spotify audience: the latest reading, the change over 28 days, and 90 days of monthly listeners. */
+export async function artistAudience(ctx: ServiceContext, artistId: string) {
+  ctx.assert('streams:read');
+  const rows = await ctx.tx
+    .select()
+    .from(artistSpotifyStats)
+    .where(and(eq(artistSpotifyStats.artistId, artistId), gte(artistSpotifyStats.day, daysAgo(90))))
+    .orderBy(asc(artistSpotifyStats.day));
+  const latest = rows.at(-1) ?? null;
+  if (!latest) return null;
+  // The reading closest to 28 days before the latest one.
+  const target = new Date(Date.parse(`${latest.day}T00:00:00Z`) - 28 * 86400_000).toISOString().slice(0, 10);
+  const before = rows.filter((r) => r.day <= target).at(-1) ?? null;
+  const change = (a: number | null | undefined, b: number | null | undefined) => (a != null && b != null ? a - b : null);
+  return {
+    day: latest.day,
+    spotifyArtistId: latest.spotifyArtistId,
+    monthlyListeners: latest.monthlyListeners,
+    followers: latest.followers,
+    worldRank: latest.worldRank,
+    listenersChange28d: change(latest.monthlyListeners, before?.monthlyListeners),
+    followersChange28d: change(latest.followers, before?.followers),
+    comparedTo: before?.day ?? null,
+    topCities: latest.topCities,
+    discoveredOn: latest.discoveredOn,
+    series: rows.filter((r) => r.monthlyListeners != null).map((r) => ({ day: r.day, monthlyListeners: r.monthlyListeners!, followers: r.followers })),
+  };
+}
+
+/** The primary artists of a track, for tools that start from a track. */
+export async function primaryArtistIds(ctx: ServiceContext, trackId: string) {
+  return (await ctx.tx.select({ id: trackArtists.artistId }).from(trackArtists).where(and(eq(trackArtists.trackId, trackId), eq(trackArtists.role, 'primary')))).map((r) => r.id);
+}
+
+/** For agents: the audience numbers only (no playlist owners' account names). */
+export async function audienceForAgent(ctx: ServiceContext, artistId: string) {
+  const a = await artistAudience(ctx, artistId);
+  if (!a) return null;
+  return {
+    asOf: a.day,
+    monthlyListeners: a.monthlyListeners,
+    monthlyListenersChange28d: a.listenersChange28d,
+    followers: a.followers,
+    followersChange28d: a.followersChange28d,
+    worldRank: a.worldRank,
+    topCities: a.topCities.map((c) => ({ city: c.city, country: c.country, listeners: c.listeners })),
+    discoveredOnPlaylists: a.discoveredOn.slice(0, 20).map((p) => ({ name: p.name, curator: p.owner && /^[a-z0-9]{20,}$/.test(p.owner) ? null : p.owner, spotifyUrl: `https://open.spotify.com/playlist/${p.id}` })),
   };
 }
 

@@ -38,7 +38,7 @@ export default async function ArtistDetailPage({ run, params, session, panels, e
       />
       <div className="lc-grid-stats">
         <StatCard label="Releases" icon="album" value={String(extras.releases ?? 0)} note={`${extras.liveReleases ?? 0} live`} />
-        <StatCard label="Streams · 28d" icon="visibility" value={fmt.compact(extras.streams28d ?? null)} note="plays from YouTube and the licensed provider" />
+        <StatCard label="Streams · 28d" icon="visibility" value={fmt.compact(extras.streams28d ?? null)} note="plays from Spotify and YouTube" />
         <StatCard label="Earned · 12m" icon="payments" value={extras.earned12mCents ? fmt.moneyCents(extras.earned12mCents, currency) : '—'} note="net, from imported statements" />
         <StatCard label="Contract" icon="draft" value={<Chip tone={contractTone(extras.contract ?? '—')}>{extras.contract ?? '—'}</Chip>} note={extras.deal ?? undefined} />
       </div>

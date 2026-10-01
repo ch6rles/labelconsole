@@ -19,6 +19,13 @@ export default async function StreamTrackPage({ run, params, session, searchPara
   const st = d.tracked;
   const sum = (days: number) => polled.reduce((a, s) => a + s.points.filter((p) => p.day > new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10)).reduce((x, p) => x + p.delta, 0), 0);
   const yt = polled.find((s) => s.platform === 'youtube');
+  const sp = polled.find((s) => s.platform === 'spotify' && s.source === 'spotscraper');
+  const spPrimary = d.spotify.find((i) => i.variant === 'primary' && i.status === 'confirmed');
+  // One card per source the track actually uses, so the row stays at four.
+  const showSpotify = d.spotScraper || d.spotify.length > 0;
+  const showYouTube = d.youtube.length > 0 || !showSpotify;
+  // The first reading of a series has a total but no plays figure yet.
+  const isFirst = (s: { since: string | null }, day: string) => granularity === 'day' && s.since === day;
   const latestStmt = stmt.flatMap((s) => s.points.map((p) => ({ ...p, platform: s.platform }))).sort((a, b) => b.day.localeCompare(a.day));
   const lastPeriod = latestStmt[0]?.day;
   const months = [...new Set(stmt.flatMap((s) => s.points.map((p) => p.day)))].sort().slice(-12);
@@ -42,8 +49,9 @@ export default async function StreamTrackPage({ run, params, session, searchPara
       />
       {st?.lastError && <InlineNote icon="error">{st.lastError}</InlineNote>}
       <div className="lc-grid-stats">
-        <StatCard label="STATUS" icon="radar" value={st ? (STATUS_CHIP[st.status]?.label ?? st.status) : 'Not tracked'} note={st?.status === 'tracking' ? `${st.tier === 'active' ? 'every 6 h' : 'daily'} · last ${st.lastPolledAt ? fmt.relative(st.lastPolledAt) : 'pending'}` : st?.status === 'pending_match' ? 'waiting for a YouTube match' : '—'} />
-        <StatCard label="YOUTUBE VIEWS" icon="smart_display" value={yt?.points.length ? fmt.compact(yt.points.at(-1)!.total) : '—'} note="total across matched videos" />
+        <StatCard label="STATUS" icon="radar" value={st ? (STATUS_CHIP[st.status]?.label ?? st.status) : 'Not tracked'} note={st?.status === 'tracking' ? `${st.tier === 'active' ? 'every 6 h' : 'daily'} · last ${st.lastPolledAt ? fmt.relative(st.lastPolledAt) : 'pending'}` : st?.status === 'pending_match' ? 'waiting for a Spotify or YouTube match' : '—'} />
+        {showSpotify && <StatCard label="SPOTIFY PLAYS" icon="graphic_eq" value={sp?.points.length ? fmt.compact(sp.points.at(-1)!.total) : '—'} note={spPrimary ? 'all-time, from SpotScraper' : d.spotScraper ? 'no Spotify ID yet' : 'needs a SpotScraper key'} />}
+        {showYouTube && <StatCard label="YOUTUBE VIEWS" icon="smart_display" value={yt?.points.length ? fmt.compact(yt.points.at(-1)!.total) : '—'} note="total across matched videos" />}
         <StatCard label="PLAYS · 7D" icon="trending_up" value={polled.length ? fmt.compact(sum(7)) : '—'} note={`${fmt.compact(sum(28))} over 28 days`} />
         <StatCard label="LAST STATEMENT" icon="receipt_long" value={lastPeriod ? fmt.compact(latestStmt.filter((p) => p.day === lastPeriod).reduce((a, p) => a + p.total, 0)) : '—'} note={lastPeriod ? `units in ${new Date(`${lastPeriod}T00:00:00Z`).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}` : 'no statement lines matched'} />
       </div>
@@ -61,10 +69,10 @@ export default async function StreamTrackPage({ run, params, session, searchPara
         {polled.length ? (
           <>
             <Legend items={polled.map((s, i) => ({ label: seriesName(s.platform, s.source), color: platformColor(s.platform, i) }))} />
-            <LineChart series={polled.map((s, i) => ({ name: seriesName(s.platform, s.source), color: platformColor(s.platform, i), points: s.points.map((p) => ({ x: p.day, y: p.delta })) }))} height={240} />
+            <LineChart series={polled.map((s, i) => ({ name: seriesName(s.platform, s.source), color: platformColor(s.platform, i), points: s.points.filter((p) => !isFirst(s, p.day)).map((p) => ({ x: p.day, y: p.delta })) }))} height={240} />
           </>
         ) : (
-          <EmptyState icon="monitoring" title="No readings yet">{st?.status === 'tracking' ? 'The first poll records the running total; plays per day start from the second reading.' : 'Readings start once the track has a confirmed YouTube video or a licensed provider is set up.'}</EmptyState>
+          <EmptyState icon="monitoring" title="No readings yet">{st?.status === 'tracking' ? 'The first poll records the running total; plays per day start from the second reading.' : 'Readings start once the track has a Spotify ID (found by ISRC with a SpotScraper key) or a confirmed YouTube video.'}</EmptyState>
         )}
       </Card>
 
@@ -79,6 +87,38 @@ export default async function StreamTrackPage({ run, params, session, searchPara
       )}
 
       <div className="lc-grid-2">
+        <Card
+          title="Spotify"
+          sub="Play counts are read from one Spotify ID per track, found by ISRC. Re-releases share the count, so they are never added together."
+          actions={
+            canManage && (
+              <FormModal
+                title="Set the Spotify track"
+                description="Paste this track's Spotify link. Play counts are read from it from now on; the series continues without a jump."
+                trigger={{ label: spPrimary ? 'Change' : 'Set link', icon: spPrimary ? 'edit' : 'add', size: 'sm' }}
+                endpoint={`/streams/registry/${d.track.id}/spotify`}
+                fields={[{ name: 'spotify', label: 'Spotify link', required: true, full: true, placeholder: 'https://open.spotify.com/track/…' }]}
+                columns={1}
+                success="Spotify track set"
+              />
+            )
+          }
+        >
+          {!d.spotScraper && <span className="lc-muted" style={{ fontSize: 13 }}>Spotify play counts need a SpotScraper key under Settings → Integrations.</span>}
+          {d.spotScraper && d.spotify.length === 0 && <span className="lc-muted" style={{ fontSize: 13 }}>{d.track.isrc ? 'Not matched yet: the next poll searches Spotify by ISRC.' : 'No ISRC on this track: add one in the catalogue, or paste the Spotify link.'}</span>}
+          {d.spotify.map((i) => (
+            <KV
+              key={i.id}
+              k={
+                <span className="lc-cell-stack">
+                  <a href={i.url ?? `https://open.spotify.com/track/${i.externalId}`} target="_blank" rel="noreferrer" className="lc-mono" style={{ fontSize: 13 }}>{i.externalId}</a>
+                  <span className="lc-cell-sub">{i.source === 'spotscraper' ? 'matched by ISRC' : i.source === 'manual' ? 'set by staff' : `from ${i.source}`}</span>
+                </span>
+              }
+              v={<span className={i.variant === 'primary' && i.status === 'confirmed' ? 'lc-chip lc-chip--blue' : 'lc-chip lc-chip--muted'}>{i.status !== 'confirmed' ? fmt.titleCase(i.status.replace('_', ' ')) : i.variant === 'primary' ? 'Polled' : 'Other release'}</span>}
+            />
+          ))}
+        </Card>
         <Card
           title="YouTube videos"
           sub="Views are summed across confirmed videos: the Topic art track (YouTube Music) and the official video."
@@ -113,13 +153,13 @@ export default async function StreamTrackPage({ run, params, session, searchPara
       {polled.length > 0 && (
         <DataTable
           title="Latest readings"
-          rows={polled.flatMap((s) => s.points.map((p) => ({ ...p, platform: s.platform, source: s.source }))).sort((a, b) => b.day.localeCompare(a.day)).slice(0, 14)}
+          rows={polled.flatMap((s) => s.points.map((p) => ({ ...p, platform: s.platform, source: s.source, first: isFirst(s, p.day) }))).sort((a, b) => b.day.localeCompare(a.day)).slice(0, 14)}
           rowKey={(r) => `${r.platform}-${r.source}-${r.day}`}
           minWidth={620}
           columns={[
             { key: 'd', header: granularity === 'day' ? 'Day' : granularity === 'week' ? 'Week of' : 'Month', width: '140px', render: (r) => <span className="lc-mono" style={{ fontSize: 12 }}>{fmt.date(r.day)}</span> },
             { key: 's', header: 'Series', width: 'minmax(180px,1fr)', render: (r) => seriesName(r.platform, r.source) },
-            { key: 'p', header: 'Plays', width: '110px', align: 'right', render: (r) => <span className="lc-cell-num">{fmt.int(r.delta)}</span> },
+            { key: 'p', header: 'Plays', width: '110px', align: 'right', render: (r) => (r.first ? <span className="lc-cell-sub" title="Tracking started: plays count from the next reading">first reading</span> : <span className="lc-cell-num">{fmt.int(r.delta)}</span>) },
             { key: 't', header: 'Running total', width: '140px', align: 'right', render: (r) => <span className="lc-cell-num lc-muted">{fmt.int(r.total)}</span> },
           ]}
         />

@@ -1,0 +1,34 @@
+{
+ "data": {
+  "id": "4uLU6hMCjMI75M1A2tKUQC",
+  "uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+  "name": "Never Gonna Give You Up",
+  "metadata": {
+   "explicit": false,
+   "isPlayable": true,
+   "durationMs": 213573,
+   "trackNumber": 1
+  },
+  "statistics": {
+   "playCount": 1185218315
+  },
+  "artists": [
+   {
+    "id": "0gxyHStUsqpMadRV0Di1Qt",
+    "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+    "name": "Rick Astley"
+   }
+  ],
+  "album": {
+   "id": "6N9PS4QXF1D0OWPk0Sxtb4",
+   "uri": "spotify:album:6N9PS4QXF1D0OWPk0Sxtb4",
+   "name": "Whenever You Need Somebody",
+   "copyright": "(P) 1987 Sony Music Entertainment UK Limited under exclusive license to BMG Rights Management (UK) Limited"
+  },
+  "popularity": 7,
+  "isrc": null
+ },
+ "type": "track",
+ "success": true,
+ "status": 200
+}

@@ -3,7 +3,7 @@ import { manifest } from './manifest';
 import StreamAlertsPage from './ui/alerts';
 import StreamMatchingPage from './ui/matching';
 import StreamsOverviewPage from './ui/overview';
-import { artistStreamsPanel, trackStreamsPanel } from './ui/panels';
+import { artistAudiencePanel, artistStreamsPanel, trackStreamsPanel } from './ui/panels';
 import StreamTrackPage from './ui/track-detail';
 import StreamTracksPage from './ui/tracks';
 
@@ -19,5 +19,6 @@ export default defineWeb({
   panels: [
     { id: 'streams-track', entityType: 'track', title: 'Streams', order: 15, permission: 'streams:read', component: trackStreamsPanel },
     { id: 'streams-artist', entityType: 'artist', title: 'Streams', order: 15, permission: 'streams:read', component: artistStreamsPanel },
+    { id: 'streams-artist-audience', entityType: 'artist', title: 'Spotify audience', order: 16, permission: 'streams:read', component: artistAudiencePanel },
   ],
 });

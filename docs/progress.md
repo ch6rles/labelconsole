@@ -9,7 +9,7 @@
 | 1 | Foundation: pnpm monorepo, core platform (tenancy + RLS, auth/sessions, permissions, vault, audit, outbox events, BullMQ queues, worker service, SSE realtime, storage), design system, console shell | Done |
 | 2 | Catalogue + in-house metadata lookup (`POST /v1/metadata/resolve`, distributor inference, bulk import, demos + public intake) | Done |
 | 3 | People, Drive, Documents (contracts with AI term review, statements, royalties, key dates) | Done |
-| 4 | Streams (YouTube Data API adapter, statement-import adapter, licensed-provider interface, snapshots, rollups, alerts) | Done |
+| 4 | Streams (YouTube Data API adapter, Spotify play counts via SpotScraper, statement-import adapter, licensed-provider interface, snapshots, rollups, alerts) | Done |
 | 5 | Network (contacts, interactions, playlists) + Marketing (campaigns, pipeline boards, outreach, sketchboards) | Done |
 | 6 | Agent system (orchestrator, checkpointed runtime, tools, memory, triggers, approvals, budgets, delegation, kill switch, 8 agent types) + Inbox approvals page | Done |
 | 7 | Hardening: load tests, backups and restore drill, observability, billing (plan limits), onboarding, dev seed, Docker, docs | Done |
@@ -84,7 +84,7 @@
 - **Budgets:** per run (summed across the delegation tree), per agent per day, and a label-wide monthly cap (Settings → Workspace). Checked before each model call, so a run stops before overspending (`budget_exceeded`).
 - **Delegation:** `agents_delegate_task` starts a child run and parks the parent in `waiting_child` until the child finishes. The child can only do what both agents may do. The plan tree is shown on the run page.
 - **Memory:** facts, outcomes and preferences per agent or shared by all agents. Duplicates bump importance. Staff can add, correct and delete memories on Agents → Memory.
-  - **Hybrid recall:** semantic similarity × 4 + full-text rank × 4 + importance + recency.
+  - **Hybrid recall:** relevance × 6 + full-text rank × 4 + importance + recency. Relevance is cosine similarity above a 0.2 noise floor, scaled by 0.5. Calibrated on real Voyage scores: unrelated texts land around 0.15–0.3 and related ones 0.4–0.75. So a clearly relevant memory outranks an unrelated one of any importance.
   - **Embeddings:** Voyage AI (`voyage-4`, 1024 dimensions), using the label's own key from Settings → Integrations or the platform `VOYAGE_API_KEY`. New and corrected memories are embedded by a background job (`agents.embed-memories`) shortly after commit, with a 15-minute sweep as backstop.
   - **Model changes:** each vector records the model that made it (migration `0002`). After a model change everything is re-embedded, and vectors from another model are never compared.
   - **Fallback:** without a key, or when Voyage fails, recall falls back to full-text search.
@@ -153,22 +153,46 @@
 - **Anthropic workspace keys:** personal keys that span several workspaces need a workspace to bill. Set `ANTHROPIC_WORKSPACE_ID` (platform), or the Workspace ID field on the label's Anthropic integration, and every request carries the `anthropic-workspace-id` header.
 - **Tests:** 125 passing, including semantic memory (embedding, re-embedding, fallback, stale-write protection) and the Voyage client contract. Also the load test and the restore drill.
 
+## SpotScraper (Spotify data)
+
+The owner chose [SpotScraper](https://spotscraper.readme.io) for Spotify data. Built from its API reference and checked against live responses (where they differ from the reference, the client accepts both). The client is `packages/core/src/spotscraper.ts`: an `x-api-key` header, a shared Redis rate limit, and normalised types. Raw responses never leave that file. Podcast, audiobook and user endpoints exist but aren't wrapped; a label has no use for them.
+
+- **Key:** the label's own (Settings → Integrations → SpotScraper), else the platform `SPOTSCRAPER_API_KEY`. SpotScraper bills per request ($0.0005 at the time of writing). Every request is counted in the label's `spotscraper_requests` usage counter.
+- **Spotify play counts (Streams):** a new polled source, `spotscraper`, with platform `spotify`.
+  - **Matching:** each track is matched by ISRC search, preferring the release by the track's own artist, then the most popular. An exact ISRC match needs no review. A Spotify ID the catalogue already knows is reused without a request. Unmatched ISRCs are searched again weekly.
+  - **Polling:** one request per track per poll, at the usual cadence (every 6 hours for active tracks, daily for catalogue).
+  - **One ID per track:** a track is polled through exactly one Spotify ID (identity variant `primary`). Re-releases share the ISRC and Spotify's merged count, so polling several would double count.
+  - **Staff links:** staff can paste the right Spotify link. The rollup for single-ID sources reads one ID at a time, so switching IDs continues the series without doubling the total or showing a fake spike.
+  - **No YouTube needed:** tracks with only a Spotify ID are tracked.
+- **First readings:** the first day of any series has a running total but no plays figure. The track page, charts and agents show it as such rather than as 0. Movers flag `newlyTracked` so a track's first readings aren't presented as a gain.
+- **Artist audience (People and Streams):** a daily job reads monthly listeners, followers, world rank, top cities and "discovered on" playlists for every artist with a Spotify artist ID. It costs two requests per artist, and results are stored in `artist_spotify_stats` (migration `0003`). Artist pages show a Spotify audience panel with 28-day changes.
+- **Credits (Catalogue):** "From Spotify" on a track, or "Credits from Spotify" on the tracks list (for every track without credits).
+  - Credits are added without duplicates.
+  - Roster artists are linked by name or alias.
+  - The "No credits" delivery blocker clears.
+- **Metadata lookup:** SpotScraper is a lookup source, ranked just below the Spotify Web API.
+  - By ISRC: the track, then its album for UPC, label, release date, ℗ line and tracklist.
+  - By Spotify link: works without Spotify Web API credentials.
+- **Playlists (Network):** follower counts for Spotify playlists are refreshed weekly, when a playlist is added, or on demand. Adding a playlist by link fills in its ID.
+- **Agents:** they only ever see derived numbers.
+  - `streams_get_history` reports the `spotscraper` source.
+  - `streams_artist_audience` (by artist or track) gives audience numbers and discovered-on playlists. Listener account names are dropped.
+  - `streams_spotify_artist_lookup` checks any artist's audience by profile link; A&R Scout uses it for demos.
+- **Verified live** against the real API: ISRC match, play count, 7 credits, artist audience, playlist followers, and a real agent run answering from the stored numbers.
+- **Tests:** 144 passing. They cover client parsing against recorded live responses, matching, single-ID rollups, the missing-key path, audience, credits, playlists and the metadata source.
+
 ## Next steps
 
-1. Allow `spotscraper.readme.io`, `api.spotscraper.com` and `api.voyageai.com` in the environment's network access, then build the SpotScraper integration from its docs.
-2. Decide the open items below; each has its integration point ready.
-3. Run the restore drill and the load test against staging infrastructure, and record the numbers in `docs/operations.md`.
-4. Set real plan limits in `packages/core/src/plans.ts` once pricing is decided.
+1. Decide the open items below; each has its integration point ready.
+2. Run the restore drill and the load test against staging infrastructure, and record the numbers in `docs/operations.md`.
+3. Set real plan limits in `packages/core/src/plans.ts` once pricing is decided.
 
 ## Open decisions
 
 These need the owner. Nothing paid was added without asking.
 
-- **Spotify data: SpotScraper (decided by the owner).** It will supply play counts, track credits and ISRC lookup through the licensed-source adapter (`modules/streams/sources/licensed.ts`) and metadata resolution. **Blocked:** the environment's network policy denies `spotscraper.readme.io` and `api.spotscraper.com`, so neither the docs nor the API can be read, and nothing is built from guesses.
-- **API keys:**
-  - **Anthropic:** the key is in place but needs a workspace ID (`wrkspc_…`), or a workspace-scoped key.
-  - **Voyage AI:** needed for semantic memory, and `api.voyageai.com` must be allowed.
-  - **YouTube Data API:** needed for stream polling.
+- **API keys:** Anthropic, Voyage AI and SpotScraper are set and verified live. A YouTube Data API key is still needed for YouTube views.
+- **Spotify data source:** SpotScraper was chosen by the owner. It most likely works by scraping Spotify, which the original spec ruled out; that trade-off is the owner's call. A licensed vendor can still be added later through `modules/streams/sources/licensed.ts`.
 - **Real plan limits.** No payment provider is needed while the owner is the only user. Limits are placeholders in `packages/core/src/plans.ts`.
 - **Error tracking and tracing** (Sentry, or an OpenTelemetry backend such as Grafana Tempo or Honeycomb). Metrics, dashboards and alerts are in place.
 - **Spotify Web API extended access**, or rely on Deezer, MusicBrainz and Apple for metadata (current default).

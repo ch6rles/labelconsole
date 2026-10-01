@@ -64,6 +64,8 @@ export const routes = defineRoutes('catalogue', [
   route({ method: 'GET', path: '/catalogue/splits', permission: 'catalogue:read', handler: (ctx) => svc.listSplitSheets(ctx) }),
 
   /* identities */
+  route({ method: 'POST', path: '/catalogue/tracks/:id/credits/import', permission: 'catalogue:write', handler: (ctx, req) => svc.requestCreditImport(ctx, [req.params.id]) }),
+  route({ method: 'POST', path: '/catalogue/credits/import', permission: 'catalogue:write', handler: (ctx) => svc.requestCreditImport(ctx) }),
   route({ method: 'POST', path: '/catalogue/identities', permission: 'catalogue:write', body: svc.IdentityInput, handler: (ctx, req) => svc.upsertIdentity(ctx, req.body) }),
   route({ method: 'PATCH', path: '/catalogue/identities/:id', permission: 'catalogue:write', body: z.object({ status: z.enum(['confirmed', 'rejected']) }), handler: (ctx, req) => svc.reviewIdentity(ctx, req.params.id, req.body.status) }),
 

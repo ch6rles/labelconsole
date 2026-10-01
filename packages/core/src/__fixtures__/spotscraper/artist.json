@@ -1,0 +1,41 @@
+{
+ "data": {
+  "type": "artist",
+  "id": "0gxyHStUsqpMadRV0Di1Qt",
+  "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+  "name": "Rick Astley",
+  "metadata": {
+   "verified": true
+  },
+  "statistics": {
+   "monthlyListeners": 8575581,
+   "followers": 1617392,
+   "worldRank": 0,
+   "topCities": [
+    {
+     "city": "Mexico City",
+     "country": "MX",
+     "region": "CMX",
+     "listenerCount": 191746
+    },
+    {
+     "city": "Santiago",
+     "country": "CL",
+     "region": "RM",
+     "listenerCount": 182060
+    },
+    {
+     "city": "São Paulo",
+     "country": "BR",
+     "region": "SP",
+     "listenerCount": 159387
+    }
+   ]
+  },
+  "popularity": 67,
+  "genres": []
+ },
+ "type": "artist",
+ "success": true,
+ "status": 200
+}

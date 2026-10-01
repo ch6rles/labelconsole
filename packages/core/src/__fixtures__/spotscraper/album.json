@@ -1,0 +1,79 @@
+{
+ "data": {
+  "id": "6N9PS4QXF1D0OWPk0Sxtb4",
+  "uri": "spotify:album:6N9PS4QXF1D0OWPk0Sxtb4",
+  "name": "Whenever You Need Somebody",
+  "metadata": {
+   "label": "Sony Music CG",
+   "copyright": "(P) 1987 Sony Music Entertainment UK Limited under exclusive license to BMG Rights Management (UK) Limited",
+   "releasedOn": "1987-11-12T00:00:00.000Z",
+   "discCount": 1
+  },
+  "artists": [],
+  "tracks": {
+   "total": 10,
+   "items": [
+    {
+     "id": "4uLU6hMCjMI75M1A2tKUQC",
+     "uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+     "name": "Never Gonna Give You Up",
+     "metadata": {
+      "durationMs": 213573,
+      "trackNumber": 1
+     },
+     "statistics": {
+      "playCount": 1185218315
+     },
+     "artists": [
+      {
+       "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+       "name": "Rick Astley"
+      }
+     ]
+    },
+    {
+     "id": "6aiKIFjPwa3UvDCD5ecoJj",
+     "uri": "spotify:track:6aiKIFjPwa3UvDCD5ecoJj",
+     "name": "Whenever You Need Somebody",
+     "metadata": {
+      "durationMs": 233666,
+      "trackNumber": 2
+     },
+     "statistics": {
+      "playCount": 24368371
+     },
+     "artists": [
+      {
+       "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+       "name": "Rick Astley"
+      }
+     ]
+    },
+    {
+     "id": "76QJgXPE3oc1cnkE4PFHEn",
+     "uri": "spotify:track:76QJgXPE3oc1cnkE4PFHEn",
+     "name": "Together Forever",
+     "metadata": {
+      "durationMs": 205533,
+      "trackNumber": 3
+     },
+     "statistics": {
+      "playCount": 215355882
+     },
+     "artists": [
+      {
+       "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+       "name": "Rick Astley"
+      }
+     ]
+    }
+   ]
+  },
+  "popularity": 4,
+  "upc": "035627515026",
+  "ean": null
+ },
+ "type": "album",
+ "success": true,
+ "status": 200
+}

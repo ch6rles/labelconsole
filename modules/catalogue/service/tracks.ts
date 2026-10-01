@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { patchOf } from '@labelconsole/core/zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { NotFoundError, ValidationError } from '@labelconsole/core/errors';
+import { enqueueAfterCommit } from '@labelconsole/core/queue';
+import { spotScraperConfigured } from '@labelconsole/core/spotscraper';
 import { artists } from '@labelconsole/people/schema';
 import { credits, platformIdentities, releaseTracks, releases, splitParties, splitSheets, trackArtists, tracks, type Track } from '../schema';
 import { isrcField } from './shared';
@@ -168,6 +170,55 @@ export async function removeCredit(ctx: ServiceContext, creditId: string) {
   if (!row) throw new NotFoundError('Credit');
   await recomputeBlockers(ctx, row.trackId);
   await ctx.audit({ action: 'credit.removed', module: 'catalogue', targetType: 'track', targetId: row.trackId, before: { name: row.name, role: row.role } });
+}
+
+/**
+ * Queue a credits import from Spotify (SpotScraper) for some tracks, or for
+ * every track that has no credits yet. Runs in the worker: the key may be in
+ * the vault, and requests never run inside a transaction.
+ */
+export async function requestCreditImport(ctx: ServiceContext, trackIds?: string[]) {
+  ctx.assert('catalogue:write');
+  if (!(await spotScraperConfigured(ctx))) throw new ValidationError('Importing credits from Spotify needs a SpotScraper key under Settings → Integrations');
+  if (trackIds?.length) for (const id of trackIds) await getTrackRow(ctx, id);
+  enqueueAfterCommit(ctx, 'catalogue.import-credits', { trackIds: trackIds ?? null }, { jobId: `credits-${ctx.orgId}-${trackIds?.length === 1 ? trackIds[0] : 'missing'}-${Math.floor(Date.now() / 60_000)}`, attempts: 3, backoff: { type: 'exponential', delay: 30_000 } });
+  return { queued: true };
+}
+
+/** Tracks with no credits yet, for a bulk import. */
+export async function tracksWithoutCredits(ctx: ServiceContext, limit = 200) {
+  return ctx.tx
+    .select({ id: tracks.id })
+    .from(tracks)
+    .where(sql`not exists (select 1 from credits c where c.track_id = ${tracks.id})`)
+    .orderBy(desc(tracks.createdAt))
+    .limit(limit);
+}
+
+/**
+ * Add credits read from Spotify that the track doesn't list yet (same name and
+ * role, ignoring case), linking roster artists by name or alias.
+ */
+export async function addImportedCredits(ctx: ServiceContext, trackId: string, imported: Array<{ name: string; role: string }>) {
+  const t = await getTrackRow(ctx, trackId);
+  const key = (name: string, role: string) => `${name.trim().toLowerCase()}|${role.trim().toLowerCase()}`;
+  const seen = new Set((await ctx.tx.select({ name: credits.name, role: credits.role }).from(credits).where(eq(credits.trackId, trackId))).map((c) => key(c.name, c.role)));
+  const roster = await ctx.tx.select({ id: artists.id, name: artists.name, aliases: artists.aliases }).from(artists);
+  const artistFor = (name: string) => roster.find((a) => [a.name, ...a.aliases].some((n) => n.trim().toLowerCase() === name.trim().toLowerCase()))?.id ?? null;
+  const added: Array<{ name: string; role: string }> = [];
+  for (const c of imported) {
+    const name = c.name.trim().slice(0, 200);
+    const role = c.role.trim().slice(0, 80);
+    if (!name || !role || seen.has(key(name, role))) continue;
+    seen.add(key(name, role));
+    await ctx.tx.insert(credits).values({ trackId, name, role, artistId: artistFor(name) });
+    added.push({ name, role });
+  }
+  if (added.length) {
+    await recomputeBlockers(ctx, trackId);
+    await ctx.audit({ action: 'credits.imported', module: 'catalogue', targetType: 'track', targetId: trackId, targetLabel: t.title, after: { source: 'spotify', added } });
+  }
+  return { added: added.length, skipped: imported.length - added.length };
 }
 
 /* ------------------------------------------------------------- splits -- */

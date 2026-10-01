@@ -62,6 +62,7 @@ Set in the environment (see `.env.example`). The app refuses to start if a requi
 | `ANTHROPIC_WORKSPACE_ID` | | Only for a personal key that isn't scoped to one workspace: the workspace to bill (`wrkspc_…`), sent as `anthropic-workspace-id` |
 | `VOYAGE_API_KEY` | for semantic memory | Voyage AI embeddings for agent memory; labels can add their own. Without it, recall uses full-text search only |
 | `VOYAGE_MODEL` | | Embedding model (default `voyage-4`; must produce 1024 dimensions). Changing it re-embeds every memory in the background |
+| `SPOTSCRAPER_API_KEY` | for Spotify data | Spotify play counts, credits, ISRC search, artist audiences and playlist followers. Labels can add their own. Billed per request; usage is counted per label as `spotscraper_requests` |
 | `YOUTUBE_API_KEY` | for stream tracking | Platform default; labels can add their own. 10,000 units/day per Google project by default; request more before many labels onboard |
 | `METRICS_TOKEN` | | Enables `/api/metrics` with this bearer token |
 | `CLAMAV_HOST`, `CLAMAV_PORT` | | Upload virus scanning via clamd; without it files are marked "not scanned" |
@@ -127,6 +128,7 @@ Run backups on a schedule (cron, a Kubernetes CronJob) with a `pg_dump` that mat
 | `StreamPollsOverdue` | `streams.poll-org` job logs | YouTube quota exhausted (resets at midnight Pacific; request more quota) or the key is missing or revoked |
 | Agent runs refused with "No Anthropic API key" | Settings → Integrations | Add the label's key, or set `ANTHROPIC_API_KEY` for the platform |
 | Agent runs fail with "API key is not scoped to a workspace" | Settings → Integrations → Anthropic | Fill in Workspace ID (`wrkspc_…`), or set `ANTHROPIC_WORKSPACE_ID`, or use a workspace-scoped key |
+| Tracks say "Add a SpotScraper key…", or Spotify plays stop | Settings → Integrations → SpotScraper | Add a key or set `SPOTSCRAPER_API_KEY`. "SpotScraper refused the API key" means the key was rejected |
 | Memory page says "semantic recall off", or `lc_agent_memories_unembedded` keeps growing | Settings → Integrations → Voyage AI | Add a key or set `VOYAGE_API_KEY`; check the worker can reach `api.voyageai.com` |
 | A label hits a plan limit (402 `plan_limit`) | Settings → Plan & usage | Change the label's plan (`organizations.plan`) or free up seats, tracks or storage. Limits live in `packages/core/src/plans.ts` |
 | Changing the vault master key | `verifyVault()` | Not automated yet: unwrap each label key with the old key and re-wrap it with the new one, then run the restore drill with the new key |

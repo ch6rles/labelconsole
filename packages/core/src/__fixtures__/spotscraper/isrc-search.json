@@ -1,0 +1,159 @@
+{
+ "data": {
+  "tracks": [
+   {
+    "id": "4PTG3Z6ehGkBFwjybzWkR8",
+    "uri": "spotify:track:4PTG3Z6ehGkBFwjybzWkR8",
+    "name": "Never Gonna Give You Up",
+    "metadata": {
+     "explicit": false,
+     "isPlayable": true,
+     "durationMs": 213573,
+     "trackNumber": 1
+    },
+    "statistics": {
+     "playCount": 1185218315
+    },
+    "artists": [
+     {
+      "id": "0gxyHStUsqpMadRV0Di1Qt",
+      "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+      "name": "Rick Astley"
+     }
+    ],
+    "album": {
+     "id": "6eUW0wxWtzkFdaEFsTJto6",
+     "uri": "spotify:album:6eUW0wxWtzkFdaEFsTJto6",
+     "name": "Whenever You Need Somebody",
+     "copyright": "1987 BMG Rights Management (UK) Limited"
+    },
+    "popularity": 83,
+    "isrc": "GBARL9300135"
+   },
+   {
+    "id": "4L7qMw8HI3vM57hHRMyb4Y",
+    "uri": "spotify:track:4L7qMw8HI3vM57hHRMyb4Y",
+    "name": "Never Gonna Give You Up",
+    "metadata": {
+     "explicit": false,
+     "isPlayable": true,
+     "durationMs": 213960,
+     "trackNumber": 2
+    },
+    "statistics": {
+     "playCount": 1185218315
+    },
+    "artists": [
+     {
+      "id": "0gxyHStUsqpMadRV0Di1Qt",
+      "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+      "name": "Rick Astley"
+     }
+    ],
+    "album": {
+     "id": "6CWdaSQN5rsdDkOrhFcZ0E",
+     "uri": "spotify:album:6CWdaSQN5rsdDkOrhFcZ0E",
+     "name": "The Best of Me",
+     "copyright": "2019 BMG Rights Management (UK) Limited"
+    },
+    "popularity": 39,
+    "isrc": "GBARL9300135"
+   },
+   {
+    "id": "1lO9fEwLRExY4rLtzdKaew",
+    "uri": "spotify:track:1lO9fEwLRExY4rLtzdKaew",
+    "name": "Never Gonna Give You Up",
+    "metadata": {
+     "explicit": false,
+     "isPlayable": true,
+     "durationMs": 214720,
+     "trackNumber": 1
+    },
+    "statistics": {
+     "playCount": 1185218315
+    },
+    "artists": [
+     {
+      "id": "0gxyHStUsqpMadRV0Di1Qt",
+      "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+      "name": "Rick Astley"
+     }
+    ],
+    "album": {
+     "id": "5PHoa5MzLs6pJ3mPIfjftC",
+     "uri": "spotify:album:5PHoa5MzLs6pJ3mPIfjftC",
+     "name": "3 Originals",
+     "copyright": "2002 BMG Rights Management (UK) Limited"
+    },
+    "popularity": 22,
+    "isrc": "GBARL9300135"
+   },
+   {
+    "id": "1EZx2d5h6OfBwRfORsdU8j",
+    "uri": "spotify:track:1EZx2d5h6OfBwRfORsdU8j",
+    "name": "Never Gonna Give You Up",
+    "metadata": {
+     "explicit": false,
+     "isPlayable": true,
+     "durationMs": 212400,
+     "trackNumber": 5
+    },
+    "statistics": {
+     "playCount": 1185218315
+    },
+    "artists": [
+     {
+      "id": "0gxyHStUsqpMadRV0Di1Qt",
+      "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+      "name": "Rick Astley"
+     }
+    ],
+    "album": {
+     "id": "2ez9egymT5MEHIFGRuAPht",
+     "uri": "spotify:album:2ez9egymT5MEHIFGRuAPht",
+     "name": "Ultimate Summer BBQ",
+     "copyright": "2022 Countdown Media GmbH, a BMG company"
+    },
+    "popularity": 15,
+    "isrc": "GBARL9300135"
+   },
+   {
+    "id": "27Snz8YoSOHlEOoU5gM0bc",
+    "uri": "spotify:track:27Snz8YoSOHlEOoU5gM0bc",
+    "name": "Never Gonna Give You Up",
+    "metadata": {
+     "explicit": false,
+     "isPlayable": true,
+     "durationMs": 213960,
+     "trackNumber": 2
+    },
+    "statistics": {
+     "playCount": 1185218315
+    },
+    "artists": [
+     {
+      "id": "0gxyHStUsqpMadRV0Di1Qt",
+      "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+      "name": "Rick Astley"
+     }
+    ],
+    "album": {
+     "id": "6C55u1I4oqut6X97zIh8m4",
+     "uri": "spotify:album:6C55u1I4oqut6X97zIh8m4",
+     "name": "The Best Of Me: Never Edition",
+     "copyright": "2024 BMG Rights Management (UK) Limited"
+    },
+    "popularity": 10,
+    "isrc": "GBARL9300135"
+   }
+  ],
+  "pagingInfo": {
+   "limit": 0,
+   "nextOffset": null
+  },
+  "totalCount": 5
+ },
+ "type": "track_search_results",
+ "success": true,
+ "status": 200
+}

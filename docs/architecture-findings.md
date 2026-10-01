@@ -56,7 +56,8 @@ Turning a module off for a label (or a plan that lacks it) removes its nav, its 
 | Auth.js or Clerk if starting fresh | Own session auth | Org-aware sessions and permission sets are central; avoids a paid dependency |
 | Stream snapshots "partitioned by month or stored in TimescaleDB" | Native Postgres monthly partitions, maintained by a daily job | No extra extension to operate |
 | Long-term memories "stored with embeddings (pgvector), retrieved by relevance" | Memories are embedded in the background with Voyage AI. Recall ranks by cosine similarity plus full-text rank, then importance and recency | Embedding outside the write transaction keeps writes fast and never blocks on the provider. Without a key, or when Voyage fails, recall falls back to full-text search, so memory always works |
-| Licensed stream-data provider adapter | Interface and registry only | The vendor isn't chosen; the plan says to ask first |
+| "Do NOT scrape Spotify"; Spotify counts from a licensed vendor | Spotify play counts, credits, ISRC search, artist audiences and playlist followers come from SpotScraper, a third-party API | The owner's decision. SpotScraper most likely scrapes Spotify. It is isolated behind one client (`packages/core/src/spotscraper.ts`) and its own stream source, so it can be swapped for a licensed vendor without touching the rest |
+| Licensed stream-data provider adapter | Interface and registry only | Kept for a licensed vendor alongside SpotScraper |
 | Spotify Web API in metadata lookup | Adapter present, used only with the label's own credentials | Commercial use needs extended access; Deezer, MusicBrainz and Apple cover ISRC/UPC |
 | Observability: OpenTelemetry traces, Sentry | Structured logs (pino), Prometheus metrics, Grafana dashboard, alert rules, deep health check | Sentry is a paid service and a tracing backend is a choice to make; metrics cover dashboards and alerting now |
 | Billing | Plan tiers gate modules; per-plan limits on seats, tracked tracks and storage, enforced when something is added; usage on Settings → Plan & usage | Taking payments needs a payment provider (paid); limits are placeholders until pricing is set |
@@ -72,4 +73,5 @@ Turning a module off for a label (or a plan that lacks it) removes its nav, its 
 - **Audit entries for sensitive records set `readPermission`** (for example `documents:read_confidential`), so the activity feed only shows them to people who could open the record. Settings entries need `settings:audit`.
 - **Role changes stay within the actor's own access.** Nobody can assign, change or remove a role that holds permissions they don't have.
 - **Every permission key must be declared by a module.** A unit test fails on undeclared keys, because a typo silently hides a feature.
-- **Agent tools never see secrets or raw Spotify responses.** They receive credential handles and derived numbers.
+- **Agent tools never see secrets or raw Spotify responses.** They receive credential handles and derived numbers. SpotScraper responses are normalised inside its client and stored as numbers; tools read those.
+- **One Spotify ID per tracked track.** Streams polls the identity with variant `primary`. Adding another Spotify identity never changes the polled one unless staff choose it, and `upsertIdentity` keeps an existing variant unless a new one is given.

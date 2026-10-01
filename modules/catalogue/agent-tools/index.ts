@@ -28,7 +28,7 @@ export const tools = [
   defineTool({
     name: 'catalogue_get_track',
     module: 'catalogue',
-    description: 'Get a track: ISRC, duration, credits, split sheets and signature status, releases it appears on, and platform ids.',
+    description: 'Get a track: ISRC, duration, artists (with their ids), credits, split sheets and signature status, releases it appears on, and platform ids.',
     input: z.object({ id: z.uuid() }),
     permission: 'catalogue:read',
     risk: 'read',
@@ -45,7 +45,7 @@ export const tools = [
           explicit: d.track.explicit,
           status: d.track.status,
           blockers: d.track.blockers,
-          artists: d.artists.map((a) => a.name),
+          artists: d.artists.map((a) => ({ id: a.id, name: a.name })),
           releases: d.releases.map((r) => ({ id: r.id, title: r.title, releaseDate: r.releaseDate })),
           credits: d.credits.map((c) => `${c.role}: ${c.name}`),
           splits: d.splitSheets.map((s) => ({ kind: s.kind, status: s.status, parties: s.parties.map((p) => ({ name: p.name, share: Number(p.sharePct), signed: Boolean(p.signedAt) })) })),

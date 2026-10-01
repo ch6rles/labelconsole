@@ -17,6 +17,7 @@ export const routes = defineRoutes('streams', [
   route({ method: 'POST', path: '/streams/poll', permission: 'streams:manage', body: z.object({ trackId: z.uuid().optional() }), handler: (ctx, req) => svc.requestPoll(ctx, req.body.trackId) }),
   route({ method: 'POST', path: '/streams/registry/:trackId/resolve', permission: 'streams:manage', handler: (ctx, req) => svc.requestResolve(ctx, req.params.trackId) }),
   route({ method: 'POST', path: '/streams/registry/:trackId/youtube', permission: 'streams:manage', body: svc.AddVideoInput, handler: (ctx, req) => svc.addVideo(ctx, req.params.trackId, req.body) }),
+  route({ method: 'POST', path: '/streams/registry/:trackId/spotify', permission: 'streams:manage', body: svc.SpotifyTrackInput, handler: (ctx, req) => svc.setSpotifyTrack(ctx, req.params.trackId, req.body) }),
 
   // Matching review.
   route({ method: 'GET', path: '/streams/matching', permission: 'streams:manage', handler: (ctx) => svc.matchingQueue(ctx) }),

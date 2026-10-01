@@ -5,6 +5,7 @@ import { sql } from 'drizzle-orm';
 import { env } from '@labelconsole/core/env';
 import { defineListener, defineModule } from '@labelconsole/core/modules';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
+import { spotScraperConfigured } from '@labelconsole/core/spotscraper';
 import { getCredentialHandle } from '@labelconsole/core/vault';
 import * as fmt from '@labelconsole/ui/format';
 import { tools } from './agent-tools';
@@ -31,12 +32,15 @@ export default defineModule({
   },
   onboarding: async (ctx) => [
     { id: 'youtube', title: 'Connect YouTube for stream tracking', sub: 'A YouTube Data API key lets the tracker poll view counts every few hours', done: Boolean(env().YOUTUBE_API_KEY) || Boolean(await getCredentialHandle(ctx, 'youtube')), href: '/settings/integrations', order: 60 },
+    { id: 'spotify', title: 'Connect SpotScraper for Spotify plays', sub: 'Spotify play counts, credits and artist monthly listeners, matched to your tracks by ISRC', done: await spotScraperConfigured(ctx), href: '/settings/integrations', order: 61 },
   ],
   jobs,
   tools,
   schedules: [
     { id: 'streams-schedule', job: 'streams.schedule', everyMs: 15 * 60_000 },
     { id: 'streams-partitions', job: 'streams.maintain-partitions', cron: '17 3 * * *' },
+    // Spotify updates monthly listeners about once a day.
+    { id: 'streams-audience', job: 'streams.audience', cron: '41 6 * * *' },
   ],
   listeners: [
     // Track registry: every track that enters the catalogue is tracked.
@@ -67,7 +71,7 @@ export default defineModule({
     if (!ctx.can('streams:read')) return [];
     const o = await svc.overview(ctx);
     const items = [{ n: o.openAlerts, tone: 'ink' as const, title: 'Stream alerts to look at', sub: 'Spikes, drops and milestones from the tracker', href: '/streams/alerts' }];
-    if (ctx.can('streams:manage')) items.push({ n: o.pendingMatches + o.tracking.pendingMatch, tone: 'ink' as const, title: 'Tracks waiting for a YouTube match', sub: `${o.pendingMatches} suggested matches to review`, href: '/streams/matching' });
+    if (ctx.can('streams:manage')) items.push({ n: o.pendingMatches + o.tracking.pendingMatch, tone: 'ink' as const, title: 'Tracks waiting for a match', sub: `No Spotify ID or YouTube video yet · ${o.pendingMatches} suggested videos to review`, href: '/streams/matching' });
     return items;
   },
   enrich: {

@@ -1,7 +1,7 @@
 import { listArtists } from '@labelconsole/people/service';
 import type { PageProps } from '@labelconsole/core/web';
 import { Chip, DataTable, FilterPills, Page, PageHeader, Summary, fmt } from '@labelconsole/ui';
-import { FormModal, SearchInput } from '@labelconsole/ui/client';
+import { ActionButton, FormModal, SearchInput } from '@labelconsole/ui/client';
 import * as svc from '../service';
 import { trackFields } from './fields';
 
@@ -15,7 +15,15 @@ export default async function TracksPage({ run, session, searchParams }: PagePro
   const missingIsrc = all.filter((t) => !t.isrc).length;
   return (
     <Page>
-      <PageHeader title="All tracks" description="Every recording in the catalogue, with what still blocks delivery." actions={session.permissions.has('catalogue:write') && <FormModal title="New track" trigger={{ label: 'New track', icon: 'add', variant: 'primary' }} endpoint="/catalogue/tracks" fields={trackFields(artistOptions)} redirectTo="/catalog/tracks/{id}" wide />} />
+      <PageHeader title="All tracks" description="Every recording in the catalogue, with what still blocks delivery." actions={
+          session.permissions.has('catalogue:write') && (
+            <>
+              {all.some((t) => t.blockers.includes('No credits')) && <ActionButton endpoint="/catalogue/credits/import" label="Credits from Spotify" icon="download" title="Import Spotify credits for every track that has none" success="Import queued: credits appear as each track is read" />}
+              <FormModal title="New track" trigger={{ label: 'New track', icon: 'add', variant: 'primary' }} endpoint="/catalogue/tracks" fields={trackFields(artistOptions)} redirectTo="/catalog/tracks/{id}" wide />
+            </>
+          )
+        }
+      />
       <div className="lc-toolbar">
         <SearchInput placeholder="Search title or ISRC" />
         <FilterPills

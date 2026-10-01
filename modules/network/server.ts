@@ -3,6 +3,7 @@ import { ilike, or, sql } from 'drizzle-orm';
 import { defineModule } from '@labelconsole/core/modules';
 import { tools } from './agent-tools';
 import { routes } from './api';
+import { jobs } from './jobs';
 import { manifest } from './manifest';
 import { contacts } from './schema';
 import * as svc from './service';
@@ -11,6 +12,8 @@ export default defineModule({
   manifest,
   routes,
   tools,
+  jobs,
+  schedules: [{ id: 'network-refresh-playlists', job: 'network.refresh-playlists', cron: '23 5 * * 1' }],
   stats: async (ctx) => {
     if (!ctx.can('network:read')) return [];
     const c = await svc.networkCounts(ctx);

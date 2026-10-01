@@ -1,4 +1,5 @@
 import { logger } from '@labelconsole/core/logger';
+import type { SpotScraperClient } from '@labelconsole/core/spotscraper';
 import type { DistributorEvidence, ResolvedMetadata } from '../schema';
 import { inferDistributor, type Alias, type Hint } from './distributor';
 import { normalizeIsrc, normalizeUpc, type ParsedInput } from './input';
@@ -7,15 +8,16 @@ import { deezerLookup, deezerSearch } from './sources/deezer';
 import { licensedMetadataProvider, type LicensedSecret } from './sources/licensed';
 import { musicbrainzLookup, musicbrainzSearch } from './sources/musicbrainz';
 import { spotifyLookup, spotifyOEmbedTitle, type SpotifySecret } from './sources/spotify';
+import { spotScraperLookup } from './sources/spotscraper';
 import type { Query, SourceResult } from './sources/types';
 import { splitVideoTitle, youtubeTitle } from './sources/youtube';
 import type { AudioTags } from './tags';
 
-export type ResolveCredentials = { spotify?: SpotifySecret | null; apple?: AppleSecret | null; youtubeApiKey?: string | null; licensed?: LicensedSecret | null };
+export type ResolveCredentials = { spotify?: SpotifySecret | null; apple?: AppleSecret | null; youtubeApiKey?: string | null; licensed?: LicensedSecret | null; spotscraper?: SpotScraperClient | null };
 export type ResolveContext = { creds: ResolveCredentials; aliases: Alias[]; hints: Hint[]; tags?: AudioTags | null };
 
 /** When sources disagree, the first in this order wins and the conflict is reported. */
-const PRIORITY = ['spotify', 'apple', 'deezer', 'musicbrainz', 'licensed', 'itunes', 'tags', 'search'];
+const PRIORITY = ['spotify', 'spotscraper', 'apple', 'deezer', 'musicbrainz', 'licensed', 'itunes', 'tags', 'search'];
 const rank = (s: string) => {
   const i = PRIORITY.indexOf(s);
   return i < 0 ? PRIORITY.length : i;
@@ -139,13 +141,13 @@ export async function resolveMetadata(parsed: ParsedInput, raw: Record<string, s
       else q.deezerAlbumId = parsed.id;
       break;
     case 'spotify':
-      if (creds.spotify) {
+      if (creds.spotify || creds.spotscraper) {
         if (parsed.entity === 'track') q.spotifyTrackId = parsed.id;
         else q.spotifyAlbumId = parsed.id;
       } else {
         const title = await spotifyOEmbedTitle(parsed.url).catch(() => null);
         if (title) Object.assign(q, { title });
-        sources.push({ source: 'spotify', ok: false, skipped: 'No Spotify credentials: resolved the link by title instead' });
+        sources.push({ source: 'spotify', ok: false, skipped: 'No Spotify or SpotScraper credentials: resolved the link by title instead' });
       }
       break;
     case 'apple':
@@ -176,7 +178,7 @@ export async function resolveMetadata(parsed: ParsedInput, raw: Record<string, s
   }
 
   // Matches found by searching a title are suggestions: identities from them go to human review.
-  if (parsed.kind === 'text' || parsed.kind === 'youtube' || (parsed.kind === 'spotify' && !creds.spotify) || (parsed.kind === 'file' && !q.isrc)) raw = { ...raw, matchedBy: 'search' };
+  if (parsed.kind === 'text' || parsed.kind === 'youtube' || (parsed.kind === 'spotify' && !creds.spotify && !creds.spotscraper) || (parsed.kind === 'file' && !q.isrc)) raw = { ...raw, matchedBy: 'search' };
 
   // Free-text: search for an ISRC first (Deezer, then MusicBrainz).
   if (!q.isrc && !q.upc && !q.deezerTrackId && !q.deezerAlbumId && !q.spotifyTrackId && !q.spotifyAlbumId && !q.appleSongId && !q.appleAlbumId && q.title) {
@@ -191,7 +193,7 @@ export async function resolveMetadata(parsed: ParsedInput, raw: Record<string, s
   // Pass 1b: id-based lookups give us ISRC/UPC for pass 2.
   const first = await Promise.all([
     q.deezerTrackId || q.deezerAlbumId ? run('deezer', sources, () => deezerLookup({ ...q, withTracklist: Boolean(q.deezerAlbumId) })) : null,
-    q.spotifyTrackId || q.spotifyAlbumId ? run('spotify', sources, () => spotifyLookup(creds.spotify!, q)) : null,
+    q.spotifyTrackId || q.spotifyAlbumId ? (creds.spotify ? run('spotify', sources, () => spotifyLookup(creds.spotify!, q)) : run('spotscraper', sources, () => spotScraperLookup(creds.spotscraper!, q))) : null,
     q.appleSongId || q.appleAlbumId ? run('apple', sources, () => appleLookup(creds.apple!, q)) : null,
   ]);
   for (const r of first) if (r) results.push(r);
@@ -208,6 +210,7 @@ export async function resolveMetadata(parsed: ParsedInput, raw: Record<string, s
     done.has('deezer') ? null : run('deezer', sources, () => deezerLookup({ isrc: q.isrc, upc: q.upc, withTracklist: parsed.kind === 'upc' })),
     run('musicbrainz', sources, () => musicbrainzLookup({ isrc: q.isrc, upc: q.upc })),
     done.has('spotify') ? null : run('spotify', sources, () => spotifyLookup(creds.spotify!, { isrc: q.isrc, upc: q.upc }), creds.spotify ? undefined : 'Not connected (Settings → Integrations)'),
+    done.has('spotscraper') ? null : run('spotscraper', sources, () => spotScraperLookup(creds.spotscraper!, { isrc: q.isrc }), !creds.spotscraper ? 'Not connected (Settings → Integrations)' : q.isrc ? undefined : 'Needs an ISRC'),
     done.has('apple') ? null : run('apple', sources, () => appleLookup(creds.apple!, { isrc: q.isrc, upc: q.upc }), creds.apple ? undefined : 'Not connected (Settings → Integrations)'),
     run('itunes', sources, () => itunesLookup({ upc: q.upc, itunesId: q.itunesId ?? undefined }), q.upc || q.itunesId ? undefined : 'Needs a UPC'),
     run('licensed', sources, () => licensed!.lookup(creds.licensed!, { isrc: q.isrc, upc: q.upc }), licensed ? undefined : 'No licensed provider configured'),

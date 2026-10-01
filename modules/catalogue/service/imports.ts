@@ -112,7 +112,7 @@ export async function confirmLookup(ctx: ServiceContext, lookupId: string, overr
     const entityId = p.entity === 'release' ? release.id : primaryTrack?.trackId;
     if (!entityId) continue;
     const exact = !bySearch || p.source === 'link';
-    await upsertIdentity(ctx, { entityType: p.entity, entityId, platform: p.platform, externalId: p.externalId, url: p.url, source: p.source, confidence: exact ? 1 : 0.6, status: exact ? 'confirmed' : 'pending_review', variant: p.platform === 'youtube' ? 'official' : null });
+    await upsertIdentity(ctx, { entityType: p.entity, entityId, platform: p.platform, externalId: p.externalId, url: p.url, source: p.source, confidence: exact ? 1 : 0.6, status: exact ? 'confirmed' : 'pending_review', variant: p.platform === 'youtube' ? 'official' : undefined });
   }
 
   // Learn: a confirmed distributor teaches the label-string and UPC-prefix tables.
