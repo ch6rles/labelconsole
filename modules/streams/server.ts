@@ -6,7 +6,7 @@ import { env } from '@labelconsole/core/env';
 import { defineListener, defineModule } from '@labelconsole/core/modules';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
 import { getCredentialHandle } from '@labelconsole/core/vault';
-import { fmt } from '@labelconsole/ui';
+import * as fmt from '@labelconsole/ui/format';
 import { tools } from './agent-tools';
 import { routes } from './api';
 import { jobs } from './jobs';

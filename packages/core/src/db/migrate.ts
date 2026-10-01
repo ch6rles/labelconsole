@@ -7,7 +7,8 @@ import postgres from 'postgres';
 import { rlsSql } from './rls';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const MIGRATIONS_DIR = path.resolve(here, '../../migrations');
+// Bundled builds (the worker image) point this at the copied folder.
+export const MIGRATIONS_DIR = process.env.LC_MIGRATIONS_DIR ?? path.resolve(here, '../../migrations');
 
 /**
  * Apply generated migrations, then the hand-written ones (partitioning,

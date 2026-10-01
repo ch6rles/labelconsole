@@ -1,6 +1,6 @@
 import './types';
 import { and, eq, ilike, inArray, or, sql } from 'drizzle-orm';
-import { fmt } from '@labelconsole/ui';
+import * as fmt from '@labelconsole/ui/format';
 import { defineModule } from '@labelconsole/core/modules';
 import { tools } from './agent-tools';
 import { routes } from './api';

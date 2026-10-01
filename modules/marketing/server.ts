@@ -1,7 +1,7 @@
 import './types';
 import { ilike } from 'drizzle-orm';
 import { defineModule } from '@labelconsole/core/modules';
-import { fmt } from '@labelconsole/ui';
+import * as fmt from '@labelconsole/ui/format';
 import { tools } from './agent-tools';
 import { routes } from './api';
 import { jobs } from './jobs';

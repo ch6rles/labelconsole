@@ -1,0 +1,86 @@
+# The whole stack on one machine: Postgres (with pgvector), Redis, the web app
+# and the worker. For trying Label Console out or a small single-server deploy.
+#
+#   cp .env.example .env    # set VAULT_MASTER_KEY and SIGNING_SECRET (and API keys)
+#   docker compose up --build
+#   open http://localhost:3000
+#
+# Compose reads VAULT_MASTER_KEY, SIGNING_SECRET, ANTHROPIC_API_KEY and
+# YOUTUBE_API_KEY from .env; database and Redis addresses are set below.
+# Change the database passwords before exposing this anywhere.
+
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgres://labelconsole_app:${DB_APP_PASSWORD:-app_password}@postgres:5432/labelconsole
+  DATABASE_SYSTEM_URL: postgres://labelconsole_owner:${DB_OWNER_PASSWORD:-owner_password}@postgres:5432/labelconsole
+  REDIS_URL: redis://redis:6379
+  APP_URL: ${APP_URL:-http://localhost:3000}
+  VAULT_MASTER_KEY: ${VAULT_MASTER_KEY:?set VAULT_MASTER_KEY in .env (openssl rand -base64 32)}
+  VAULT_MASTER_KEY_ID: ${VAULT_MASTER_KEY_ID:-local-v1}
+  SIGNING_SECRET: ${SIGNING_SECRET:?set SIGNING_SECRET in .env (openssl rand -hex 32)}
+  STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+  STORAGE_LOCAL_DIR: /data/storage
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+  METRICS_TOKEN: ${METRICS_TOKEN:-}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-off: create roles, database and extensions if missing, then apply migrations. Exits when done.
+  migrate:
+    build: { context: ., target: worker }
+    image: labelconsole-worker
+    environment:
+      <<: *app-env
+      DATABASE_SUPERUSER_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
+    command: ['sh', '-c', 'node dist/setup.js && node dist/migrate.js']
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: 'no'
+
+  web:
+    build: { context: ., target: web }
+    image: labelconsole-web
+    environment: *app-env
+    ports: ['3000:3000']
+    volumes: [storage:/data/storage]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  worker:
+    image: labelconsole-worker
+    environment: *app-env
+    volumes: [storage:/data/storage]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    stop_grace_period: 70s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  storage:
