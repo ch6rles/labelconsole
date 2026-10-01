@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "test:load": "LC_LOAD_TEST=1 vitest run --project load",
     "db:setup": "tsx scripts/db-setup.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/db-migrate.ts",

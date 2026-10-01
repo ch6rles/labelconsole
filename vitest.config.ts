@@ -1,5 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
+/** The agent load test is slow and noisy, so it only runs when asked for (pnpm test:load). */
+const load = process.env.LC_LOAD_TEST === '1';
+
 export default defineConfig({
   test: {
     projects: [
@@ -25,6 +28,22 @@ export default defineConfig({
           hookTimeout: 60_000,
         },
       },
+      ...(load
+        ? [
+            {
+              test: {
+                name: 'load',
+                include: ['test/load/**/*.load.test.ts'],
+                environment: 'node',
+                globalSetup: ['./test/global-setup.ts'],
+                setupFiles: ['./test/setup-env.ts'],
+                fileParallelism: false,
+                testTimeout: 600_000,
+                hookTimeout: 120_000,
+              },
+            },
+          ]
+        : []),
     ],
   },
 });

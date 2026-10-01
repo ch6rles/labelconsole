@@ -61,8 +61,9 @@ export async function executeRun(job: JobContext, runId: string) {
     return row ? { run: row } : { skip: 'not claimable' as const };
   });
   if ('skip' in claim) {
-    // Over the org's concurrency cap: back off without spending a retry.
-    if (claim.skip === 'busy') throw new RateLimitedError(10_000, 'Agent concurrency limit reached for this label');
+    // Over the org's concurrency cap: back off without spending a retry. Jittered so a
+    // label's queued runs don't all retry in the same instant (measured in test/load).
+    if (claim.skip === 'busy') throw new RateLimitedError(1_500 + Math.round(Math.random() * 2_500), 'Agent concurrency limit reached for this label');
     return { skipped: claim.skip };
   }
 
