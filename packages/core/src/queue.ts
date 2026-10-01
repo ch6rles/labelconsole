@@ -28,15 +28,16 @@ export const DEFAULT_JOB_OPTIONS: JobsOptions = {
 };
 
 const prefix = () => process.env.LC_QUEUE_PREFIX ?? 'lc';
-const queues = new Map<QueueName, Queue>();
+const queues = new Map<QueueName, { queue: Queue; connection: ReturnType<typeof createRedis> }>();
 
 export function queue(name: QueueName): Queue {
-  let q = queues.get(name);
-  if (!q) {
-    q = new Queue(name, { connection: createRedis(), prefix: prefix(), defaultJobOptions: DEFAULT_JOB_OPTIONS });
-    queues.set(name, q);
+  let entry = queues.get(name);
+  if (!entry) {
+    const connection = createRedis();
+    entry = { queue: new Queue(name, { connection, prefix: prefix(), defaultJobOptions: DEFAULT_JOB_OPTIONS }), connection };
+    queues.set(name, entry);
   }
-  return q;
+  return entry.queue;
 }
 
 export function queuePrefix() {
@@ -104,7 +105,13 @@ export function makeJobContext(job: Job): JobContext {
   };
 }
 
+/** BullMQ doesn't close a connection it was handed, so quit ours after each queue closes. */
 export async function closeQueues() {
-  await Promise.all([...queues.values()].map((q) => q.close()));
+  await Promise.all(
+    [...queues.values()].map(async ({ queue: q, connection }) => {
+      await q.close();
+      await connection.quit().catch(() => connection.disconnect());
+    }),
+  );
   queues.clear();
 }
