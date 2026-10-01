@@ -16,7 +16,7 @@ export default defineModule({
     ]);
     const s = org?.settings ?? {};
     return [
-      { id: 'label', title: 'Fill in your label details', sub: 'Legal entity, distributor, timezone and currency: used on statements, schedules and agent briefs', done: Boolean(s.distributor && s.legalEntity), href: '/settings/workspace', order: 10 },
+      { id: 'label', title: 'Fill in your label details', sub: 'Legal entity, distributor, timezone and currency: used on statements, schedules and agent briefs', done: Boolean(s.distributor && s.legalEntity), href: '/settings', order: 10 },
       { id: 'team', title: 'Invite your team', sub: 'Each person gets a role: marketing, A&R, finance and more', done: (members?.n ?? 0) > 1 || (invites?.n ?? 0) > 0, href: '/admin/users', order: 20 },
     ];
   },

@@ -4,6 +4,7 @@ import type { Database, DbLike } from './db/client';
 import { orgModules } from './db/schema';
 import type { EventType, StoredEvent } from './events';
 import type { Metric } from './metrics';
+import type { PlanLimits } from './plans';
 import { registerPermissions, type PermissionDef } from './permissions';
 import type { JobDefinition, ScheduleDefinition } from './queue';
 import type { ApiRoute } from './router';
@@ -74,6 +75,8 @@ export interface ModuleServer {
    * system connection, so it must return aggregates only (counts, ages, sums).
    */
   metrics?: (db: Database) => Promise<Metric[]>;
+  /** How much of each plan limit this label uses, for Settings → Plan & usage. */
+  planUsage?: (ctx: ServiceContext) => Promise<Partial<Record<keyof PlanLimits, number>>>;
   /** Setup steps for the dashboard's getting-started checklist. */
   onboarding?: (ctx: ServiceContext) => Promise<OnboardingStep[]>;
   /** Counts for the console shell (notification badge, agent indicator). */

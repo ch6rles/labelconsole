@@ -6,10 +6,12 @@ import { routes } from './api';
 import { jobs } from './jobs';
 import { manifest } from './manifest';
 import { files } from './schema';
+import { storageUsed } from './service';
 
 export default defineModule({
   manifest,
   routes,
+  planUsage: async (ctx) => ({ storageBytes: await storageUsed(ctx) }),
   jobs,
   tools,
   schedules: [{ id: 'drive-sync-all', job: 'drive.sync-all', everyMs: 30 * 60_000 }],

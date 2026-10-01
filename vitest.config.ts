@@ -9,8 +9,8 @@ export default defineConfig({
       {
         test: {
           name: 'unit',
-          include: ['packages/**/*.test.ts', 'modules/**/*.test.ts', 'apps/**/*.test.ts'],
-          exclude: ['**/*.int.test.ts', '**/node_modules/**'],
+          include: ['packages/**/*.test.ts', 'modules/**/*.test.ts', 'apps/**/*.test.ts', 'test/**/*.test.ts'],
+          exclude: ['**/*.int.test.ts', '**/*.load.test.ts', '**/node_modules/**'],
           environment: 'node',
           setupFiles: ['./test/setup-env.ts'],
         },

@@ -1,5 +1,5 @@
 import '../types';
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { patchOf } from '@labelconsole/core/zod';
 import type { ServiceContext } from '@labelconsole/core/context';
@@ -7,6 +7,7 @@ import { credentials, organizations } from '@labelconsole/core/db/schema';
 import { env } from '@labelconsole/core/env';
 import { NotFoundError, ValidationError } from '@labelconsole/core/errors';
 import { enabledModuleIds, enrich } from '@labelconsole/core/modules';
+import { assertWithinPlan, lockPlanLimit, planOf } from '@labelconsole/core/plans';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
 import { platformIdentities, releaseTracks, releases, trackArtists, tracks } from '@labelconsole/catalogue/schema';
 import { setIdentityStatus, upsertIdentity } from '@labelconsole/catalogue/service';
@@ -36,6 +37,12 @@ const daysAgo = (n: number) => new Date(Date.now() - n * 86400_000).toISOString(
 export async function registerTrack(ctx: ServiceContext, trackId: string) {
   const [track] = await ctx.tx.select({ id: tracks.id, isrc: tracks.isrc }).from(tracks).where(eq(tracks.id, trackId));
   if (!track) return null;
+  const [existing] = await ctx.tx.select({ id: streamTracks.id }).from(streamTracks).where(eq(streamTracks.trackId, trackId));
+  if (!existing) {
+    // Over the plan's tracking limit a new track waits unregistered; the scheduler's backfill adds it once there's room.
+    await lockPlanLimit(ctx, 'trackedTracks');
+    if ((await activeTrackCount(ctx)) >= (await planOf(ctx)).limits.trackedTracks) return null;
+  }
   const [row] = await ctx.tx.insert(streamTracks).values({ trackId, isrc: track.isrc }).onConflictDoUpdate({ target: [streamTracks.orgId, streamTracks.trackId], set: { isrc: track.isrc } }).returning();
   if (row.status === 'paused') return row;
   const known = await confirmedVideos(ctx, [trackId]);
@@ -45,6 +52,12 @@ export async function registerTrack(ctx: ServiceContext, trackId: string) {
     enqueueAfterCommit(ctx, 'streams.resolve-track', { streamTrackId: row.id }, { jobId: `resolve-${row.id}`, attempts: 3, backoff: { type: 'exponential', delay: 60_000 } });
   }
   return row;
+}
+
+/** Tracks that count against the plan: everything registered and not paused. */
+export async function activeTrackCount(ctx: ServiceContext) {
+  const [r] = await ctx.tx.select({ n: sql<number>`count(*)::int` }).from(streamTracks).where(ne(streamTracks.status, 'paused'));
+  return r?.n ?? 0;
 }
 
 export async function confirmedVideos(ctx: ServiceContext, trackIds: string[]) {
@@ -119,6 +132,13 @@ export async function getTracked(ctx: ServiceContext, trackId: string) {
 
 export async function setTrackStatus(ctx: ServiceContext, trackId: string, status: 'tracking' | 'paused') {
   ctx.assert('streams:manage');
+  if (status === 'tracking') {
+    const [current] = await ctx.tx.select({ status: streamTracks.status }).from(streamTracks).where(eq(streamTracks.trackId, trackId));
+    if (current?.status === 'paused') {
+      await lockPlanLimit(ctx, 'trackedTracks');
+      await assertWithinPlan(ctx, 'trackedTracks', await activeTrackCount(ctx));
+    }
+  }
   const [row] = await ctx.tx.update(streamTracks).set({ status: status === 'tracking' ? ((await confirmedVideos(ctx, [trackId])).length ? 'tracking' : 'pending_match') : 'paused', nextPollAt: status === 'tracking' ? new Date() : null }).where(eq(streamTracks.trackId, trackId)).returning();
   if (!row) throw new NotFoundError('Tracked track');
   await ctx.audit({ action: status === 'paused' ? 'streams.tracking_paused' : 'streams.tracking_resumed', module: 'streams', targetType: 'track', targetId: trackId });
@@ -566,11 +586,14 @@ export async function sourceStatus(ctx: ServiceContext) {
 
 /** Register catalogue tracks the tracker doesn't know yet (created before Streams was switched on). */
 export async function backfillRegistry(ctx: ServiceContext, limit = 200) {
+  // At the plan's tracking limit there's nothing to add until a track is paused or the plan grows.
+  const room = (await planOf(ctx)).limits.trackedTracks - (await activeTrackCount(ctx));
+  if (room <= 0) return 0;
   const missing = await ctx.tx
     .select({ id: tracks.id })
     .from(tracks)
     .where(sql`not exists (select 1 from stream_tracks st where st.track_id = ${tracks.id})`)
-    .limit(limit);
+    .limit(Math.min(limit, room));
   for (const t of missing) await registerTrack(ctx, t.id);
   return missing.length;
 }

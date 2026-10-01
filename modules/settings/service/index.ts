@@ -1,5 +1,5 @@
 import '../types';
-import { and, desc, eq, gte, ilike, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, ilike, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { hashToken, newToken } from '@labelconsole/core/auth';
 import type { ServiceContext } from '@labelconsole/core/context';
@@ -7,6 +7,7 @@ import { auditLog, customRoles, invitations, memberships, organizations, usageCo
 import { env } from '@labelconsole/core/env';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@labelconsole/core/errors';
 import { modules, setModuleEnabled, enabledModuleIds, PLAN_LABELS, type PlanTier } from '@labelconsole/core/modules';
+import { assertWithinPlan, limitsFor, lockPlanLimit } from '@labelconsole/core/plans';
 import { accessLevel, allPermissions, BUILT_IN_ROLES, PermissionSet, ROLE_LABELS, type BuiltInRole } from '@labelconsole/core/permissions';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
 import { listCredentials, putCredential, revokeCredential } from '@labelconsole/core/vault';
@@ -136,6 +137,15 @@ function assertAssignable(ctx: ServiceContext, role: string) {
   if (role === 'owner' && !ctx.permissions.has('settings:billing')) throw new ForbiddenError('Only an owner can grant the owner role');
 }
 
+/** Active members plus invitations that could still be accepted. */
+async function seatsInUse(ctx: ServiceContext) {
+  const [[m], [i]] = await Promise.all([
+    ctx.tx.select({ n: sql<number>`count(*)::int` }).from(memberships).where(and(eq(memberships.orgId, ctx.orgId), eq(memberships.status, 'active'))),
+    ctx.tx.select({ n: sql<number>`count(*)::int` }).from(invitations).where(and(eq(invitations.orgId, ctx.orgId), isNull(invitations.acceptedAt), isNull(invitations.revokedAt), gt(invitations.expiresAt, new Date()))),
+  ]);
+  return (m?.n ?? 0) + (i?.n ?? 0);
+}
+
 export async function inviteMember(ctx: ServiceContext, input: z.infer<typeof InviteInput>) {
   ctx.assert('settings:members');
   assertAssignable(ctx, input.role);
@@ -145,6 +155,8 @@ export async function inviteMember(ctx: ServiceContext, input: z.infer<typeof In
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(and(eq(memberships.orgId, ctx.orgId), sql`lower(${users.email}) = ${input.email}`));
   if (existing.length) throw new ConflictError(`${input.email} is already a member`);
+  await lockPlanLimit(ctx, 'seats');
+  await assertWithinPlan(ctx, 'seats', await seatsInUse(ctx));
   const token = newToken();
   const [inv] = await ctx.tx
     .insert(invitations)
@@ -314,13 +326,17 @@ export async function planUsage(ctx: ServiceContext) {
   const org = await getWorkspace(ctx);
   const month = new Date().toISOString().slice(0, 7);
   const usage = await ctx.tx.select().from(usageCounters).where(eq(usageCounters.month, month));
-  const [seats] = await ctx.tx.select({ n: sql<number>`count(*)::int` }).from(memberships).where(eq(memberships.status, 'active'));
+  const enabled = await enabledModuleIds(ctx.tx, org);
+  const used: Partial<Record<'seats' | 'trackedTracks' | 'storageBytes', number>> = { seats: await seatsInUse(ctx) };
+  for (const m of modules()) if (m.planUsage && enabled.has(m.manifest.id)) Object.assign(used, await m.planUsage(ctx));
   const get = (metric: string) => Number(usage.find((u) => u.metric === metric)?.value ?? 0);
   return {
     plan: org.plan as PlanTier,
     planLabel: PLAN_LABELS[org.plan as PlanTier] ?? org.plan,
     month,
-    seats: seats.n,
+    seats: used.seats ?? 0,
+    limits: limitsFor(org.plan),
+    used,
     agentSpendUsd: get('agent_cost_usd'),
     agentRuns: get('agent_runs'),
     llmTokens: get('llm_tokens'),

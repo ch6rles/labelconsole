@@ -1,11 +1,12 @@
 import '../types';
 import { createHash } from 'node:crypto';
 import { Readable, Transform } from 'node:stream';
-import { and, asc, desc, eq, ilike, inArray, isNull, or } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { memberships } from '@labelconsole/core/db/schema';
 import { ForbiddenError, NotFoundError, ValidationError } from '@labelconsole/core/errors';
+import { PlanLimitError, planOf } from '@labelconsole/core/plans';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
 import { storage, storageKey, UPLOAD_RULES } from '@labelconsole/core/storage';
 import { fileLinks, files, folderPermissions, folders, type DriveFile, type DriveFolder } from '../schema';
@@ -175,6 +176,12 @@ export type StoreInput = {
  * while hashing and counting bytes, enforces type and size rules, sniffs the
  * first bytes, records the file and queues a virus scan.
  */
+/** Bytes of live files the label stores (counts against the plan). */
+export async function storageUsed(ctx: ServiceContext) {
+  const [r] = await ctx.tx.select({ bytes: sql<string>`coalesce(sum(${files.size}), 0)` }).from(files).where(isNull(files.deletedAt));
+  return Number(r?.bytes ?? 0);
+}
+
 export async function storeFile(ctx: ServiceContext, input: StoreInput): Promise<DriveFile> {
   ctx.assert('drive:write');
   const folder = input.folderId ? await getFolder(ctx, input.folderId) : null;
@@ -183,6 +190,9 @@ export async function storeFile(ctx: ServiceContext, input: StoreInput): Promise
   const mime = mimeFor(name, input.mime);
   const rule = UPLOAD_RULES[input.kind ?? 'any'];
   if (!rule.mimes.test(mime)) throw new ValidationError(`Files of type ${mime} are not allowed here`);
+  const { plan, limits } = await planOf(ctx);
+  const used = await storageUsed(ctx);
+  if (used >= limits.storageBytes) throw new PlanLimitError('storageBytes', limits.storageBytes, plan);
 
   const source = Buffer.isBuffer(input.body) ? Readable.from(input.body) : input.body instanceof Readable ? input.body : Readable.fromWeb(input.body as never);
   const hash = createHash('sha256');
@@ -210,6 +220,10 @@ export async function storeFile(ctx: ServiceContext, input: StoreInput): Promise
   if (size === 0) {
     await storage().delete(key).catch(() => undefined);
     throw new ValidationError('The file is empty');
+  }
+  if (used + size > limits.storageBytes) {
+    await storage().delete(key).catch(() => undefined);
+    throw new PlanLimitError('storageBytes', limits.storageBytes, plan);
   }
   const [row] = await ctx.tx
     .insert(files)

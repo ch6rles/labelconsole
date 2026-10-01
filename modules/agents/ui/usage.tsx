@@ -27,7 +27,7 @@ export default async function UsagePage({ run, session }: PageProps) {
       <PageHeader
         title="Usage"
         description="Model spend across every agent run, including delegated work. Budgets stop runs before they overspend; nothing is billed beyond them."
-        actions={session.permissions.has('settings:write') && <Link className="lc-btn" href="/settings/workspace">Monthly cap</Link>}
+        actions={session.permissions.has('settings:manage') && <Link className="lc-btn" href="/settings">Monthly cap</Link>}
       />
       <div className="lc-grid-stats">
         <StatCard label="THIS MONTH" icon="payments" value={usd(use.monthUsd)} note={cap != null ? `of ${usd(cap)} cap · ${capPct.toFixed(0)}% used` : 'no label-wide cap'} />

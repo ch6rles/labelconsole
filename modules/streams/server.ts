@@ -16,6 +16,7 @@ import * as svc from './service';
 export default defineModule({
   manifest,
   routes,
+  planUsage: async (ctx) => ({ trackedTracks: await svc.activeTrackCount(ctx) }),
   metrics: async (db) => {
     const [byStatus, [overdue], [snaps]] = (await Promise.all([
       db.execute(sql`select status, count(*)::int as n from stream_tracks group by status`),
