@@ -134,6 +134,10 @@
   - The `Dockerfile` builds web (Next standalone) and worker images: the worker bundle plus only its runtime packages, 431 MB.
   - `docker-compose.yml` runs the full stack. Verified: a fresh stack comes up healthy, sign-up and catalogue writes work, and the containerized worker processes their events.
 - **Docs:** `docs/label-console-plan.md` (the spec), `docs/architecture-findings.md`, `docs/operations.md`, `README.md`.
+- **Security fixes from the new module tests:**
+  - **Role escalation:** anyone with `settings:members` could promote people (including themselves) to admin, or demote and remove people with more access. Roles can now only be handed out, changed or removed within the actor's own access, the same rule custom roles already followed.
+  - **Activity feed leaks:** the feed showed Settings entries (invites, role changes, credentials) to anyone with `settings:read`, and the titles of confidential contracts and statements to anyone with `documents:read`. Audit entries can now carry a read permission (new `read_permission` column, migration `0001`); Documents sets it, and Settings entries need `settings:audit`.
+  - **Uploads could crash the process:** a file rejected mid-stream (content not matching its type, or too large) raised an uncaught exception, which takes a Node process down. It's now a 422.
 - **Bugs found and fixed while hardening:**
   - **Leaking queue connections:** BullMQ queues kept their Redis connections open, so scripts never exited and worker shutdown waited for its force-exit timer.
   - **Worker failed outside the monorepo:** the bundle imported packages the worker never declared, and pulled React and Next in through the UI index.
@@ -141,7 +145,7 @@
   - **Doomed runs:** runs were queued with no model key configured and could only fail.
   - **Permission typo:** a page checked a permission no module declares. A test now scans for undeclared permission keys.
   - **Broken links:** some links pointed at `/settings/workspace`.
-- **Tests:** 99 passing, plus the load test and the restore drill.
+- **Tests:** 117 passing (new integration tests for People, Network, Drive, Inbox and Settings), plus the load test and the restore drill.
 
 ## Next steps
 

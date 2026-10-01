@@ -1,5 +1,5 @@
 import '../types';
-import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { actorString } from '@labelconsole/core/context';
@@ -101,11 +101,17 @@ export async function markRead(ctx: ServiceContext, userId: string, ids?: string
  * Activity feed: the audit log, limited to areas the reader can see. Settings
  * changes need the audit permission; everything else needs the module's read.
  */
+/**
+ * The activity feed: audit entries from modules the reader can read. Settings
+ * entries (invites, roles, credentials) need settings:audit, and entries marked
+ * with a read permission (confidential documents, statements) need that too.
+ */
 export async function activity(ctx: ServiceContext, q: { limit?: number; before?: string }) {
-  const readable = [...ctx.permissions.keys].filter((k) => k.endsWith(':read')).map((k) => k.split(':')[0]);
+  const readable = [...ctx.permissions.keys].filter((k) => k.endsWith(':read') && !k.startsWith('settings:')).map((k) => k.split(':')[0]);
   if (ctx.can('settings:audit')) readable.push('settings');
   if (readable.length === 0) return [];
-  const conds = [inArray(auditLog.module, readable)];
+  const held = [...ctx.permissions.keys];
+  const conds = [inArray(auditLog.module, readable), or(isNull(auditLog.readPermission), held.length ? inArray(auditLog.readPermission, held) : sql`false`)!];
   if (q.before) conds.push(lt(auditLog.createdAt, new Date(q.before)));
   return ctx.tx
     .select({ id: auditLog.id, actorType: auditLog.actorType, actorLabel: auditLog.actorLabel, action: auditLog.action, module: auditLog.module, targetType: auditLog.targetType, targetId: auditLog.targetId, targetLabel: auditLog.targetLabel, agentRunId: auditLog.agentRunId, createdAt: auditLog.createdAt })

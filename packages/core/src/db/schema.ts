@@ -200,6 +200,8 @@ export const auditLog = pgTable(
     targetLabel: text('target_label'),
     before: jsonb('before'),
     after: jsonb('after'),
+    /** Extra permission needed to see this entry in the activity feed (confidential or financial records). */
+    readPermission: text('read_permission'),
     agentRunId: uuid('agent_run_id'),
     agentStepId: uuid('agent_step_id'),
     ip: text('ip'),

@@ -24,6 +24,8 @@ export type AuditEntry = {
   targetLabel?: string;
   before?: Record<string, unknown> | null;
   after?: Record<string, unknown> | null;
+  /** Who may see this entry in the activity feed beyond the module's read permission. Auditors see everything. */
+  readPermission?: string;
 };
 
 export interface ServiceContext {
@@ -131,6 +133,7 @@ export async function withOrg<T>(input: OrgContextInput, fn: (ctx: ServiceContex
           targetLabel: entry.targetLabel,
           before: d.before,
           after: d.after,
+          readPermission: entry.readPermission ?? null,
           agentRunId: input.actor.type === 'agent' ? input.actor.runId : null,
           agentStepId: input.actor.type === 'agent' ? input.actor.stepId ?? null : null,
           ip: input.ip,

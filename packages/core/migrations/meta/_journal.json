@@ -8,6 +8,13 @@
       "when": 1790837961802,
       "tag": "0000_nifty_expediter",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790875815977,
+      "tag": "0001_audit_read_permission",
+      "breakpoints": true
     }
   ]
 }

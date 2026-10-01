@@ -28,6 +28,11 @@ function assertCanRead(ctx: ServiceContext, d: Document) {
 
 export const LinkInput = z.object({ entityType: z.enum(['artist', 'release', 'track', 'campaign', 'contact']), entityId: z.uuid() });
 
+/** Activity-feed visibility for a document's audit entries: statements are financial, flagged documents confidential. */
+export function documentReadPermission(d: Pick<Document, 'type' | 'confidential'>) {
+  return d.type === 'statement' ? 'documents:read_financial' : d.confidential ? 'documents:read_confidential' : undefined;
+}
+
 export const UploadMeta = z.object({
   type: z.enum(DOCUMENT_TYPES).default('other'),
   title: z.string().trim().max(300).optional(),
@@ -67,7 +72,7 @@ export async function uploadDocument(ctx: ServiceContext, file: { name: string; 
     await ctx.tx.insert(documentLinks).values({ documentId: row.id, entityType: l.entityType, entityId: l.entityId }).onConflictDoNothing();
   }
   if (previous) await ctx.tx.update(documents).set({ isLatest: false }).where(eq(documents.id, previous.id));
-  await ctx.audit({ action: previous ? 'document.version_uploaded' : 'document.uploaded', module: 'documents', targetType: 'document', targetId: row.id, targetLabel: row.title, after: { type: row.type, version: row.version, confidential: row.confidential } });
+  await ctx.audit({ action: previous ? 'document.version_uploaded' : 'document.uploaded', module: 'documents', targetType: 'document', targetId: row.id, targetLabel: row.title, after: { type: row.type, version: row.version, confidential: row.confidential }, readPermission: documentReadPermission(row) });
   await ctx.emit('documents.document.uploaded', { documentId: row.id, title: row.title, type: row.type });
   if (row.type === 'contract') enqueueAfterCommit(ctx, 'documents.extract', { documentId: row.id }, { jobId: `extract-${row.id}`, attempts: 3 });
   if (row.type === 'statement') enqueueAfterCommit(ctx, 'documents.parse-statement', { documentId: row.id }, { jobId: `statement-${row.id}`, attempts: 3 });
@@ -181,7 +186,7 @@ export async function updateDocument(ctx: ServiceContext, id: string, patch: z.i
   const before = await getDocumentRow(ctx, id);
   if (patch.confidential !== undefined && !ctx.can('documents:read_confidential')) throw new ForbiddenError('Only people who can open confidential documents can change the flag');
   const [after] = await ctx.tx.update(documents).set(patch).where(eq(documents.id, id)).returning();
-  await ctx.audit({ action: patch.contractStatus && patch.contractStatus !== before.contractStatus ? 'contract.status_changed' : 'document.updated', module: 'documents', targetType: 'document', targetId: id, targetLabel: after.title, before: before as never, after: after as never });
+  await ctx.audit({ action: patch.contractStatus && patch.contractStatus !== before.contractStatus ? 'contract.status_changed' : 'document.updated', module: 'documents', targetType: 'document', targetId: id, targetLabel: after.title, before: before as never, after: after as never, readPermission: documentReadPermission(after.confidential ? after : before) });
   return after;
 }
 
@@ -202,7 +207,7 @@ export async function deleteDocument(ctx: ServiceContext, id: string) {
   // Deleting the newest version makes the previous one current again.
   if (d.previousId && d.isLatest) await ctx.tx.update(documents).set({ isLatest: true }).where(eq(documents.id, d.previousId));
   await ctx.tx.delete(documents).where(eq(documents.id, id));
-  await ctx.audit({ action: 'document.deleted', module: 'documents', targetType: 'document', targetId: id, targetLabel: d.title });
+  await ctx.audit({ action: 'document.deleted', module: 'documents', targetType: 'document', targetId: id, targetLabel: d.title, readPermission: documentReadPermission(d) });
 }
 
 export async function requestExtraction(ctx: ServiceContext, id: string) {
@@ -257,7 +262,7 @@ export async function confirmTerms(ctx: ServiceContext, id: string, terms: z.inf
   const unique = new Map(dates.map((k) => [`${k.kind}:${k.date}`, k]));
   if (unique.size) await ctx.tx.insert(keyDates).values([...unique.values()].map((k) => ({ documentId: id, kind: k.kind, date: k.date, description: k.description })));
   for (const p of terms.parties) if (p.artistId) await ctx.tx.insert(documentLinks).values({ documentId: id, entityType: 'artist', entityId: p.artistId }).onConflictDoNothing();
-  await ctx.audit({ action: 'contract.terms_confirmed', module: 'documents', targetType: 'document', targetId: id, targetLabel: d.title, before: (d.terms ?? null) as never, after: terms as never });
+  await ctx.audit({ action: 'contract.terms_confirmed', module: 'documents', targetType: 'document', targetId: id, targetLabel: d.title, before: (d.terms ?? null) as never, after: terms as never , readPermission: documentReadPermission(d) });
   await ctx.emit('documents.terms.confirmed', { documentId: id, title: d.title });
   return after;
 }

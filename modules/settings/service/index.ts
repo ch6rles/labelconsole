@@ -132,9 +132,29 @@ export async function listMembers(ctx: ServiceContext) {
   return { members, invitations: pending.map((i) => ({ id: i.id, email: i.email, role: i.role, roleLabel: ROLE_LABELS[i.role as BuiltInRole] ?? i.role, expiresAt: i.expiresAt, createdAt: i.createdAt })) };
 }
 
-function assertAssignable(ctx: ServiceContext, role: string) {
+/**
+ * A role someone may hand out: one that exists, and never one with more access
+ * than they hold themselves (otherwise settings:members would be a path to admin).
+ */
+async function assertAssignable(ctx: ServiceContext, role: string, customRoleId?: string | null) {
   if (role !== 'custom' && !BUILT_IN_ROLES.includes(role as BuiltInRole)) throw new ValidationError(`Unknown role ${role}`);
   if (role === 'owner' && !ctx.permissions.has('settings:billing')) throw new ForbiddenError('Only an owner can grant the owner role');
+  let custom: string[] | undefined;
+  if (role === 'custom') {
+    if (!customRoleId) throw new ValidationError('Pick a custom role');
+    const [c] = await ctx.tx.select({ permissions: customRoles.permissions }).from(customRoles).where(eq(customRoles.id, customRoleId));
+    if (!c) throw new NotFoundError('Custom role');
+    custom = c.permissions;
+  }
+  const excess = PermissionSet.forRole(role, [], custom).toArray().filter((p) => !ctx.permissions.has(p));
+  if (excess.length) throw new ForbiddenError(`You can't give a role more access than you have (${excess.slice(0, 4).join(', ')}${excess.length > 4 ? ', …' : ''})`);
+}
+
+/** You can only change or remove someone whose access you fully hold yourself. */
+async function assertOutranks(ctx: ServiceContext, m: typeof memberships.$inferSelect) {
+  const [c] = m.customRoleId ? await ctx.tx.select({ permissions: customRoles.permissions }).from(customRoles).where(eq(customRoles.id, m.customRoleId)) : [];
+  const theirs = PermissionSet.forRole(m.role, m.extraPermissions, c?.permissions);
+  if (theirs.toArray().some((p) => !ctx.permissions.has(p))) throw new ForbiddenError('You can’t change someone who has more access than you');
 }
 
 /** Active members plus invitations that could still be accepted. */
@@ -148,7 +168,7 @@ async function seatsInUse(ctx: ServiceContext) {
 
 export async function inviteMember(ctx: ServiceContext, input: z.infer<typeof InviteInput>) {
   ctx.assert('settings:members');
-  assertAssignable(ctx, input.role);
+  await assertAssignable(ctx, input.role);
   const existing = await ctx.tx
     .select({ id: memberships.id })
     .from(memberships)
@@ -184,14 +204,14 @@ async function ownerCount(ctx: ServiceContext) {
 
 export async function changeRole(ctx: ServiceContext, membershipId: string, input: z.infer<typeof RoleChange>) {
   ctx.assert('settings:members');
-  assertAssignable(ctx, input.role);
+  await assertAssignable(ctx, input.role, input.customRoleId);
   const [m] = await ctx.tx.select().from(memberships).where(eq(memberships.id, membershipId));
   if (!m) throw new NotFoundError('Member');
+  await assertOutranks(ctx, m);
   if (m.role === 'owner' && input.role !== 'owner') {
     if (!ctx.permissions.has('settings:billing')) throw new ForbiddenError('Only an owner can change another owner');
     if ((await ownerCount(ctx)) <= 1) throw new ValidationError('A label needs at least one owner');
   }
-  if (input.role === 'custom' && !input.customRoleId) throw new ValidationError('Pick a custom role');
   const [after] = await ctx.tx
     .update(memberships)
     .set({ role: input.role, customRoleId: input.role === 'custom' ? input.customRoleId ?? null : null })
@@ -208,6 +228,7 @@ export async function removeMember(ctx: ServiceContext, membershipId: string) {
   const [m] = await ctx.tx.select().from(memberships).where(eq(memberships.id, membershipId));
   if (!m) throw new NotFoundError('Member');
   if (m.role === 'owner' && (await ownerCount(ctx)) <= 1) throw new ValidationError('A label needs at least one owner');
+  await assertOutranks(ctx, m);
   if (m.role === 'owner' && !ctx.permissions.has('settings:billing')) throw new ForbiddenError('Only an owner can remove an owner');
   await ctx.tx.update(memberships).set({ status: 'removed' }).where(eq(memberships.id, membershipId));
   const [u] = await ctx.tx.select({ name: users.name }).from(users).where(eq(users.id, m.userId));

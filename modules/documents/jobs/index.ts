@@ -115,7 +115,7 @@ export const jobs = [
           );
         }
         await ctx.tx.update(documents).set({ extractionStatus: 'done', extractedTerms: summary }).where(eq(documents.id, doc.id));
-        await ctx.audit({ action: 'statement.parsed', module: 'documents', targetType: 'document', targetId: doc.id, targetLabel: doc.title, after: { lines: lines.length, netCents: summary.netCents, anomalies: summary.anomalies.length } });
+        await ctx.audit({ action: 'statement.parsed', module: 'documents', targetType: 'document', targetId: doc.id, targetLabel: doc.title, after: { lines: lines.length, netCents: summary.netCents, anomalies: summary.anomalies.length } , readPermission: 'documents:read_financial' });
         await ctx.emit('documents.statement.parsed', { documentId: doc.id, lines: lines.length, periodStart: summary.periodStart, periodEnd: summary.periodEnd });
       });
       await publish(job.orgId!, { type: 'documents.extraction.updated', data: { documentId: doc.id, status: 'done' }, permission: 'documents:read_financial' });
