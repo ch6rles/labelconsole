@@ -62,7 +62,7 @@ function mapError(err: unknown): never {
   if (err instanceof Anthropic.APIConnectionError) throw new ProviderError('anthropic', err.message, { transient: true });
   if (err instanceof Anthropic.InternalServerError) throw new ProviderError('anthropic', err.message, { status: err.status, transient: true });
   if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
-    throw new ProviderError('anthropic', 'The Anthropic API key was rejected. Update it under Settings → Credentials.', { status: err.status, transient: false });
+    throw new ProviderError('anthropic', 'The Anthropic API key was rejected. Update it under Settings → Integrations.', { status: err.status, transient: false });
   }
   if (err instanceof Anthropic.APIError) throw new ProviderError('anthropic', err.message, { status: err.status, transient: false });
   throw err;
