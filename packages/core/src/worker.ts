@@ -101,7 +101,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerRuntime> {
 
   /* ---------------------------------------------------------- workers -- */
   const connection = createRedis();
-  const conc = { jobs: env().WORKER_CONCURRENCY, events: 16, agents: 8, ...opts.concurrency };
+  const conc = { jobs: env().WORKER_CONCURRENCY, events: 16, agents: env().WORKER_AGENT_CONCURRENCY, ...opts.concurrency };
 
   async function processJob(job: Job, token?: string) {
     const def = jobs.get(job.name);

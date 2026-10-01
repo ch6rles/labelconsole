@@ -36,6 +36,8 @@ const EnvSchema = z.object({
   /** Seed data is only ever written when this is set and NODE_ENV is not production. */
   LC_DEV_SEED: z.string().optional(),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(8),
+  /** Agent runs one worker process executes at once (they mostly wait on the model). */
+  WORKER_AGENT_CONCURRENCY: z.coerce.number().int().positive().default(8),
   AGENT_CONCURRENCY_PER_ORG: z.coerce.number().int().positive().default(4),
   WORKER_HEALTH_PORT: z.coerce.number().int().default(9091),
   /** Bearer token for GET /api/metrics (Prometheus). Unset means the endpoint is off. */

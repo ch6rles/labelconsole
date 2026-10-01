@@ -1,7 +1,6 @@
 # Label Console — build progress
 
-> **Current position:** Phases 1–6 are done. Phase 7 (hardening, docs, deploy) is next.
-> If work pauses again, resume from **"Next steps"** below and carry on through the phases in order.
+> **Current position:** All seven phases are done. What's left are decisions only the owner can make (see **Open decisions**), plus the follow-ups listed under **Next steps**.
 
 ## Phase status
 
@@ -13,7 +12,20 @@
 | 4 | Streams (YouTube Data API adapter, statement-import adapter, licensed-provider interface, snapshots, rollups, alerts) | Done |
 | 5 | Network (contacts, interactions, playlists) + Marketing (campaigns, pipeline boards, outreach, sketchboards) | Done |
 | 6 | Agent system (orchestrator, checkpointed runtime, tools, memory, triggers, approvals, budgets, delegation, kill switch, 8 agent types) + Inbox approvals page | Done |
-| 7 | Hardening: dev seed, docs (`label-console-plan.md`, `architecture-findings.md`, README), Dockerfiles, full test run, screenshots, push | **Next** |
+| 7 | Hardening: load tests, backups and restore drill, observability, billing (plan limits), onboarding, dev seed, Docker, docs | Done |
+
+## Phase 1 acceptance
+
+- **Two test labels cannot see each other's data:** `packages/core/src/rls.int.test.ts` runs as the restricted app role and checks that rows of one label are invisible to the other, and that writes into another label are rejected by RLS.
+- **A background job runs on the worker with the browser closed:** `packages/core/src/worker.int.test.ts` runs a queued job on a real worker scoped to its label, delivers committed outbox events to listeners, and never delivers events from a rolled-back transaction.
+- **The shell matches the design file:** tokens, sidebar, top bar, label switcher, command palette, notifications and agent indicator were built from `Label Console.dc.html` and compared at desktop and mobile widths.
+- Also covered: sessions and invitations (`auth.int.test.ts`), the vault (`vault.int.test.ts`), permissions (`permissions.test.ts`).
+
+## Phase 2 acceptance
+
+- **Pasting a DSP link or ISRC creates a release and track with ISRC, UPC and a distributor guess with evidence:**
+  - `modules/catalogue/metadata/metadata.test.ts` covers link, ISRC, UPC and "Artist - Title" parsing, embedded ID3 tags, merging by source priority with conflicts, distributor inference (label text, learned UPC prefixes, a licensed field), and resolving an ISRC through Deezer, MusicBrainz and iTunes.
+  - `modules/catalogue/catalogue.int.test.ts` covers confirming a resolved lookup into releases, tracks, artists and platform identities; release readiness; and the bulk-import CSV parser.
 
 ## Phase 3 acceptance
 
@@ -94,28 +106,70 @@
   - cron and event triggers
   - the owner permission cap
 
-## Next steps (resume here)
+## Phase 7 acceptance
 
-1. **Phase 7 hardening.**
-   - Dev seed behind `LC_DEV_SEED=1` (sample label, releases, contacts, campaigns, agents). Never runs in production.
-   - Write `docs/label-console-plan.md`, `docs/architecture-findings.md` and the README.
-   - Dockerfiles for web and worker, plus deploy notes.
-   - Full test run, typecheck and `next build`; desktop and mobile screenshots.
-   - Final progress update and push.
+- **Load test with many concurrent agents** (`pnpm test:load`):
+  - Many labels' agents run through the real worker, queues, runtime and tools; only the model is a stub, with 60–180 ms latency.
+  - 400 runs across 40 labels finished in about 16 s on one worker process (32 agent slots).
+  - No label exceeded its concurrency limit, no model call or tool side effect repeated, and API reads stayed under 45 ms p95.
+  - Finding fixed: runs that hit a label's limit backed off a fixed 10 s; the backoff is now 1.5–4 s with jitter, which took the worst queue wait from 11.6 s to 2.7 s.
+- **Backups and restore drill** (`pnpm db:backup`, `pnpm db:restore-drill`):
+  - The dump is taken from an exported snapshot, with a manifest of row counts from that same snapshot.
+  - The drill restores into a scratch database and checks the checksum, row counts table by table, migrations, row-level security for the app role, and that every vault key and credential decrypts.
+  - Verified passing, and verified failing (exit 1) with the wrong master key.
+- **Observability:**
+  - `/api/metrics` (Prometheus, token-protected, aggregates only): queues, worker heartbeats, outbox lag, job throughput, failures and durations, agents, streams and documents.
+  - `/api/health?deep=1` adds worker liveness and outbox lag.
+  - A Grafana dashboard and Prometheus alert rules are in `infra/`.
+- **Billing:**
+  - Plan tiers gate modules.
+  - Per-plan limits on seats (invitations count), tracked tracks and file storage are checked when something is added, under an advisory lock so concurrent adds can't both take the last slot.
+  - Over the tracking limit, new tracks wait and are added automatically once there is room.
+  - Settings → Plan & usage shows each limit. Taking payment is an open decision.
+- **Onboarding:**
+  - New labels get a getting-started checklist on the dashboard. Each module contributes its own step: label details, team, artists, a release, a contract or statement, YouTube, an agent.
+  - The checklist can be hidden, and brought back from Settings.
+- **Dev seed:** `LC_DEV_SEED=1 pnpm db:seed` creates a sample label through the real services. It refuses without the flag and always refuses in production. It invents no stream readings.
+- **Docker:**
+  - The `Dockerfile` builds web (Next standalone) and worker images: the worker bundle plus only its runtime packages, 431 MB.
+  - `docker-compose.yml` runs the full stack. Verified: a fresh stack comes up healthy, sign-up and catalogue writes work, and the containerized worker processes their events.
+- **Docs:** `docs/label-console-plan.md` (the spec), `docs/architecture-findings.md`, `docs/operations.md`, `README.md`.
+- **Bugs found and fixed while hardening:**
+  - **Leaking queue connections:** BullMQ queues kept their Redis connections open, so scripts never exited and worker shutdown waited for its force-exit timer.
+  - **Worker failed outside the monorepo:** the bundle imported packages the worker never declared, and pulled React and Next in through the UI index.
+  - **Stale event triggers:** events that happened before an agent's trigger existed could start it, because outbox delivery is asynchronous.
+  - **Doomed runs:** runs were queued with no model key configured and could only fail.
+  - **Permission typo:** a page checked a permission no module declares. A test now scans for undeclared permission keys.
+  - **Broken links:** some links pointed at `/settings/workspace`.
+- **Tests:** 99 passing, plus the load test and the restore drill.
 
-## Open questions for the owner
+## Next steps
 
-- The licensed stream-data vendor hasn't been chosen yet. Only the provider interface exists (`modules/streams/sources/licensed.ts`); the plan says to ask before adding a paid service.
-- YouTube polling needs a YouTube Data API key: either the label's own (Settings → Integrations) or a platform `YOUTUBE_API_KEY`. The default quota is 10,000 units per day per Google project.
-- No paid embedding provider is used. Memory uses a pgvector column with a Postgres full-text-search fallback.
-- Agents need an Anthropic API key, either the label's own (Settings → Integrations) or a platform `ANTHROPIC_API_KEY`. Contract term extraction and statement PDF reading need it too.
+1. Decide the open items below; each has its integration point ready.
+2. Run the restore drill and the load test against staging infrastructure, and record the numbers in `docs/operations.md`.
+3. Set real plan limits in `packages/core/src/plans.ts` once pricing is decided.
+
+## Open decisions
+
+These need the owner. Nothing paid was added without asking.
+
+- **Licensed stream-data vendor** for Spotify counts (Chartmetric, Songstats, Soundcharts, …). The adapter interface is ready (`modules/streams/sources/licensed.ts`).
+- **API keys:** an Anthropic key (agents, contract reading) and a YouTube Data API key (stream polling, 10,000 units/day by default), either platform-wide or per label.
+- **Payment provider** (for example Stripe) to take payment for plans, and **real plan limits and prices**. Limits today are placeholders in `packages/core/src/plans.ts`.
+- **Embedding provider** for agent memory. Memory uses full-text search plus importance and recency; the pgvector column is ready.
+- **Error tracking and tracing** (Sentry, or an OpenTelemetry backend such as Grafana Tempo or Honeycomb). Metrics, dashboards and alerts are in place.
+- **Spotify Web API extended access**, or rely on Deezer, MusicBrainz and Apple for metadata (current default).
+- **Outreach channels for agents** beyond email; most social platforms restrict automated DMs.
+- **Artist portal** logins (a later phase in the spec).
 
 ## Running locally
+
+See the [README](../README.md) for setup, and [operations.md](operations.md) for deploying.
 
 ```
 pnpm install
 pnpm db:setup && pnpm db:migrate     # needs Postgres 16 with pgvector, plus Redis
-pnpm --filter @labelconsole/web dev  # http://localhost:3000
-pnpm --filter @labelconsole/worker dev
+LC_DEV_SEED=1 pnpm db:seed           # optional sample label
+pnpm dev                             # web on http://localhost:3000 and the worker
 pnpm test
 ```

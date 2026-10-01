@@ -2,7 +2,9 @@ import { signup } from '@labelconsole/core/auth';
 import { withOrg, withSystemOrg, type ServiceContext } from '@labelconsole/core/context';
 import { logger } from '@labelconsole/core/logger';
 import type { JobContext, JobDefinition } from '@labelconsole/core/queue';
-import { PermissionSet } from '@labelconsole/core/permissions';
+import { PermissionSet, type BuiltInRole } from '@labelconsole/core/permissions';
+import { systemDb } from '@labelconsole/core/db/client';
+import { memberships } from '@labelconsole/core/db/schema';
 
 let n = 0;
 export const uniqueEmail = () => `user${Date.now().toString(36)}${n++}@example.test`;
@@ -15,6 +17,14 @@ export async function makeOrg(label = 'Test Label') {
   const as = <T>(fn: (ctx: ServiceContext) => Promise<T>, permissions?: PermissionSet) =>
     withOrg({ orgId: org.id, actor: { type: 'user', id: user.id, name: user.name }, permissions: permissions ?? PermissionSet.forRole('owner') }, fn);
   return { user, org, as };
+}
+
+/** Another person in an existing label, with a built-in role, and a helper to act as them. */
+export async function addMember(org: TestOrg, role: BuiltInRole, name = `${role} member`) {
+  const { user } = await signup({ name, email: uniqueEmail(), password: 'correct horse battery', labelName: `${name}'s own label` });
+  await systemDb().insert(memberships).values({ orgId: org.org.id, userId: user.id, role, createdBy: `user:${org.user.id}` });
+  const as = <T>(fn: (ctx: ServiceContext) => Promise<T>) => withOrg({ orgId: org.org.id, actor: { type: 'user', id: user.id, name: user.name }, permissions: PermissionSet.forRole(role) }, fn);
+  return { user, as };
 }
 
 /** Run a job handler in-process, the way the worker would, without a queue. */

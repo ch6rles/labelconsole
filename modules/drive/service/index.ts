@@ -210,12 +210,20 @@ export async function storeFile(ctx: ServiceContext, input: StoreInput): Promise
       cb(null, chunk);
     },
   });
+  // pipe() starts the flow at once, before the storage driver attaches its own listeners;
+  // without these, a rejected chunk (wrong type, too big) or a broken upload would be an
+  // uncaught exception that takes the process down.
+  const failed: { error: Error | null } = { error: null };
+  meter.on('error', (err) => (failed.error ??= err));
+  source.on('error', (err) => meter.destroy(err));
   const key = storageKey(ctx.orgId, 'drive', name);
   try {
     await storage().put(key, source.pipe(meter), { contentType: mime });
+    if (failed.error) throw failed.error;
   } catch (err) {
     await storage().delete(key).catch(() => undefined);
-    throw err instanceof ValidationError ? err : new ValidationError((err as Error).message);
+    const cause = failed.error ?? (err as Error);
+    throw cause instanceof ValidationError ? cause : new ValidationError(cause.message);
   }
   if (size === 0) {
     await storage().delete(key).catch(() => undefined);
