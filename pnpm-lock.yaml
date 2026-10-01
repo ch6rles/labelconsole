@@ -232,6 +232,9 @@ importers:
       '@labelconsole/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      cron-parser:
+        specifier: ^4.9.0
+        version: 4.9.0
       drizzle-orm:
         specifier: ^0.45.3
         version: 0.45.3(postgres@3.4.9)

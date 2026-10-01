@@ -18,10 +18,10 @@ export async function makeOrg(label = 'Test Label') {
 }
 
 /** Run a job handler in-process, the way the worker would, without a queue. */
-export function jobContext(orgId: string | null, name = 'test-job') {
+export function jobContext(orgId: string | null, name = 'test-job', opts: { attempts?: number; attemptsMade?: number } = {}) {
   const ctx: JobContext = {
     orgId,
-    job: { id: `test-${Date.now()}`, name, attemptsMade: 0 } as unknown as JobContext['job'],
+    job: { id: `test-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name, attemptsMade: opts.attemptsMade ?? 0, opts: { attempts: opts.attempts ?? 1 } } as unknown as JobContext['job'],
     log: logger.child({ test: name }),
     progress: async () => {},
     withOrg: (fn) => {
@@ -33,8 +33,8 @@ export function jobContext(orgId: string | null, name = 'test-job') {
 }
 
 /** Find a module job definition by name and run it with the given data. */
-export async function runJob(jobs: JobDefinition[], name: string, orgId: string | null, data: unknown = {}) {
+export async function runJob(jobs: JobDefinition[], name: string, orgId: string | null, data: unknown = {}, opts: { attempts?: number; attemptsMade?: number } = {}) {
   const def = jobs.find((j) => j.name === name);
   if (!def) throw new Error(`No job ${name}`);
-  return def.handler(jobContext(orgId, name), data);
+  return def.handler(jobContext(orgId, name, opts), data);
 }

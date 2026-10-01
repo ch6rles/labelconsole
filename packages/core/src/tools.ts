@@ -26,6 +26,8 @@ export interface ToolContext {
   credential(provider: string): Promise<CredentialHandle | null>;
   /** Start a child run for another agent (only the delegate tool uses this). */
   delegate?(input: { agentId: string; task: string }): Promise<{ childRunId: string }>;
+  /** What is left of this run's budget, in USD, or null when unlimited. */
+  remainingBudgetUsd?: number | null;
 }
 
 export interface ToolDefinition<I extends z.ZodType = z.ZodType, O = unknown> {
@@ -41,6 +43,12 @@ export interface ToolDefinition<I extends z.ZodType = z.ZodType, O = unknown> {
   idempotent?: boolean;
   /** Always stop for a human, whatever the agent's policy says (e.g. asking for sign-off). */
   requiresApproval?: boolean;
+  /**
+   * Situational approval: return a reason when this particular call needs a
+   * person (e.g. delegating beyond the remaining budget), or null to follow
+   * the agent's policy.
+   */
+  approvalReason?(ctx: ToolContext, input: z.infer<I>): Promise<string | null>;
   /** Human-readable summary of what the call will do, shown in the approvals inbox. */
   preview?(input: z.infer<I>): string;
   execute(ctx: ToolContext, input: z.infer<I>): Promise<O>;

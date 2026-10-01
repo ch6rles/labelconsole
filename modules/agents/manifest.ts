@@ -24,5 +24,5 @@ export const manifest: ModuleManifest = {
     },
   ],
   events: { emits: ['agents.run.started', 'agents.run.completed', 'agents.run.failed', 'agents.approval.requested', 'agents.approval.decided'], listens: ['*'] },
-  tools: ['agents_delegate_task', 'agents_remember', 'agents_recall'],
+  tools: ['agents_list', 'agents_delegate_task', 'agents_remember', 'agents_recall'],
 };

@@ -105,6 +105,16 @@ export function getModule(id: string): ModuleServer | undefined {
   return registry.get(id);
 }
 
+/** Every registered agent tool, optionally limited to the modules an org has on. */
+export function allTools(enabled?: Set<string>): ToolDefinition[] {
+  return [...registry.values()].filter((m) => !enabled || enabled.has(m.manifest.id)).flatMap((m) => m.tools ?? []);
+}
+
+export function toolByName(name: string): ToolDefinition | undefined {
+  for (const m of registry.values()) for (const t of m.tools ?? []) if (t.name === name) return t;
+  return undefined;
+}
+
 /** Which modules are on for an org: explicit toggles win, else the plan default. */
 export async function enabledModuleIds(db: DbLike, org: { id: string; plan: string }): Promise<Set<string>> {
   const rows = await db.select().from(orgModules).where(eq(orgModules.orgId, org.id));
