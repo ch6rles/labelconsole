@@ -6,7 +6,7 @@ import { contacts, playlists } from '@labelconsole/network/schema';
 
 export const CAMPAIGN_STATUSES = ['planning', 'active', 'paused', 'completed', 'cancelled'] as const;
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
-export type Kpi = { name: string; target: number; unit: string; metric?: 'streams' | 'views' | 'posts' | 'adds' | 'custom' };
+export type Kpi = { name: string; target: number; unit: string; metric?: 'streams' | 'views' | 'posts' | 'adds' | 'custom'; /** Entered by hand for custom KPIs; the others are measured. */ actual?: number | null };
 
 export const campaigns = pgTable(
   'campaigns',
@@ -79,7 +79,7 @@ export const cards = pgTable(
   (t) => [index('pipeline_cards_board_idx').on(t.orgId, t.boardId, t.stage, t.position), index('pipeline_cards_campaign_idx').on(t.orgId, t.campaignId)],
 );
 
-export const PITCH_STATUSES = ['draft', 'approved', 'sent', 'opened', 'replied', 'accepted', 'declined'] as const;
+export const PITCH_STATUSES = ['draft', 'approved', 'sending', 'sent', 'opened', 'replied', 'accepted', 'declined'] as const;
 
 /** Playlist / editor outreach tracker. */
 export const pitches = pgTable(

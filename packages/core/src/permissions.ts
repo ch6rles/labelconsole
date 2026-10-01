@@ -42,7 +42,7 @@ const ROLE_GRANTS: Record<BuiltInRole, string[]> = {
   owner: ['*'],
   admin: ['*'],
   manager: [
-    'catalogue:*', 'people:*', 'network:*', 'marketing:*', 'drive:*', 'streams:*', 'inbox:*',
+    'catalogue:*', 'people:*', 'network:*', 'marketing:*', 'marketing:spend', 'drive:*', 'streams:*', 'inbox:*',
     'documents:read', 'documents:write', 'documents:read_financial',
     'agents:read', 'agents:run', 'agents:manage', 'agents:approve',
     'settings:read', 'settings:audit',
@@ -52,7 +52,7 @@ const ROLE_GRANTS: Record<BuiltInRole, string[]> = {
     'documents:read', 'streams:read', 'inbox:*', 'agents:read', 'agents:run', 'agents:approve', 'settings:read',
   ],
   marketing: [
-    'marketing:*', 'network:*', 'catalogue:read', 'people:read', 'streams:read', 'drive:read', 'drive:write',
+    'marketing:*', 'marketing:spend', 'network:*', 'catalogue:read', 'people:read', 'streams:read', 'drive:read', 'drive:write',
     'documents:read', 'inbox:*', 'agents:read', 'agents:run', 'agents:approve', 'settings:read',
   ],
   finance: [

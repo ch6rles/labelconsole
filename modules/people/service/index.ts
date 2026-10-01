@@ -1,6 +1,7 @@
 import '../types';
 import { and, asc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { patchOf } from '@labelconsole/core/zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { memberships, users } from '@labelconsole/core/db/schema';
 import { NotFoundError } from '@labelconsole/core/errors';
@@ -27,7 +28,7 @@ export const ArtistInput = z.object({
   rosterSince: z.iso.date().nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
 });
-export const ArtistPatch = ArtistInput.partial();
+export const ArtistPatch = patchOf(ArtistInput);
 
 export const OnboardingPatch = z.object({
   profile: z.boolean(),

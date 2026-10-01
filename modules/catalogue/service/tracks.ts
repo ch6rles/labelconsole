@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { patchOf } from '@labelconsole/core/zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { NotFoundError, ValidationError } from '@labelconsole/core/errors';
 import { artists } from '@labelconsole/people/schema';
@@ -20,7 +21,7 @@ export const TrackInput = z.object({
   artistIds: z.array(z.uuid()).max(20).optional(),
   releaseId: z.uuid().optional(),
 });
-export const TrackPatch = TrackInput.omit({ releaseId: true }).partial().extend({ audioFileId: z.uuid().nullable().optional() });
+export const TrackPatch = patchOf(TrackInput.omit({ releaseId: true })).extend({ audioFileId: z.uuid().nullable().optional() });
 
 export const CreditInput = z.object({ name: z.string().trim().min(1).max(200), role: z.string().trim().min(1).max(80), artistId: z.uuid().nullable().optional() });
 

@@ -27,6 +27,6 @@ export const routes = defineRoutes('streams', [
   route({ method: 'POST', path: '/streams/alerts/:id/ack', permission: 'streams:read', handler: (ctx, req) => svc.acknowledgeAlert(ctx, req.params.id) }),
   route({ method: 'GET', path: '/streams/alert-rules', permission: 'streams:read', handler: (ctx) => svc.listRules(ctx) }),
   route({ method: 'POST', path: '/streams/alert-rules', permission: 'streams:manage', body: svc.RuleInput, handler: (ctx, req) => svc.createRule(ctx, req.body) }),
-  route({ method: 'PATCH', path: '/streams/alert-rules/:id', permission: 'streams:manage', body: svc.RuleInput.partial(), handler: (ctx, req) => svc.updateRule(ctx, req.params.id, req.body) }),
+  route({ method: 'PATCH', path: '/streams/alert-rules/:id', permission: 'streams:manage', body: svc.RulePatch, handler: (ctx, req) => svc.updateRule(ctx, req.params.id, req.body) }),
   route({ method: 'DELETE', path: '/streams/alert-rules/:id', permission: 'streams:manage', handler: (ctx, req) => svc.deleteRule(ctx, req.params.id) }),
 ]);

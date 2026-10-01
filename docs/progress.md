@@ -1,6 +1,6 @@
 # Label Console — build progress
 
-> **Current position:** Phases 1–4 are done. Phase 5 (Network + Marketing) is next.
+> **Current position:** Phases 1–5 are done. Phase 6 (the agent system) is next.
 > If work pauses again, resume from **"Next steps"** below and carry on through the phases in order.
 
 ## Phase status
@@ -11,8 +11,8 @@
 | 2 | Catalogue + in-house metadata lookup (`POST /v1/metadata/resolve`, distributor inference, bulk import, demos + public intake) | Done |
 | 3 | People, Drive, Documents (contracts with AI term review, statements, royalties, key dates) | Done |
 | 4 | Streams (YouTube Data API adapter, statement-import adapter, licensed-provider interface, snapshots, rollups, alerts) | Done |
-| 5 | Network (contacts, interactions, playlists) + Marketing (campaigns, pipeline boards, outreach, sketchboards) | **Next** (schema + manifest exist) |
-| 6 | Agent system (orchestrator, checkpointed runtime, tools, memory, triggers, approvals, budgets, delegation, kill switch, 8 agent types) + Inbox approvals page | Not started (schema + manifest; Inbox and Settings are done) |
+| 5 | Network (contacts, interactions, playlists) + Marketing (campaigns, pipeline boards, outreach, sketchboards) | Done |
+| 6 | Agent system (orchestrator, checkpointed runtime, tools, memory, triggers, approvals, budgets, delegation, kill switch, 8 agent types) + Inbox approvals page | **Next** (schema, manifest and 33 module tools exist; Inbox and Settings are done) |
 | 7 | Hardening: dev seed, docs (`label-console-plan.md`, `architecture-findings.md`, README), Dockerfiles, full test run, screenshots, push | Not started |
 
 ## Phase 3 acceptance
@@ -37,18 +37,42 @@
 - **Agent tools:** `streams_get_history` and `streams_top_movers` return derived numbers only.
 - **Tests:** 66 passing. They cover polling, rollups, alerts, the resolver, statement import, the missing-key path, the scheduler fan-out and tenant isolation.
 
+## Phase 5 acceptance
+
+- **Network:** a contacts CRM for creators, editors, curators and press.
+  - Handles are normalised and deduplicated by email or handle.
+  - Contacts carry audience, genres, rate and a relationship stage, which logged interactions move along. Do-not-contact blocks outreach.
+  - Account checks record verified or gone; gone accounts stay visible for audit.
+  - Playlists are recorded with their curators.
+- **Marketing:**
+  - Campaigns are tied to a release, with budget, dates, status and KPIs. KPIs are measured from the tracker (streams), bookings (views and posts) and accepted pitches (adds), or entered by hand.
+  - Each campaign shows its stream delta: plays during the campaign versus the same number of days before it started.
+  - Pipeline boards (creator, editor, playlist, custom) use Kanban with drag between stages. Creator cards are the booking ledger: offer, payment, posts ordered and delivered, proof links and measured views. Recording money needs `marketing:spend`.
+  - Paid spend can't be deleted.
+  - The outreach tracker drafts pitches and sends them through the worker over SMTP, at most once (approved → sending → sent). Each send is logged in the contact's history.
+  - Sketchboards are a canvas with notes, references and milestones, with autosave and version conflict detection.
+  - The Marketing overview matches the design ("what needs doing, most money first"), computed from the ledger. A full bookings CSV is available.
+  - Live campaigns mark their tracks active for 6-hourly stream polling through the `stream-tier` enrich hook.
+  - Agent tools: `network_*` (3) and `marketing_*` (6). Sending outreach always needs approval.
+- **Bug fixed across modules:** Zod's `.partial()` keeps defaults, so PATCH requests silently reset fields such as release status or artist payout method. Every patch schema now uses `patchOf()` from `@labelconsole/core/zod`, with regression tests.
+- **Tests:** 74 passing.
+
 ## Next steps (resume here)
 
-1. **Phase 5 Network + Marketing**:
-   - contacts CRM, interactions and playlists
-   - campaigns with a linked release, KPIs and stream deltas (from `streams` history)
-   - pipeline boards (Kanban)
-   - outreach pitches sent over SMTP after approval
-   - sketchboards
-   - the Marketing overview task list
-   - mark campaign tracks active through the `stream-tier` enrich hook
-2. **Phase 6 Agents**: runtime, triggers, approvals UI, tests with the stubbed provider (`setLlmProviderFactory`).
-3. **Phase 7**: dev seed, docs, Dockerfiles, full verification.
+1. **Phase 6 Agents.**
+   - Agent type registry (8 types: Label Manager, Playlist and Editor Outreach, Creator Outreach, Trend and Social Monitor, A&R Scout, Stream Watch, Contract and Rights, Release Ops).
+   - Orchestrator: start, pause, resume, stop, per-org concurrency, and the kill switch (`organizations.agentsPaused`).
+   - Runtime job `agents.run`:
+     - lease and heartbeat, with a checkpoint after every step
+     - tools filtered by permission and frozen per run
+     - approval policy by risk level
+     - idempotency through `idempotency_keys`
+     - budgets, compaction, delegation with `waiting_child`, memory, and the web search server tool
+   - Triggers: cron (via `agents.tick`), events (`*` listener) and webhooks (`/api/webhooks/agents/[token]`).
+   - Approvals service and the Inbox approvals page.
+   - Agents UI: list, builder, live run view, plan tree, memory and usage.
+   - Tests with the stubbed provider (`setLlmProviderFactory`): the loop, approvals, crash recovery, budgets and the kill switch.
+2. **Phase 7**: dev seed, docs, Dockerfiles, full verification.
 
 ## Open questions for the owner
 

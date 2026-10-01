@@ -17,7 +17,7 @@ export const manifest: ModuleManifest = {
     {
       section: MARKETING_SECTION,
       tabs: [
-        { id: 'contacts', label: 'Creators & Contacts', href: '/marketing/contacts', permission: 'network:read', order: 60 },
+        { id: 'contacts', label: 'Creators', href: '/marketing/contacts', permission: 'network:read', order: 60 },
         { id: 'playlists', label: 'Playlists', href: '/marketing/playlists', permission: 'network:read', order: 70 },
       ],
     },

@@ -41,6 +41,23 @@ export default defineModule({
       },
     },
   ],
+  stats: async (ctx) => {
+    if (!ctx.can('documents:read_financial')) return [];
+    const r = await svc.royalties(ctx, 12);
+    if (!r.period) return [{ label: 'REVENUE · BOOKED', icon: 'payments', value: '—', note: 'import a distributor statement', group: 'health' }];
+    const prev = r.byMonth.at(-2);
+    const change = prev && prev.netCents > 0 ? ((r.totals.netCents - prev.netCents) / prev.netCents) * 100 : null;
+    return [
+      {
+        label: 'REVENUE · BOOKED',
+        icon: 'payments',
+        value: fmt.moneyCents(r.totals.netCents),
+        delta: change != null ? fmt.pct(change, { signed: true, decimals: 1 }) : undefined,
+        note: `${r.period} · booked through ${r.bookedThrough ?? '—'}`,
+        group: 'health',
+      },
+    ];
+  },
   attention: async (ctx) => {
     if (!ctx.can('documents:read')) return [];
     const [unsigned, dates, contracts] = await Promise.all([svc.liveReleasesOnUnsignedPaper(ctx), svc.upcomingKeyDates(ctx, 30), svc.listDocuments(ctx, { type: 'contract' })]);

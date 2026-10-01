@@ -90,7 +90,8 @@ export function LineChart({ series, height = 220, format = (v: number) => compac
         </g>
       ))}
       {xs.map((v, i) =>
-        i % labelEvery === 0 || i === xs.length - 1 ? (
+        // Every nth label, plus the last one unless it would collide with the previous label.
+        i % labelEvery === 0 || (i === xs.length - 1 && i % labelEvery >= labelEvery / 2) ? (
           <text key={v} x={x(v)} y={H - 8} textAnchor="middle">
             {v.slice(5)}
           </text>

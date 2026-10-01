@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { patchOf } from '@labelconsole/core/zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { NotFoundError } from '@labelconsole/core/errors';
 import { artists } from '@labelconsole/people/schema';
@@ -21,7 +22,7 @@ export const ReleaseInput = z.object({
   notes: z.string().max(5000).nullable().optional(),
   artistIds: z.array(z.uuid()).max(20).optional(),
 });
-export const ReleasePatch = ReleaseInput.partial().extend({ artworkFileId: z.uuid().nullable().optional() });
+export const ReleasePatch = patchOf(ReleaseInput).extend({ artworkFileId: z.uuid().nullable().optional() });
 
 /** Manual checklist steps every release starts with; automatic checks are computed. */
 export const DEFAULT_CHECKLIST: ChecklistItem[] = [

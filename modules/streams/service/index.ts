@@ -1,6 +1,7 @@
 import '../types';
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { patchOf } from '@labelconsole/core/zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { credentials, organizations } from '@labelconsole/core/db/schema';
 import { env } from '@labelconsole/core/env';
@@ -456,6 +457,8 @@ export const RuleInput = z.object({
   enabled: z.boolean().default(true),
 });
 
+export const RulePatch = patchOf(RuleInput);
+
 export async function createRule(ctx: ServiceContext, input: z.input<typeof RuleInput>) {
   ctx.assert('streams:manage');
   const r = RuleInput.parse(input);
@@ -464,9 +467,9 @@ export async function createRule(ctx: ServiceContext, input: z.input<typeof Rule
   return row;
 }
 
-export async function updateRule(ctx: ServiceContext, id: string, patch: Partial<z.input<typeof RuleInput>>) {
+export async function updateRule(ctx: ServiceContext, id: string, patch: z.input<typeof RulePatch>) {
   ctx.assert('streams:manage');
-  const p = RuleInput.partial().parse(patch);
+  const p = RulePatch.parse(patch);
   const [before] = await ctx.tx.select().from(alertRules).where(eq(alertRules.id, id));
   if (!before) throw new NotFoundError('Alert rule');
   const [row] = await ctx.tx.update(alertRules).set({ ...p, threshold: p.threshold != null ? String(p.threshold) : undefined }).where(eq(alertRules.id, id)).returning();
@@ -570,4 +573,20 @@ export async function backfillRegistry(ctx: ServiceContext, limit = 200) {
     .limit(limit);
   for (const t of missing) await registerTrack(ctx, t.id);
   return missing.length;
+}
+
+/**
+ * Plays (polled sources) for a set of tracks between two days, by day.
+ * Marketing uses it for a campaign's stream delta.
+ */
+export async function playsForTracks(ctx: ServiceContext, trackIds: string[], from: string, to: string) {
+  if (trackIds.length === 0 || !ctx.can('streams:read')) return { total: 0, daily: [] as Array<{ day: string; plays: number }> };
+  const rows = await ctx.tx
+    .select({ day: sql<string>`${streamDaily.day}::text`, plays: sql<number>`sum(${streamDaily.delta})::bigint` })
+    .from(streamDaily)
+    .where(and(inArray(streamDaily.trackId, trackIds), gte(streamDaily.day, from), lte(streamDaily.day, to), sql`${streamDaily.source} in ${polled}`))
+    .groupBy(streamDaily.day)
+    .orderBy(streamDaily.day);
+  const daily = rows.map((r) => ({ day: r.day, plays: Number(r.plays) }));
+  return { total: daily.reduce((a, d) => a + d.plays, 0), daily };
 }

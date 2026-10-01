@@ -1748,7 +1748,7 @@ button.lc-table-row {
 .lc-kanban {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(260px, 1fr);
+  grid-auto-columns: minmax(200px, 1fr);
   gap: 12px;
   overflow-x: auto;
   padding-bottom: 8px;
@@ -2026,6 +2026,9 @@ button.lc-table-row {
   background: var(--lc-ink);
   color: #fff;
   border-color: var(--lc-ink);
+}
+.lc-canvas-item.is-ink input {
+  color-scheme: dark;
 }
 .lc-canvas-item.is-red {
   background: var(--lc-danger-soft);

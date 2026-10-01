@@ -109,3 +109,20 @@ describe('catalogue', () => {
     expect(svc.parseCodesCsv('724384960650\n724384960650\n')).toEqual(['724384960650']);
   });
 });
+
+describe('partial updates', () => {
+  it('only change the fields sent, never resetting defaults', async () => {
+    const a = await makeOrg();
+    const { release, artist } = await a.as(async (ctx) => {
+      const artist = await createArtist(ctx, { name: 'Kofi Brandt', status: 'active', payoutMethod: 'bank', aliases: ['KB'] });
+      const release = await svc.createRelease(ctx, { title: 'Concrete Bloom', type: 'album', status: 'live', artistIds: [artist.id] });
+      return { release, artist };
+    });
+    await a.as((ctx) => svc.updateRelease(ctx, release.id, svc.ReleasePatch.parse({ title: 'Concrete Bloom (Deluxe)' })));
+    const r = await a.as((ctx) => svc.getRelease(ctx, release.id));
+    expect(r.release).toMatchObject({ title: 'Concrete Bloom (Deluxe)', type: 'album', status: 'live' });
+    const { updateArtist, ArtistPatch, getArtist } = await import('@labelconsole/people/service');
+    await a.as((ctx) => updateArtist(ctx, artist.id, ArtistPatch.parse({ country: 'DE' })));
+    expect(await a.as((ctx) => getArtist(ctx, artist.id))).toMatchObject({ status: 'active', payoutMethod: 'bank', aliases: ['KB'], country: 'DE' });
+  });
+});
