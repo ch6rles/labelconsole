@@ -202,3 +202,34 @@ export async function rotateSecret(ctx: ServiceContext, id: string, secret: Reco
   const [iv, authTag, ciphertext] = encrypt(key, Buffer.from(JSON.stringify(secret), 'utf8'));
   await ctx.tx.update(credentials).set({ iv, authTag, ciphertext }).where(eq(credentials.id, id));
 }
+
+/**
+ * Prove the vault is readable with the configured master key: every org data
+ * key unwraps and every live credential decrypts. Plaintext is discarded and
+ * nothing is cached. Used by the restore drill and before master-key changes.
+ */
+export async function verifyVault(db: DbLike): Promise<{ orgKeys: number; credentials: number; failures: string[] }> {
+  assertCanDecrypt();
+  const failures: string[] = [];
+  const keys = new Map<string, Buffer>();
+  const wrapped = await db.select().from(orgKeys);
+  for (const k of wrapped) {
+    try {
+      keys.set(k.orgId, await keyProvider().unwrap(k.wrappedKey));
+    } catch {
+      failures.push(`org key for ${k.orgId} (master key ${k.masterKeyId}) does not unwrap`);
+    }
+  }
+  const creds = await db.select().from(credentials).where(isNull(credentials.revokedAt));
+  for (const c of creds) {
+    const key = keys.get(c.orgId);
+    try {
+      if (!key) throw new Error('no data key');
+      decrypt(key, c.iv, c.authTag, c.ciphertext).fill(0);
+    } catch {
+      failures.push(`credential ${c.id} (${c.provider}) does not decrypt`);
+    }
+  }
+  for (const k of keys.values()) k.fill(0);
+  return { orgKeys: wrapped.length, credentials: creds.length, failures };
+}

@@ -2,7 +2,6 @@ import './types';
 import '@labelconsole/catalogue/types';
 import '@labelconsole/documents/types';
 import { sql } from 'drizzle-orm';
-import { systemDb } from '@labelconsole/core/db/client';
 import { env } from '@labelconsole/core/env';
 import { defineListener, defineModule } from '@labelconsole/core/modules';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
@@ -17,8 +16,7 @@ import * as svc from './service';
 export default defineModule({
   manifest,
   routes,
-  metrics: async () => {
-    const db = systemDb();
+  metrics: async (db) => {
     const [byStatus, [overdue], [snaps]] = (await Promise.all([
       db.execute(sql`select status, count(*)::int as n from stream_tracks group by status`),
       db.execute(sql`select count(*)::int as n from stream_tracks where status = 'tracking' and next_poll_at < now() - interval '1 hour'`),

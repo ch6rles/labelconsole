@@ -8,13 +8,12 @@ import { jobs } from './jobs';
 import { manifest } from './manifest';
 import { documents } from './schema';
 import * as svc from './service';
-import { systemDb } from '@labelconsole/core/db/client';
 
 export default defineModule({
   manifest,
   routes,
-  metrics: async () => {
-    const rows = (await systemDb().execute(sql`select extraction_status as status, count(*)::int as n from documents where extraction_status <> 'none' group by extraction_status`)) as unknown as Array<{ status: string; n: number }>;
+  metrics: async (db) => {
+    const rows = (await db.execute(sql`select extraction_status as status, count(*)::int as n from documents where extraction_status <> 'none' group by extraction_status`)) as unknown as Array<{ status: string; n: number }>;
     return [{ name: 'lc_documents_extraction', help: 'Documents by extraction status (contract terms, statement parsing).', type: 'gauge', samples: rows.map((r) => ({ labels: { status: r.status }, value: r.n })) }];
   },
   onboarding: async (ctx) => {

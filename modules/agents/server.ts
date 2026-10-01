@@ -8,7 +8,6 @@ import { jobs } from './jobs';
 import { manifest } from './manifest';
 import { agents, runs, triggers, type TriggerConfig } from './schema';
 import * as svc from './service';
-import { systemDb } from '@labelconsole/core/db/client';
 
 /** Domain events that start agents. Agent and inbox events are excluded so agents can't trigger each other in loops. */
 const eventTriggers = defineListener({
@@ -44,8 +43,7 @@ export default defineModule({
   manifest,
   routes,
   // Aggregates across labels for operators; nothing tenant-identifying.
-  metrics: async () => {
-    const db = systemDb();
+  metrics: async (db) => {
     const [byStatus, finished, [today], [pending], [stalled]] = (await Promise.all([
       db.execute(sql`select status, count(*)::int as n from agent_runs where status in ('queued', 'running', 'waiting_approval', 'waiting_child', 'paused') group by status`),
       db.execute(sql`select status, count(*)::int as n, coalesce(sum(tokens_in), 0)::bigint as tin, coalesce(sum(tokens_out), 0)::bigint as tout from agent_runs where ended_at > now() - interval '24 hours' group by status`),

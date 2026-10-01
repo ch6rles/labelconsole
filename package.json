@@ -24,6 +24,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:seed": "tsx scripts/db-seed.ts",
+    "db:backup": "tsx scripts/backup.ts",
+    "db:restore-drill": "tsx scripts/restore-drill.ts",
     "db:reset": "tsx scripts/db-setup.ts --reset && tsx scripts/db-migrate.ts"
   },
   "devDependencies": {

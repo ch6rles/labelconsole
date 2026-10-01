@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { systemDb } from '@labelconsole/core/db/client';
 import { env } from '@labelconsole/core/env';
 import { logger } from '@labelconsole/core/logger';
 import { coreMetrics, renderPrometheus, type Metric } from '@labelconsole/core/metrics';
@@ -23,7 +24,7 @@ export async function GET(req: Request) {
   for (const m of modules()) {
     if (!m.metrics) continue;
     try {
-      metrics.push(...(await m.metrics()));
+      metrics.push(...(await m.metrics(systemDb())));
     } catch (err) {
       // One module's query failing shouldn't blank the whole scrape.
       logger.warn({ err, module: m.manifest.id }, 'module metrics failed');

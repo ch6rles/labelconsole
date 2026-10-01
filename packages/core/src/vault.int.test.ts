@@ -4,7 +4,7 @@ import { makeOrg } from '../../../test/helpers';
 import { closeDb, systemDb } from './db/client';
 import { credentials, orgKeys } from './db/schema';
 import { registerPermissions } from './permissions';
-import { getCredentialHandle, listCredentials, LocalKeyProvider, putCredential, readSecret, revokeCredential } from './vault';
+import { getCredentialHandle, keyProvider, listCredentials, LocalKeyProvider, putCredential, readSecret, revokeCredential, setKeyProvider, verifyVault } from './vault';
 
 beforeAll(() => registerPermissions([{ key: 'settings:read', description: '' }, { key: 'settings:credentials', description: '', sensitive: true }]));
 afterAll(async () => {
@@ -60,6 +60,25 @@ describe('credentials vault', () => {
       await expect(a.as((ctx) => readSecret(ctx, 'x'))).rejects.toThrow(/worker/);
     } finally {
       process.env.LC_ALLOW_DECRYPT = prev;
+    }
+  });
+
+  it('verifies every key and credential decrypts, and catches the wrong master key', async () => {
+    const a = await makeOrg();
+    await a.as((ctx) => putCredential(ctx, { provider: 'youtube', label: 'Drill', secret: { apiKey: 'AIza-verify' } }));
+    const ok = await verifyVault(systemDb());
+    expect(ok.failures).toEqual([]);
+    expect(ok.credentials).toBeGreaterThan(0);
+
+    const real = keyProvider();
+    // Any key other than the test master key (which is 32 bytes of 7).
+    setKeyProvider(new LocalKeyProvider(Buffer.alloc(32, 3).toString('base64'), 'wrong'));
+    try {
+      const bad = await verifyVault(systemDb());
+      expect(bad.failures.some((f) => f.includes(a.org.id))).toBe(true);
+      expect(bad.failures.join(' ')).not.toContain('AIza');
+    } finally {
+      setKeyProvider(real);
     }
   });
 });

@@ -34,9 +34,10 @@ export function appDb(): Database {
 }
 
 /**
- * Owner role: bypasses RLS. Only core uses it, for work that is cross-tenant by
- * nature (sign-up, session lookup, scheduler fan-out, webhook routing).
- * Module code must never import this.
+ * Owner role: bypasses RLS. For work that is cross-tenant by nature: sign-up,
+ * session lookup, webhook routing, and the scheduler jobs that fan out to each
+ * label (which then do their real work inside `withSystemOrg`). Never use it in
+ * services or request handlers; tenant data is read through `withOrg`.
  */
 export function systemDb(): Database {
   if (!system) system = makePool(env().DATABASE_SYSTEM_URL, Number(process.env.DB_SYSTEM_POOL_MAX ?? 4));
