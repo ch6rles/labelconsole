@@ -39,6 +39,13 @@ export type HealthStat = { label: string; icon: string; value: string; delta?: s
 export type WidgetData = { value: string; unit: string; line: string; cta: string; href: string };
 export type WidgetDef = { id: string; name: string; icon: string; desc: string; permission?: string; load(ctx: ServiceContext): Promise<WidgetData> };
 
+export type ShellCounts = { unread: number; runningAgents: number; pendingApprovals: number };
+
+export type SearchResult = { type: string; title: string; sub?: string; href: string; icon?: string };
+
+/** Extra per-entity values another module contributes to a list (e.g. streams per artist). */
+export type Enricher = (ctx: ServiceContext, ids: string[]) => Promise<Record<string, Record<string, unknown>>>;
+
 export type EventListener<K extends EventType = EventType> = {
   /** Stable id used for delivery dedupe, e.g. `streams.register-imported-track`. */
   id: string;
@@ -57,6 +64,10 @@ export interface ModuleServer {
   widgets?: WidgetDef[];
   attention?: (ctx: ServiceContext) => Promise<AttentionItem[]>;
   stats?: (ctx: ServiceContext) => Promise<HealthStat[]>;
+  search?: (ctx: ServiceContext, q: string) => Promise<SearchResult[]>;
+  /** Counts for the console shell (notification badge, agent indicator). */
+  shell?: (ctx: ServiceContext, userId: string) => Promise<Partial<ShellCounts>>;
+  enrich?: Record<string, Enricher>;
 }
 
 export function defineModule(m: ModuleServer): ModuleServer {
@@ -67,7 +78,10 @@ export function defineListener<K extends EventType>(l: EventListener<K>): EventL
   return l as unknown as EventListener;
 }
 
-const registry = new Map<string, ModuleServer>();
+// Shared via globalThis: Next compiles route handlers and pages into separate bundles,
+// each with its own copy of this file, but they must see one registry.
+const g = globalThis as unknown as { __lcModuleRegistry?: Map<string, ModuleServer> };
+const registry: Map<string, ModuleServer> = (g.__lcModuleRegistry ??= new Map());
 
 export function registerModules(mods: ModuleServer[]) {
   const toolNames = new Set<string>();
@@ -151,3 +165,16 @@ export function buildNav(enabled: Set<string>, can: (p: string) => boolean) {
 }
 
 export type NavModel = ReturnType<typeof buildNav>;
+
+/** Merge enrichment from every enabled module for one entity type. */
+export async function enrich(ctx: ServiceContext, enabled: Set<string>, entityType: string, ids: string[]) {
+  const out: Record<string, Record<string, unknown>> = Object.fromEntries(ids.map((id) => [id, {}]));
+  if (ids.length === 0) return out;
+  for (const m of registry.values()) {
+    const fn = m.enrich?.[entityType];
+    if (!fn || !enabled.has(m.manifest.id)) continue;
+    const part = await fn(ctx, ids);
+    for (const [id, vals] of Object.entries(part)) Object.assign((out[id] ??= {}), vals);
+  }
+  return out;
+}

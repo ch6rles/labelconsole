@@ -10,7 +10,8 @@
 
 export type PermissionDef = { key: string; description: string; sensitive?: boolean };
 
-const registry = new Map<string, PermissionDef>();
+const g = globalThis as unknown as { __lcPermissionRegistry?: Map<string, PermissionDef> };
+const registry: Map<string, PermissionDef> = (g.__lcPermissionRegistry ??= new Map());
 
 export function registerPermissions(defs: PermissionDef[]) {
   for (const d of defs) {

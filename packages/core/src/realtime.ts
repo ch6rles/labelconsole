@@ -13,6 +13,8 @@ export type RealtimeMessage = {
   data: Record<string, unknown>;
   /** Restrict delivery to one user (notifications); omit for the whole org. */
   userId?: string;
+  /** Only delivered to members holding this permission. */
+  permission?: string;
   at?: string;
 };
 

@@ -1,0 +1,109 @@
+/*
+ * Label Console design tokens, extracted from `Label Console.dc.html`.
+ * Every colour, size and spacing used by the shell and modules comes from
+ * here; modules never hard-code a value.
+ */
+:root {
+  /* Surfaces */
+  --lc-bg: #fafaf9;
+  --lc-bg-sidebar: #f4f4f2;
+  --lc-surface: #ffffff;
+  --lc-surface-subtle: #fafaf9;
+  --lc-surface-hover: #f8faff;
+  --lc-surface-muted: #f1f5f9;
+  --lc-surface-faint: #f8fafc;
+  --lc-header-bg: rgba(250, 250, 249, 0.92);
+  --lc-overlay: rgba(15, 23, 42, 0.28);
+
+  /* Lines */
+  --lc-border: #e5e5e2;
+  --lc-divider: #f1f1ef;
+  --lc-divider-faint: #f8f8f7;
+  --lc-line: #e2e8f0;
+  --lc-line-strong: #cbd5e1;
+  --lc-track: #e5e7eb;
+
+  /* Text */
+  --lc-ink: #0f172a;
+  --lc-text-2: #334155;
+  --lc-text-3: #475569;
+  --lc-muted: #64748b;
+  --lc-faint: #94a3b8;
+  --lc-on-ink: #fafaf9;
+  --lc-on-accent: #ffffff;
+
+  /* Accent */
+  --lc-accent: #2563eb;
+  --lc-accent-hover: #1d4ed8;
+  --lc-accent-fg: #1d4ed8;
+  --lc-accent-soft: #eff4ff;
+  --lc-accent-soft-border: #bfdbfe;
+  --lc-accent-light: #93c5fd;
+
+  /* Danger */
+  --lc-danger: #dc2626;
+  --lc-danger-fg: #b91c1c;
+  --lc-danger-soft: #fef2f2;
+  --lc-danger-soft-border: #fecaca;
+
+  /* Series palette for splits and multi-series charts (design: SH) */
+  --lc-series-1: #0f172a;
+  --lc-series-2: #2563eb;
+  --lc-series-3: #93c5fd;
+  --lc-series-4: #cbd5e1;
+
+  /* Type */
+  --lc-font-sans: var(--font-geist-sans, 'Geist'), system-ui, sans-serif;
+  --lc-font-mono: var(--font-geist-mono, 'Geist Mono'), ui-monospace, monospace;
+  --lc-text-2xs: 10px;
+  --lc-text-xs: 11px;
+  --lc-text-sm: 12px;
+  --lc-text-base: 13px;
+  --lc-text-md: 14px;
+  --lc-text-lg: 15px;
+  --lc-text-xl: 16px;
+  --lc-text-2xl: 17px;
+  --lc-text-3xl: 18px;
+  --lc-text-4xl: 20px;
+  --lc-text-stat: 26px;
+  --lc-text-display: 28px;
+  --lc-text-h1: 30px;
+  --lc-text-h1-lg: 34px;
+  --lc-tracking-tight: -0.02em;
+  --lc-tracking-label: 0.1em;
+  --lc-tracking-section: 0.12em;
+
+  /* Spacing */
+  --lc-space-1: 2px;
+  --lc-space-2: 4px;
+  --lc-space-3: 6px;
+  --lc-space-4: 8px;
+  --lc-space-5: 10px;
+  --lc-space-6: 12px;
+  --lc-space-7: 14px;
+  --lc-space-8: 16px;
+  --lc-space-9: 18px;
+  --lc-space-10: 20px;
+  --lc-space-11: 24px;
+  --lc-space-12: 28px;
+  --lc-space-13: 40px;
+  --lc-space-14: 44px;
+  --lc-space-15: 64px;
+
+  /* Shape: the design is square-cornered throughout. */
+  --lc-radius: 0;
+  --lc-radius-round: 50%;
+
+  /* Layout */
+  --lc-sidebar-width: 272px;
+  --lc-content-max: 1440px;
+  --lc-content-wide: 1480px;
+  --lc-drawer-width: 440px;
+  --lc-control-height: 40px;
+
+  /* Elevation and motion */
+  --lc-shadow-pop: 0 12px 32px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06);
+  --lc-ease: cubic-bezier(0.2, 0, 0, 1);
+  --lc-duration: 120ms;
+  --lc-duration-slow: 220ms;
+}
