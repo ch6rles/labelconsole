@@ -84,6 +84,17 @@ export const INTEGRATIONS: Integration[] = [
     ],
     usedBy: ['Settings', 'Marketing', 'Agents'],
   },
+  {
+    provider: 'streams_webhook',
+    name: 'Stream data webhook',
+    icon: 'webhook',
+    description: 'After every poll and statement import, new stream readings are POSTed as one JSON batch to your URL, signed with HMAC-SHA256 in the X-LabelConsole-Signature header.',
+    fields: [
+      { name: 'url', label: 'Endpoint URL', hint: 'https:// only' },
+      { name: 'secret', label: 'Signing secret', secret: true, hint: 'Any long random string; verify the signature with it' },
+    ],
+    usedBy: ['Streams'],
+  },
 ];
 
 export const integrationFor = (provider: string) => INTEGRATIONS.find((i) => i.provider === provider);

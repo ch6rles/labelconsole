@@ -48,6 +48,11 @@ export async function reviewQueue(ctx: ServiceContext, platform?: string) {
 
 export async function reviewIdentity(ctx: ServiceContext, id: string, status: 'confirmed' | 'rejected') {
   ctx.assert('catalogue:write');
+  return setIdentityStatus(ctx, id, status);
+}
+
+/** The review itself; callers check their own permission (Streams reviews YouTube matches with streams:manage). */
+export async function setIdentityStatus(ctx: ServiceContext, id: string, status: 'confirmed' | 'rejected') {
   const reviewer = ctx.actor.type === 'system' ? 'system' : `${ctx.actor.type}:${ctx.actor.id}`;
   const [row] = await ctx.tx.update(platformIdentities).set({ status, reviewedBy: reviewer, confidence: status === 'confirmed' ? '1' : undefined }).where(eq(platformIdentities.id, id)).returning();
   if (!row) throw new NotFoundError('Platform match');

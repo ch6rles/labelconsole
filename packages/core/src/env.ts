@@ -28,6 +28,8 @@ const EnvSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   /** Platform default LLM key. Orgs may override with their own vault credential. */
   ANTHROPIC_API_KEY: z.string().optional(),
+  /** Platform YouTube Data API key, used when a label hasn't added its own. */
+  YOUTUBE_API_KEY: z.string().optional(),
   /** Descriptive User-Agent required by MusicBrainz and polite for every public API. */
   HTTP_USER_AGENT: z.string().default('LabelConsole/0.1 (+https://labelconsole.app)'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),

@@ -1,5 +1,5 @@
 import './types';
-import { and, eq, ilike, or } from 'drizzle-orm';
+import { and, eq, ilike, ne, or } from 'drizzle-orm';
 import { defineModule } from '@labelconsole/core/modules';
 import { fmt } from '@labelconsole/ui';
 import { tools } from './agent-tools';
@@ -43,12 +43,8 @@ export default defineModule({
   ],
   attention: async (ctx) => {
     if (!ctx.can('documents:read')) return [];
-    const [unsigned, dates, pending] = await Promise.all([
-      svc.liveReleasesOnUnsignedPaper(ctx),
-      svc.upcomingKeyDates(ctx, 30),
-      ctx.tx.select({ id: documents.id }).from(documents).where(and(eq(documents.type, 'contract'), eq(documents.extractionStatus, 'done'), eq(documents.isLatest, true))),
-    ]);
-    const awaiting = (await Promise.all(pending.map((p) => svc.getDocumentRow(ctx, p.id).catch(() => null)))).filter((d) => d && !d.termsConfirmedAt);
+    const [unsigned, dates, contracts] = await Promise.all([svc.liveReleasesOnUnsignedPaper(ctx), svc.upcomingKeyDates(ctx, 30), svc.listDocuments(ctx, { type: 'contract' })]);
+    const awaiting = contracts.filter((d) => d.extractionStatus === 'done' && !d.termsConfirmedAt);
     return [
       { n: unsigned.length, tone: 'red', title: 'Live releases on unsigned paper', sub: [...new Set(unsigned.map((u) => u.artistName))].slice(0, 3).join(', '), href: '/people/contracts' },
       { n: dates.filter((d) => d.keyDate.date >= new Date().toISOString().slice(0, 10)).length, tone: 'ink', title: 'Contract dates in the next 30 days', sub: dates.slice(0, 2).map((d) => `${d.title}: ${d.keyDate.kind} ${fmt.shortDate(d.keyDate.date)}`).join(' · '), href: '/documents/key-dates' },
@@ -59,6 +55,7 @@ export default defineModule({
     if (!ctx.can('documents:read')) return [];
     const conds = [eq(documents.isLatest, true), or(ilike(documents.title, `%${q}%`), ilike(documents.textContent, `%${q}%`))];
     if (!ctx.can('documents:read_confidential')) conds.push(eq(documents.confidential, false));
+    if (!ctx.can('documents:read_financial')) conds.push(ne(documents.type, 'statement'));
     const rows = await ctx.tx.select({ id: documents.id, title: documents.title, type: documents.type }).from(documents).where(and(...conds)).limit(6);
     return rows.filter((r) => r.type !== 'statement' || ctx.can('documents:read_financial')).map((r) => ({ type: 'Document', title: r.title, sub: `Document · ${r.type}`, href: `/documents/${r.id}`, icon: 'description' }));
   },
