@@ -1,0 +1,28 @@
+{
+  "name": "@labelconsole/catalogue",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./manifest": "./manifest.ts",
+    "./schema": "./schema/index.ts",
+    "./service": "./service/index.ts",
+    "./server": "./server.ts",
+    "./web": "./web.ts",
+    "./ui/*": "./ui/*.tsx",
+    "./*": "./*.ts"
+  },
+  "dependencies": {
+    "@labelconsole/core": "workspace:*",
+    "@labelconsole/ui": "workspace:*",
+    "@labelconsole/people": "workspace:*",
+    "@labelconsole/drive": "workspace:*",
+    "drizzle-orm": "^0.45.3",
+    "zod": "^4.6.5",
+    "papaparse": "^5.5.3"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "next": "^16.0.0"
+  }
+}

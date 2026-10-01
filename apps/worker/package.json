@@ -1,0 +1,32 @@
+{
+  "name": "@labelconsole/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "LC_PROCESS=worker tsx watch --env-file=../../.env src/index.ts",
+    "build": "node build.mjs",
+    "start": "LC_PROCESS=worker node dist/index.js"
+  },
+  "dependencies": {
+    "@labelconsole/core": "workspace:*",
+    "@labelconsole/ui": "workspace:*",
+    "@labelconsole/people": "workspace:*",
+    "@labelconsole/drive": "workspace:*",
+    "@labelconsole/network": "workspace:*",
+    "@labelconsole/catalogue": "workspace:*",
+    "@labelconsole/documents": "workspace:*",
+    "@labelconsole/streams": "workspace:*",
+    "@labelconsole/marketing": "workspace:*",
+    "@labelconsole/agents": "workspace:*",
+    "@labelconsole/inbox": "workspace:*",
+    "@labelconsole/settings": "workspace:*",
+    "bullmq": "^5.81.5",
+    "drizzle-orm": "^0.45.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15"
+  }
+}

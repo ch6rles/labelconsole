@@ -1,0 +1,61 @@
+import { z } from 'zod';
+
+/**
+ * Process-wide configuration, validated once on first access.
+ * Secrets for third-party providers do NOT live here: they live in the
+ * per-org credentials vault. Only platform-level keys belong in env.
+ */
+const EnvSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  /** Connection string for the restricted app role. Row-level security applies. */
+  DATABASE_URL: z.string().min(1),
+  /** Connection string for the owner role. Used for migrations and narrow system work only. */
+  DATABASE_SYSTEM_URL: z.string().min(1),
+  REDIS_URL: z.string().default('redis://127.0.0.1:6379'),
+  /** Public origin of the web app, used for links, CSRF origin checks and cookies. */
+  APP_URL: z.string().url().default('http://localhost:3000'),
+  /** 32-byte base64 key that wraps per-org data keys (envelope encryption). */
+  VAULT_MASTER_KEY: z.string().min(40),
+  VAULT_MASTER_KEY_ID: z.string().default('local-v1'),
+  /** HMAC secret for signed storage URLs and webhook tokens. */
+  SIGNING_SECRET: z.string().min(32),
+  STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+  STORAGE_LOCAL_DIR: z.string().default('.storage'),
+  S3_BUCKET: z.string().optional(),
+  S3_REGION: z.string().optional(),
+  S3_ENDPOINT: z.string().optional(),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  /** Platform default LLM key. Orgs may override with their own vault credential. */
+  ANTHROPIC_API_KEY: z.string().optional(),
+  /** Descriptive User-Agent required by MusicBrainz and polite for every public API. */
+  HTTP_USER_AGENT: z.string().default('LabelConsole/0.1 (+https://labelconsole.app)'),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  /** Seed data is only ever written when this is set and NODE_ENV is not production. */
+  LC_DEV_SEED: z.string().optional(),
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(8),
+  AGENT_CONCURRENCY_PER_ORG: z.coerce.number().int().positive().default(4),
+  WORKER_HEALTH_PORT: z.coerce.number().int().default(9091),
+  SENTRY_DSN: z.string().optional(),
+});
+
+export type Env = z.infer<typeof EnvSchema>;
+
+let cached: Env | undefined;
+
+export function env(): Env {
+  if (!cached) {
+    const parsed = EnvSchema.safeParse(process.env);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n  ');
+      throw new Error(`Invalid environment configuration:\n  ${issues}`);
+    }
+    cached = parsed.data;
+  }
+  return cached;
+}
+
+/** Test hook: forget the cached env so a test can change process.env. */
+export function resetEnvCache() {
+  cached = undefined;
+}
