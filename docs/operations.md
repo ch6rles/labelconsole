@@ -51,6 +51,9 @@ Set in the environment (see `.env.example`). The app refuses to start if a requi
 |---|---|---|
 | `DATABASE_URL` | yes | App role (RLS applies) |
 | `DATABASE_SYSTEM_URL` | yes | Owner role |
+| `DATABASE_SUPERUSER_URL` | | Admin URL for creating roles, database and extensions. When `DATABASE_URL` and `DATABASE_SYSTEM_URL` aren't set, both are derived from it: same server, database `labelconsole`, roles `labelconsole_app` and `labelconsole_owner`, with passwords derived from `SIGNING_SECRET` |
+| `LC_RELEASE_ON_START` | | `1` makes the worker run setup (when an admin URL is set) and migrations before it starts. For hosts with no separate release step, such as Railway |
+| `S3_FORCE_PATH_STYLE` | | `false` for Railway buckets (virtual-hosted URLs). Path-style is the default with a custom `S3_ENDPOINT` |
 | `REDIS_URL` | yes | |
 | `APP_URL` | yes | Public origin; used for links, cookies and CSRF origin checks |
 | `LABEL_NAME` | | The one label this installation runs (default "River Of Styxx"). The first visit sets it up with its owner; then setup closes and people join by invitation. `pnpm owner --email …` adds an owner or resets a password |

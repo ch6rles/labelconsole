@@ -13,3 +13,4 @@ test-results
 coverage
 playwright-report
 *.log
+.live

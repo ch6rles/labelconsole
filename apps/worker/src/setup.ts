@@ -1,16 +1,17 @@
-import { setupDatabase } from '@labelconsole/core/db/setup';
+import { runRelease } from './release';
 
 /**
  * One-time database bootstrap: roles (owner + restricted app role), the
  * database and the extensions, using DATABASE_SUPERUSER_URL. Needed for a
- * fresh Postgres (docker compose, a new server). On managed Postgres you can
- * run it once with an admin URL, or do the same steps by hand. Idempotent.
+ * fresh Postgres (docker compose, a new server). With only
+ * DATABASE_SUPERUSER_URL and SIGNING_SECRET set, the role URLs are derived
+ * (see packages/core/src/db/urls.ts). Idempotent.
  *   node dist/setup.js
  */
-const { DATABASE_SUPERUSER_URL, DATABASE_URL, DATABASE_SYSTEM_URL } = process.env;
-if (!DATABASE_SUPERUSER_URL || !DATABASE_URL || !DATABASE_SYSTEM_URL) {
-  console.error('[setup] DATABASE_SUPERUSER_URL, DATABASE_URL and DATABASE_SYSTEM_URL must be set');
+try {
+  await runRelease({ setup: true, migrate: false, log: console.log });
+  console.log('[setup] done');
+} catch (err) {
+  console.error(`[setup] ${(err as Error).message}`);
   process.exit(1);
 }
-await setupDatabase({ superuserUrl: DATABASE_SUPERUSER_URL, appUrl: DATABASE_URL, systemUrl: DATABASE_SYSTEM_URL, log: (m) => console.log(`[setup] ${m}`) });
-console.log('[setup] done');

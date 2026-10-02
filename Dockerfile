@@ -1,48 +1,52 @@
 # syntax=docker/dockerfile:1.7
 #
-# One Dockerfile, three targets:
+# One Dockerfile, two images:
 #   docker build --target web    -t labelconsole-web .
 #   docker build --target worker -t labelconsole-worker .
+# Hosts that can't pick a target (Railway) build the last stage, which is the
+# web image unless the build arg LC_TARGET=worker is set:
+#   docker build --build-arg LC_TARGET=worker -t labelconsole-worker .
 # The worker image also carries the release steps:
 #   docker run --rm labelconsole-worker node dist/setup.js     # once, fresh Postgres only
 #   docker run --rm labelconsole-worker node dist/migrate.js   # every deploy, before new code starts
 #   docker run --rm -it labelconsole-worker node dist/owner.js --email you@example.com   # add an owner or reset a password
 #
-# Behind a TLS-inspecting proxy, pass its CA for the dependency download:
-#   docker build --secret id=npm_ca,src=/path/to/ca.pem ...
+# Behind a TLS-inspecting proxy, pass its CA certificate (public, not a secret) for downloads:
+#   docker build --build-arg NPM_CA="$(cat /path/to/ca.pem)" ...
+#
+# No BuildKit cache or secret mounts: Railway only accepts cache mounts with its own
+# per-service ids. Docker's layer cache still skips installs until the lockfile changes.
 
 ARG NODE_VERSION=22
+ARG LC_TARGET=web
 
 FROM node:${NODE_VERSION}-bookworm-slim AS base
+ARG NPM_CA
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=1 NEXT_TELEMETRY_DISABLED=1 COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN --mount=type=secret,id=npm_ca,required=false \
-    if [ -f /run/secrets/npm_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/npm_ca; fi; \
+RUN if [ -n "$NPM_CA" ]; then printf '%s\n' "$NPM_CA" > /tmp/npm-ca.pem; export NODE_EXTRA_CA_CERTS=/tmp/npm-ca.pem; fi; \
     corepack enable && corepack prepare pnpm@10.28.0 --activate
 WORKDIR /repo
 
 # Dependencies from the lockfile alone, so this layer is reused until the lockfile changes.
 FROM base AS deps
+ARG NPM_CA
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    --mount=type=secret,id=npm_ca,required=false \
-    if [ -f /run/secrets/npm_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/npm_ca; fi; \
-    pnpm fetch
+RUN if [ -n "$NPM_CA" ]; then printf '%s\n' "$NPM_CA" > /tmp/npm-ca.pem; export NODE_EXTRA_CA_CERTS=/tmp/npm-ca.pem; fi; \
+    pnpm fetch --store-dir /pnpm/store
 
 FROM deps AS build
 COPY . .
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --offline --frozen-lockfile
+RUN pnpm install --offline --frozen-lockfile --store-dir /pnpm/store
 RUN pnpm --filter @labelconsole/web build && pnpm --filter @labelconsole/worker build
 
 # The worker bundle inlines the workspace packages, so its image needs only its own
 # runtime dependencies: a production install of that one project, pinned by the lockfile.
-# Starts from base, not deps: `pnpm fetch` fills node_modules/.pnpm with every package in
-# the lockfile, and those would ride along. Packages come from the shared store cache.
+# Starts from base, not deps, so only this project's packages end up in node_modules;
+# they are installed from the store `deps` already downloaded.
 FROM base AS worker-deps
+COPY --from=deps /pnpm/store /pnpm/store
 COPY . .
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    --mount=type=secret,id=npm_ca,required=false \
-    if [ -f /run/secrets/npm_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/npm_ca; fi; \
-    pnpm install --prefer-offline --frozen-lockfile --prod --filter @labelconsole/worker
+RUN pnpm install --offline --frozen-lockfile --prod --filter @labelconsole/worker --store-dir /pnpm/store
 
 FROM node:${NODE_VERSION}-bookworm-slim AS web
 ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 NEXT_TELEMETRY_DISABLED=1
@@ -75,3 +79,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # SIGTERM lets active jobs finish (up to 60s) before exit; give the container at least that long to stop.
 STOPSIGNAL SIGTERM
 CMD ["node", "dist/index.js"]
+
+# The default (last) stage: the web image, or the worker with --build-arg LC_TARGET=worker.
+FROM ${LC_TARGET}

@@ -197,6 +197,24 @@ The owner runs this installation for one label only, so there is no public sign-
 - **Verified** in a browser on an empty database: setup to the River Of Styxx dashboard, setup closed for a second visitor, removed endpoints returning 404, and both owner command paths (`tsx` and the bundled worker).
 - **Tests:** 146 passing (setup race and closure, owner add and password reset).
 
+## Railway deployment
+
+Netlify can't host Label Console: it needs an always-on worker, Postgres and Redis next to the website, and Netlify functions stop after 10 seconds. The owner chose Railway. The setup steps are in [deploy-railway.md](deploy-railway.md).
+
+- **One Dockerfile for both services.** Railway can't select a build stage, so the last stage is the web image unless the build arg `LC_TARGET=worker` is set. There are no BuildKit cache or secret mounts, because Railway rejects cache mounts without its own per-service ids. A proxy CA certificate can still be passed as `NPM_CA` for local builds. Compose keeps using `target:`.
+- **One database URL.**
+  - With only `DATABASE_SUPERUSER_URL` (Railway's admin connection string) and `SIGNING_SECRET`, the app derives the restricted app-role and owner-role URLs: same server, database `labelconsole`, passwords derived from `SIGNING_SECRET`.
+  - `setup` creates the roles, the database and the extensions with those values, and re-syncs the passwords on every run.
+- **Release on start.** With `LC_RELEASE_ON_START=1`, the worker runs setup and migrations before starting, so Railway needs no separate release step. Both are idempotent.
+- **Railway buckets.** `S3_FORCE_PATH_STYLE=false` selects virtual-hosted bucket URLs.
+- **Redis.** Connections look up IPv4 and IPv6 (`family: 0`), since Railway's older private networks are IPv6-only.
+- **Rehearsed locally with Docker**, using the guide's variables against pgvector Postgres 17, Redis and an S3 server with virtual-hosted buckets:
+  - Both images build the way Railway builds them.
+  - The worker created the roles and the database, migrated, and started.
+  - The website's deep health check passed, and the first visit went to setup and then to the River Of Styxx dashboard.
+  - A file uploaded, and its signed download link (virtual-hosted) returned it.
+  - A worker restart re-ran the release cleanly, and the owner command worked inside the worker container.
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.

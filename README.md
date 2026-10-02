@@ -34,6 +34,10 @@ Then open http://localhost:3000. The first visit sets up the label (`LABEL_NAME`
 
 Or run everything in containers: `docker compose up --build`.
 
+## Deploying
+
+To put it online, follow [docs/deploy-railway.md](docs/deploy-railway.md). It sets up the website, worker, Postgres with pgvector, Redis and a storage bucket on Railway. Serverless hosts such as Netlify or Vercel can't run it: the app needs an always-on worker, a database and Redis alongside the website.
+
 ## Commands
 
 | Command | What it does |

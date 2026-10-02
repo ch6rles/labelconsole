@@ -94,7 +94,8 @@ export class S3Driver implements StorageDriver {
         const client = new sdk.S3Client({
           region: e.S3_REGION ?? 'auto',
           endpoint: e.S3_ENDPOINT,
-          forcePathStyle: Boolean(e.S3_ENDPOINT),
+          // Path-style for custom endpoints (MinIO, R2) unless told otherwise; Railway buckets need virtual-hosted style.
+          forcePathStyle: e.S3_FORCE_PATH_STYLE ?? Boolean(e.S3_ENDPOINT),
           credentials: e.S3_ACCESS_KEY_ID ? { accessKeyId: e.S3_ACCESS_KEY_ID, secretAccessKey: e.S3_SECRET_ACCESS_KEY ?? '' } : undefined,
         });
         return { client, sdk };

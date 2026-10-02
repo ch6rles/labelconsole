@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { applyDerivedDatabaseUrls } from './db/urls';
 
 /**
  * Process-wide configuration, validated once on first access.
@@ -7,10 +8,10 @@ import { z } from 'zod';
  */
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  /** Connection string for the restricted app role. Row-level security applies. */
-  DATABASE_URL: z.string().min(1),
+  /** Connection string for the restricted app role. Row-level security applies. Derived from DATABASE_SUPERUSER_URL when unset (see db/urls.ts). */
+  DATABASE_URL: z.string({ error: 'set DATABASE_URL, or DATABASE_SUPERUSER_URL together with SIGNING_SECRET' }).min(1),
   /** Connection string for the owner role. Used for migrations and narrow system work only. */
-  DATABASE_SYSTEM_URL: z.string().min(1),
+  DATABASE_SYSTEM_URL: z.string({ error: 'set DATABASE_SYSTEM_URL, or DATABASE_SUPERUSER_URL together with SIGNING_SECRET' }).min(1),
   REDIS_URL: z.string().default('redis://127.0.0.1:6379'),
   /** Public origin of the web app, used for links, CSRF origin checks and cookies. */
   APP_URL: z.string().url().default('http://localhost:3000'),
@@ -28,6 +29,11 @@ const EnvSchema = z.object({
   S3_ENDPOINT: z.string().optional(),
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
+  /** Path-style bucket URLs. Defaults to on with a custom S3_ENDPOINT (MinIO, R2); set false for Railway buckets (virtual-hosted style). */
+  S3_FORCE_PATH_STYLE: z
+    .enum(['true', 'false', ''])
+    .optional()
+    .transform((v) => (v === 'true' ? true : v === 'false' ? false : undefined)),
   /** Platform default LLM key. Orgs may override with their own vault credential. */
   ANTHROPIC_API_KEY: z.string().optional(),
   /** Only for a personal or service-account key not scoped to a workspace (wrkspc_…): sent as anthropic-workspace-id. */
@@ -63,6 +69,7 @@ let cached: Env | undefined;
 
 export function env(): Env {
   if (!cached) {
+    applyDerivedDatabaseUrls();
     const parsed = EnvSchema.safeParse(process.env);
     if (!parsed.success) {
       const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n  ');
