@@ -59,5 +59,7 @@ export async function GET(req: Request) {
     details.outbox = lag;
   }
   const ok = Object.values(checks).every((v) => v === 'ok');
-  return Response.json({ ok, checks, ...details }, { status: ok ? 200 : 503 });
+  // Which commit is live, so a deploy can be confirmed from outside (Railway sets this for GitHub deploys).
+  const version = process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? null;
+  return Response.json({ ok, version, checks, ...details }, { status: ok ? 200 : 503 });
 }

@@ -2,7 +2,7 @@
 
 Label Console needs four things running at once: the **website**, the **worker** (stream polling, agents, scheduled jobs), a **Postgres database with pgvector**, and **Redis**. It also needs a **storage bucket** for uploaded files, so the website and worker can share them. Railway runs all of these in one project.
 
-This takes about 20 minutes the first time. You only do it once; after that, every push to the branch redeploys automatically.
+This takes about 20 minutes the first time. You only do it once. After that, pushes to the branch normally redeploy automatically; see "Deploying updates" if one doesn't.
 
 **Cost:** Railway's Hobby plan is $5 a month and includes $5 of usage. With everything always on, expect roughly $20–30 a month in total. Railway shows live usage under the project's **Usage** tab.
 
@@ -122,6 +122,12 @@ What the first line does:
 3. Wait for **web** to show **Active**.
 4. Open the website's address. The first visit shows **Set up River Of Styxx**: enter your name, email and password. This creates the owner account, and setup closes after that.
 5. Invite the rest of your team under **Admin → Users**.
+
+## Deploying updates
+
+After new code is pushed to the branch, open each service (**web**, then **worker**) and check that its latest deployment shows the newest commit message. If it doesn't, press **Cmd+K** (Ctrl+K on Windows) on the project canvas and choose **Deploy Latest Commit**, or use the **⋮** menu on the service. **Redeploy** on an old deployment rebuilds that same old commit, not the newest one.
+
+To check which version is live, open `https://<your-address>/api/health`. `version` shows the first 7 characters of the running commit, which you can compare with the latest commit on GitHub.
 
 ## If something goes wrong
 
