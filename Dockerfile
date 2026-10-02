@@ -3,13 +3,15 @@
 # One Dockerfile, two images:
 #   docker build --target web    -t labelconsole-web .
 #   docker build --target worker -t labelconsole-worker .
-# Hosts that can't pick a target (Railway) build the last stage, which is the
-# web image unless the build arg LC_TARGET=worker is set:
-#   docker build --build-arg LC_TARGET=worker -t labelconsole-worker .
+# Hosts that can't pick a target (Railway) build the last stage, `app`: one image
+# holding both, which starts the worker when LC_TARGET=worker is set at runtime
+# and the web app otherwise:
+#   docker build -t labelconsole .
 # The worker image also carries the release steps:
 #   docker run --rm labelconsole-worker node dist/setup.js     # once, fresh Postgres only
 #   docker run --rm labelconsole-worker node dist/migrate.js   # every deploy, before new code starts
 #   docker run --rm -it labelconsole-worker node dist/owner.js --email you@example.com   # add an owner or reset a password
+#   (in the combined image: cd /opt/worker/apps/worker && node dist/owner.js --email …)
 #
 # Behind a TLS-inspecting proxy, pass its CA certificate (public, not a secret) for downloads:
 #   docker build --build-arg NPM_CA="$(cat /path/to/ca.pem)" ...
@@ -18,7 +20,6 @@
 # per-service ids. Docker's layer cache still skips installs until the lockfile changes.
 
 ARG NODE_VERSION=22
-ARG LC_TARGET=web
 
 FROM node:${NODE_VERSION}-bookworm-slim AS base
 ARG NPM_CA
@@ -49,10 +50,12 @@ COPY . .
 RUN pnpm install --offline --frozen-lockfile --prod --filter @labelconsole/worker --store-dir /pnpm/store
 
 FROM node:${NODE_VERSION}-bookworm-slim AS web
-ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 NEXT_TELEMETRY_DISABLED=1 LC_MIGRATIONS_DIR=/app/migrations
 WORKDIR /app
 COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
 COPY --from=build --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
+# The web app applies migrations itself when its database URLs are derived (Railway).
+COPY --from=build --chown=node:node /repo/packages/core/migrations ./migrations
 # Local file storage (STORAGE_DRIVER=local); mount a volume here, or use S3/R2 in production.
 RUN mkdir -p /data/storage && chown node:node /data/storage
 USER node
@@ -80,5 +83,29 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 STOPSIGNAL SIGTERM
 CMD ["node", "dist/index.js"]
 
-# The default (last) stage: the web image, or the worker with --build-arg LC_TARGET=worker.
-FROM ${LC_TARGET}
+# The default (last) stage, for hosts that build one image per service from the
+# same Dockerfile: both apps, chosen when the container starts. LC_TARGET=worker
+# runs the worker; anything else runs the web app. A runtime choice can't be lost
+# the way a build argument can.
+FROM node:${NODE_VERSION}-bookworm-slim AS app
+ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 NEXT_TELEMETRY_DISABLED=1 LC_MIGRATIONS_DIR=/app/migrations WORKER_HEALTH_PORT=9091
+WORKDIR /app
+COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
+COPY --from=build --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build --chown=node:node /repo/packages/core/migrations ./migrations
+# The worker keeps pnpm's layout under its own root, apart from the web app's traced node_modules.
+COPY --from=worker-deps --chown=node:node /repo/node_modules /opt/worker/node_modules
+COPY --from=worker-deps --chown=node:node /repo/apps/worker/node_modules /opt/worker/apps/worker/node_modules
+COPY --from=worker-deps --chown=node:node /repo/apps/worker/package.json /opt/worker/apps/worker/package.json
+COPY --from=build --chown=node:node /repo/apps/worker/dist /opt/worker/apps/worker/dist
+RUN mkdir -p /data/storage && chown node:node /data/storage \
+ && printf '%s\n' '#!/bin/sh' \
+    'if [ "$LC_TARGET" = "worker" ]; then' \
+    '  export LC_PROCESS=worker; cd /opt/worker/apps/worker && exec node dist/index.js' \
+    'fi' \
+    'exec node /app/apps/web/server.js' > /usr/local/bin/lc-start \
+ && chmod +x /usr/local/bin/lc-start
+USER node
+EXPOSE 3000
+STOPSIGNAL SIGTERM
+CMD ["lc-start"]

@@ -107,8 +107,8 @@ YOUTUBE_API_KEY=${{web.YOUTUBE_API_KEY}}
 
 What the first two lines do:
 
-- `LC_TARGET=worker` makes Railway build the worker image from the same Dockerfile; without it, Railway would build the website.
-- `LC_RELEASE_ON_START=1` makes the worker create the database and apply migrations each time it starts. This is safe to repeat.
+- `LC_TARGET=worker` makes this service start as the worker. Both services run the same image, which contains the website and the worker; this variable picks one when the service starts.
+- `LC_RELEASE_ON_START=1` makes the worker create the database and apply updates each time it starts. This is safe to repeat. The website does the same on its own, so the order the two start in doesn't matter.
 
 ## 6. Deploy and set up the label
 
@@ -127,13 +127,13 @@ Open the service, then **Deployments → View logs**. The message at the end usu
 | `Invalid environment configuration: VAULT_MASTER_KEY …` | A variable is missing or malformed. Check the Raw Editor block, and that the secrets were pasted without spaces. |
 | `DATABASE_SUPERUSER_URL must be set` or `could not translate host name` | A reference doesn't match a service name. The services must be named exactly `web`, `postgres`, `redis` and `bucket`, or you must edit the `${{…}}` names to match. |
 | `extension "vector" is not available` | The database isn't the pgvector template. Replace it with **pgvector-pg17**. |
-| The website shows "This page couldn't load" right after deploying | The worker hasn't finished creating the database yet. Wait for it to be **Active** and reload. |
+| The website shows "This page couldn't load" | Open `https://<your-address>/api/health?deep=1`. It names what's wrong: the database (with the exact error), Redis, or a missing worker. A database error right after the first deploy usually clears within a minute. |
 | Upload or download errors | The bucket variables aren't set on both services, or `S3_FORCE_PATH_STYLE` isn't `false`. |
 
 **Forgot your password?** In **worker**, open the **⋮** menu and choose **Railway Shell**, or run `railway ssh` from the Railway CLI. Then run:
 
 ```sh
-node dist/owner.js --email you@example.com
+cd /opt/worker/apps/worker && node dist/owner.js --email you@example.com
 ```
 
 It asks for a new password.

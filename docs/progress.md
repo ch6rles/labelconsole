@@ -201,11 +201,12 @@ The owner runs this installation for one label only, so there is no public sign-
 
 Netlify can't host Label Console: it needs an always-on worker, Postgres and Redis next to the website, and Netlify functions stop after 10 seconds. The owner chose Railway. The setup steps are in [deploy-railway.md](deploy-railway.md).
 
-- **One Dockerfile for both services.** Railway can't select a build stage, so the last stage is the web image unless the build arg `LC_TARGET=worker` is set. There are no BuildKit cache or secret mounts, because Railway rejects cache mounts without its own per-service ids. A proxy CA certificate can still be passed as `NPM_CA` for local builds. Compose keeps using `target:`.
+- **One Dockerfile for both services.** Railway can't select a build stage, so the last stage (`app`) holds both apps and starts the worker when `LC_TARGET=worker` is set at runtime, otherwise the web app. A runtime variable can't be lost the way a build argument can. There are no BuildKit cache or secret mounts, because Railway rejects cache mounts without its own per-service ids. A proxy CA certificate can still be passed as `NPM_CA` for local builds. Compose keeps using `target:`.
 - **One database URL.**
   - With only `DATABASE_SUPERUSER_URL` (Railway's admin connection string) and `SIGNING_SECRET`, the app derives the restricted app-role and owner-role URLs: same server, database `labelconsole`, passwords derived from `SIGNING_SECRET`.
   - `setup` creates the roles, the database and the extensions with those values, and re-syncs the passwords on every run.
-- **Release on start.** With `LC_RELEASE_ON_START=1`, the worker runs setup and migrations before starting, so Railway needs no separate release step. Both are idempotent.
+- **Release on start.** When the database URLs are derived, or `LC_RELEASE_ON_START=1` is set, the web app (`instrumentation.ts`) and the worker both run setup and migrations as they start. A Postgres advisory lock makes them take turns, and both steps are idempotent. The first deploy therefore works whichever service starts first, even if the worker's settings are wrong.
+- **Health check that explains itself.** `/api/health` reports the innermost database error (drizzle wraps it as "Failed query") and which connection was used, without the password. With `?deep=1` it also checks the worker heartbeat whenever Redis is up.
 - **Railway buckets.** `S3_FORCE_PATH_STYLE=false` selects virtual-hosted bucket URLs.
 - **Redis.** Connections look up IPv4 and IPv6 (`family: 0`), since Railway's older private networks are IPv6-only.
 - **Rehearsed locally with Docker**, using the guide's variables against pgvector Postgres 17, Redis and an S3 server with virtual-hosted buckets:
