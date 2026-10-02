@@ -3,8 +3,9 @@ import { build } from 'esbuild';
 // Bundle the worker and the workspace packages it imports (TypeScript source);
 // keep third-party packages external so native and dynamic imports resolve at runtime.
 await build({
-  // index: the worker service; migrate: the release step before new code starts; setup: one-time DB bootstrap.
-  entryPoints: ['src/index.ts', 'src/migrate.ts', 'src/setup.ts'],
+  // index: the worker service; migrate: the release step before new code starts; setup: one-time DB bootstrap;
+  // owner: add an owner or reset a password from the terminal.
+  entryPoints: ['src/index.ts', 'src/migrate.ts', 'src/setup.ts', 'src/owner.ts'],
   outdir: 'dist',
   bundle: true,
   platform: 'node',

@@ -6,17 +6,16 @@ import { useState } from 'react';
 import { api, ApiError, FieldInput, type FieldSpec } from '@labelconsole/ui/client';
 import { Icon } from '@labelconsole/ui';
 
-type Mode = 'login' | 'signup' | 'invite';
+type Mode = 'login' | 'setup' | 'invite';
 
 const FIELDS: Record<Mode, FieldSpec[]> = {
   login: [
     { name: 'email', label: 'Email', type: 'email', required: true, full: true },
     { name: 'password', label: 'Password', type: 'password', required: true, full: true },
   ],
-  signup: [
+  setup: [
     { name: 'name', label: 'Your name', required: true, full: true },
-    { name: 'labelName', label: 'Label name', required: true, full: true, placeholder: 'Northline Records' },
-    { name: 'email', label: 'Work email', type: 'email', required: true, full: true },
+    { name: 'email', label: 'Email', type: 'email', required: true, full: true, hint: 'You sign in with this.' },
     { name: 'password', label: 'Password', type: 'password', required: true, full: true, hint: 'At least 10 characters.' },
   ],
   invite: [
@@ -25,7 +24,7 @@ const FIELDS: Record<Mode, FieldSpec[]> = {
   ],
 };
 
-export function AuthForm({ mode, token, inviteLabel }: { mode: Mode; token?: string; inviteLabel?: string }) {
+export function AuthForm({ mode, token, inviteLabel, labelName }: { mode: Mode; token?: string; inviteLabel?: string; labelName?: string }) {
   const router = useRouter();
   const params = useSearchParams();
   const [values, setValues] = useState<Record<string, unknown>>({});
@@ -55,7 +54,7 @@ export function AuthForm({ mode, token, inviteLabel }: { mode: Mode; token?: str
     }
   };
 
-  const title = mode === 'login' ? 'Sign in' : mode === 'signup' ? 'Create your label workspace' : `Join ${inviteLabel ?? 'the label'}`;
+  const title = mode === 'login' ? 'Sign in' : mode === 'setup' ? `Set up ${labelName ?? 'your label'}` : `Join ${inviteLabel ?? 'the label'}`;
   return (
     <div className="lc-auth">
       <form className="lc-auth-card" onSubmit={submit} noValidate>
@@ -63,7 +62,7 @@ export function AuthForm({ mode, token, inviteLabel }: { mode: Mode; token?: str
           <span className="lc-brand-code">LC</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span className="lc-brand-name">Label Console</span>
-            <span className="lc-brand-sub">Label workspace</span>
+            <span className="lc-brand-sub">{labelName ?? inviteLabel ?? 'Label workspace'}</span>
           </div>
         </div>
         <h1 className="lc-h1" style={{ fontSize: 24 }}>
@@ -81,13 +80,13 @@ export function AuthForm({ mode, token, inviteLabel }: { mode: Mode; token?: str
           </div>
         )}
         <button type="submit" className="lc-btn lc-btn--primary" disabled={busy}>
-          {busy ? 'Working…' : mode === 'login' ? 'Sign in' : mode === 'signup' ? 'Create workspace' : 'Accept invitation'}
+          {busy ? 'Working…' : mode === 'login' ? 'Sign in' : mode === 'setup' ? 'Create owner account' : 'Accept invitation'}
         </button>
         <div style={{ fontSize: 13, color: 'var(--lc-muted)' }}>
           {mode === 'login' ? (
-            <>
-              New label? <Link href="/signup">Create a workspace</Link>
-            </>
+            'Need access? Ask the label owner for an invitation.'
+          ) : mode === 'setup' ? (
+            'This creates the owner account. Afterwards, add your team by invitation under Admin.'
           ) : (
             <>
               Already have an account? <Link href="/login">Sign in</Link>

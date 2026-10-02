@@ -5,15 +5,15 @@ import { env } from '@labelconsole/core/env';
 import { AuthForm } from '@/components/auth-form';
 import { getSession } from '@/server/session';
 
-export const metadata = { title: 'Sign in' };
+export const metadata = { title: 'Set up' };
 
-export default async function LoginPage() {
+/** Shown once, on the first visit: creates the label and its owner. Afterwards it only redirects. */
+export default async function SetupPage() {
   if (await getSession()) redirect('/');
-  // A fresh installation has no label yet: the first visit sets it up.
-  if (await setupNeeded()) redirect('/setup');
+  if (!(await setupNeeded())) redirect('/login');
   return (
     <Suspense>
-      <AuthForm mode="login" labelName={env().LABEL_NAME} />
+      <AuthForm mode="setup" labelName={env().LABEL_NAME} />
     </Suspense>
   );
 }

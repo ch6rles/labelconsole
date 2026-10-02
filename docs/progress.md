@@ -181,6 +181,22 @@ The owner chose [SpotScraper](https://spotscraper.readme.io) for Spotify data. B
 - **Verified live** against the real API: ISRC match, play count, 7 credits, artist audience, playlist followers, and a real agent run answering from the stored numbers.
 - **Tests:** 144 passing. They cover client parsing against recorded live responses, matching, single-ID rollups, the missing-key path, audience, credits, playlists and the metadata source.
 
+## Single-label installation (River Of Styxx)
+
+The owner runs this installation for one label only, so there is no public sign-up.
+
+- **First run:** on a fresh install, the first visit goes to `/setup`, which creates the label (`LABEL_NAME`, default "River Of Styxx") and its owner account. Setup then closes for good.
+  - A transaction-level lock makes two simultaneous attempts safe: the second is refused.
+  - `/setup` redirects to sign-in, and `POST /api/auth/setup` answers 409.
+- **Team access:** others join by invitation (Admin → Users). "New label" is gone from the label menu, and the menu only opens for someone in more than one label.
+- **Removed:** the sign-up page and the sign-up and create-label endpoints. Unknown `/api` paths now return a JSON 404 instead of falling through to the console's sign-in redirect.
+- **Owner command:** `pnpm owner --email …` (Docker: `node dist/owner.js`) makes sure the label exists and that this person owns it, with a password typed without echo.
+  - It doubles as password recovery, since there is no reset email.
+  - A new password signs out the user's older sessions.
+- **Docker:** compose now passes `LABEL_NAME` and the Voyage, SpotScraper and Anthropic workspace settings through to the containers.
+- **Verified** in a browser on an empty database: setup to the River Of Styxx dashboard, setup closed for a second visitor, removed endpoints returning 404, and both owner command paths (`tsx` and the bundled worker).
+- **Tests:** 146 passing (setup race and closure, owner add and password reset).
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.

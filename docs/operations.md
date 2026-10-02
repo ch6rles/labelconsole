@@ -53,6 +53,7 @@ Set in the environment (see `.env.example`). The app refuses to start if a requi
 | `DATABASE_SYSTEM_URL` | yes | Owner role |
 | `REDIS_URL` | yes | |
 | `APP_URL` | yes | Public origin; used for links, cookies and CSRF origin checks |
+| `LABEL_NAME` | | The one label this installation runs (default "River Of Styxx"). The first visit sets it up with its owner; then setup closes and people join by invitation. `pnpm owner --email …` adds an owner or resets a password |
 | `VAULT_MASTER_KEY` | yes | 32 bytes, base64. Wraps each label's data key. **Back it up separately from the database**: without it, stored credentials can't be decrypted |
 | `VAULT_MASTER_KEY_ID` | | Recorded with each wrapped key and in backup manifests |
 | `SIGNING_SECRET` | yes | 32+ bytes; signed storage URLs and webhook tokens |

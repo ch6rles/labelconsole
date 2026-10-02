@@ -6,6 +6,7 @@
 # The worker image also carries the release steps:
 #   docker run --rm labelconsole-worker node dist/setup.js     # once, fresh Postgres only
 #   docker run --rm labelconsole-worker node dist/migrate.js   # every deploy, before new code starts
+#   docker run --rm -it labelconsole-worker node dist/owner.js --email you@example.com   # add an owner or reset a password
 #
 # Behind a TLS-inspecting proxy, pass its CA for the dependency download:
 #   docker build --secret id=npm_ca,src=/path/to/ca.pem ...

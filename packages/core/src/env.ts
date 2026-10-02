@@ -14,6 +14,8 @@ const EnvSchema = z.object({
   REDIS_URL: z.string().default('redis://127.0.0.1:6379'),
   /** Public origin of the web app, used for links, CSRF origin checks and cookies. */
   APP_URL: z.string().url().default('http://localhost:3000'),
+  /** The one label this installation runs. There is no public sign-up: the first visit sets it up, then it is closed. */
+  LABEL_NAME: z.string().trim().min(1).max(120).default('River Of Styxx'),
   /** 32-byte base64 key that wraps per-org data keys (envelope encryption). */
   VAULT_MASTER_KEY: z.string().min(40),
   VAULT_MASTER_KEY_ID: z.string().default('local-v1'),

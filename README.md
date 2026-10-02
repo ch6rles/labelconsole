@@ -23,11 +23,14 @@ Needs Node 22, pnpm 10, Postgres 16 with pgvector, and Redis.
 pnpm install
 cp .env.example .env            # fill VAULT_MASTER_KEY (openssl rand -base64 32) and SIGNING_SECRET (openssl rand -hex 32)
 pnpm db:setup && pnpm db:migrate
-LC_DEV_SEED=1 pnpm db:seed      # optional sample label: demo@northline.test / correct horse battery
 pnpm dev                        # web on http://localhost:3000 and the worker
 ```
 
-Add `ANTHROPIC_API_KEY` to run agents and read contracts, and `YOUTUBE_API_KEY` to track streams (or add them per label under Settings → Integrations).
+Then open http://localhost:3000. The first visit sets up the label (`LABEL_NAME`, "River Of Styxx" by default) and its owner account. There is no public sign-up: once the label exists, setup closes, and your team joins by invitation (Admin → Users).
+
+- Forgot the password, or need a second owner: `pnpm owner --email you@example.com` (with Docker: `docker compose run --rm worker node dist/owner.js --email you@example.com`). It asks for the password without showing it, and creates the label and account if they don't exist yet.
+- Add `ANTHROPIC_API_KEY` (agents, contract reading), `VOYAGE_API_KEY` (agent memory), `SPOTSCRAPER_API_KEY` (Spotify plays, credits, audiences) and `YOUTUBE_API_KEY` (YouTube views) to `.env`, or add them under Settings → Integrations.
+- `LC_DEV_SEED=1 pnpm db:seed` creates a sample label (demo@northline.test / correct horse battery) for development. Seeding first closes setup, so use `pnpm owner` afterwards for your own label.
 
 Or run everything in containers: `docker compose up --build`.
 
@@ -43,6 +46,7 @@ Or run everything in containers: `docker compose up --build`.
 | `pnpm db:setup` / `db:migrate` / `db:reset` | Create roles and database / apply migrations and RLS / start over |
 | `pnpm db:generate` | Generate a migration from schema changes (drizzle-kit) |
 | `pnpm db:seed` | Sample data, only with `LC_DEV_SEED=1` and never in production |
+| `pnpm owner --email …` | Make sure the label exists and you own it with a new password (account recovery) |
 | `pnpm db:backup` / `db:restore-drill` | Back up the database and files / prove a backup restores and works |
 
 ## Layout

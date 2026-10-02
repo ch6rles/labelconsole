@@ -129,13 +129,14 @@ function Sidebar({ nav, org, orgs, user, widgets, activeId }: { nav: ShellSectio
   return (
     <aside className="lc-sidebar">
       <div style={{ position: 'relative' }}>
-        <button type="button" className="lc-brand" onClick={() => setShowSwitcher((s) => !s)} aria-haspopup="menu" aria-expanded={showSwitcher}>
+        {/* The switcher only matters for someone in more than one label. */}
+        <button type="button" className="lc-brand" onClick={() => orgs.length > 1 && setShowSwitcher((s) => !s)} aria-haspopup={orgs.length > 1 ? 'menu' : undefined} aria-expanded={orgs.length > 1 ? showSwitcher : undefined} style={orgs.length > 1 ? undefined : { cursor: 'default' }}>
           <span className="lc-brand-code">{org.shortCode}</span>
           <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
             <span className="lc-brand-name lc-ellipsis">{org.name}</span>
             <span className="lc-brand-sub">Label workspace</span>
           </span>
-          <Icon name="unfold_more" size={18} style={{ color: 'var(--lc-muted)' }} />
+          {orgs.length > 1 && <Icon name="unfold_more" size={18} style={{ color: 'var(--lc-muted)' }} />}
         </button>
         {showSwitcher && <LabelSwitcher orgs={orgs} currentId={org.id} onClose={() => setShowSwitcher(false)} />}
       </div>
@@ -253,18 +254,6 @@ function LabelSwitcher({ orgs, currentId, onClose }: { orgs: ShellProps['orgs'];
       setBusy(false);
     }
   };
-  const create = async () => {
-    const name = window.prompt('Name of the new label');
-    if (!name?.trim()) return;
-    setBusy(true);
-    try {
-      const org = await api<{ id: string }>('/api/auth/orgs', { method: 'POST', body: { name } });
-      await switchTo(org.id);
-    } catch (e) {
-      toast((e as Error).message, 'error');
-      setBusy(false);
-    }
-  };
   return (
     <div ref={ref} className="lc-popover" role="menu" style={{ left: 12, right: 12, width: 'auto', top: 'calc(100% - 4px)' }}>
       <div className="lc-popover-head">
@@ -281,10 +270,6 @@ function LabelSwitcher({ orgs, currentId, onClose }: { orgs: ShellProps['orgs'];
             {o.id === currentId && <Icon name="check" size={18} style={{ color: 'var(--lc-accent)' }} />}
           </button>
         ))}
-        <button type="button" className="lc-picker-item" style={{ width: '100%', color: 'var(--lc-accent)' }} onClick={create} role="menuitem">
-          <Icon name="add" size={18} />
-          <span style={{ flex: 1 }}>New label</span>
-        </button>
       </div>
     </div>
   );

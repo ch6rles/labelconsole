@@ -11,6 +11,6 @@ export const SignupSchema = z.object({
   password: PasswordSchema,
   labelName: z.string().trim().min(1, 'Name your label').max(120),
 });
+export const SetupSchema = SignupSchema.omit({ labelName: true });
 export const AcceptInviteSchema = z.object({ name: z.string().trim().max(120).optional(), password: z.string().max(200).optional() });
 export const SwitchOrgSchema = z.object({ orgId: z.uuid() });
-export const CreateOrgSchema = z.object({ name: z.string().trim().min(1).max(120) });

@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { and, eq, gt, sql } from 'drizzle-orm';
 import { systemDb } from './db/client';
 import { customRoles, invitations, memberships, organizations, sessions, users } from './db/schema';
+import { env } from './env';
 import { ConflictError, UnauthorizedError, ValidationError } from './errors';
 import { PermissionSet } from './permissions';
 
@@ -189,6 +190,62 @@ export async function signup(input: SignupInput) {
   });
 }
 
+/** True until the installation's label exists. Only then is the first-run setup open. */
+export async function setupNeeded(): Promise<boolean> {
+  const [org] = await systemDb().select({ id: organizations.id }).from(organizations).limit(1);
+  return !org;
+}
+
+/**
+ * First-run setup: create the installation's one label (LABEL_NAME) and its
+ * owner. There is no public sign-up; once any label exists this refuses, and
+ * further people join by invitation. A transaction-level lock makes two
+ * simultaneous attempts safe: the second one sees the label and is refused.
+ */
+export async function setupLabel(input: { name: string; email: string; password: string }) {
+  const email = input.email.trim().toLowerCase();
+  const passwordHash = await hashPassword(input.password);
+  const labelName = env().LABEL_NAME;
+  const slug = await uniqueSlug(slugify(labelName));
+  return systemDb().transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('labelconsole:setup'))`);
+    const [org] = await tx.select({ id: organizations.id }).from(organizations).limit(1);
+    if (org) throw new ConflictError(`${labelName} is already set up. Sign in, or ask the owner for an invitation.`);
+    const [exists] = await tx.select({ id: users.id }).from(users).where(sql`lower(${users.email}) = ${email}`);
+    if (exists) throw new ConflictError('An account with that email already exists');
+    const [user] = await tx.insert(users).values({ email, name: input.name.trim(), passwordHash }).returning();
+    return { user, org: await createOrgTx(tx, { name: labelName, slug, ownerUserId: user.id }) };
+  });
+}
+
+/**
+ * For the `pnpm owner` command: make sure the installation's label exists and
+ * that this person is its owner with this password. Creates what is missing,
+ * so it also recovers a forgotten password (there is no email reset).
+ */
+export async function ensureOwner(input: { name?: string; email: string; password: string }) {
+  const email = input.email.trim().toLowerCase();
+  const passwordHash = await hashPassword(input.password);
+  const labelName = env().LABEL_NAME;
+  const slug = await uniqueSlug(slugify(labelName));
+  return systemDb().transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('labelconsole:setup'))`);
+    const [existing] = await tx.select().from(users).where(sql`lower(${users.email}) = ${email}`);
+    const user = existing
+      ? (await tx.update(users).set({ passwordHash, ...(input.name?.trim() ? { name: input.name.trim() } : {}) }).where(eq(users.id, existing.id)).returning())[0]
+      : (await tx.insert(users).values({ email, name: input.name?.trim() || email.split('@')[0], passwordHash }).returning())[0];
+    const [found] = await tx.select().from(organizations).where(eq(organizations.name, labelName)).limit(1);
+    const org = found ?? (await createOrgTx(tx, { name: labelName, slug, ownerUserId: user.id }));
+    await tx
+      .insert(memberships)
+      .values({ orgId: org.id, userId: user.id, role: 'owner', createdBy: 'system:owner-command' })
+      .onConflictDoUpdate({ target: [memberships.orgId, memberships.userId], set: { role: 'owner', status: 'active' } });
+    // Signing in with a new password ends every older session.
+    if (existing) await tx.delete(sessions).where(eq(sessions.userId, user.id));
+    return { user, org, createdUser: !existing, createdLabel: !found };
+  });
+}
+
 type SystemTx = Parameters<Parameters<ReturnType<typeof systemDb>['transaction']>[0]>[0];
 
 async function createOrgTx(tx: SystemTx, input: { name: string; slug: string; ownerUserId: string; plan?: string }) {
@@ -206,7 +263,7 @@ async function createOrgTx(tx: SystemTx, input: { name: string; slug: string; ow
   return org;
 }
 
-/** An existing user creates an additional label. */
+/** An existing user creates an additional label (tests and multi-label installs; this installation runs one label). */
 export async function createOrgForUser(userId: string, name: string) {
   const slug = await uniqueSlug(slugify(name));
   return systemDb().transaction((tx) => createOrgTx(tx, { name: name.trim(), slug, ownerUserId: userId }));

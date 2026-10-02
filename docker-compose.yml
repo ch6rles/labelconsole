@@ -5,8 +5,11 @@
 #   docker compose up --build
 #   open http://localhost:3000
 #
-# Compose reads VAULT_MASTER_KEY, SIGNING_SECRET, ANTHROPIC_API_KEY and
-# YOUTUBE_API_KEY from .env; database and Redis addresses are set below.
+# Compose reads VAULT_MASTER_KEY, SIGNING_SECRET, LABEL_NAME and the provider
+# keys (Anthropic, Voyage, SpotScraper, YouTube) from .env; database and Redis
+# addresses are set below. The first visit to http://localhost:3000 sets up the
+# label and its owner. To add an owner or reset a forgotten password:
+#   docker compose run --rm worker node dist/owner.js --email you@example.com
 # Change the database passwords before exposing this anywhere.
 
 x-app-env: &app-env
@@ -20,7 +23,12 @@ x-app-env: &app-env
   SIGNING_SECRET: ${SIGNING_SECRET:?set SIGNING_SECRET in .env (openssl rand -hex 32)}
   STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
   STORAGE_LOCAL_DIR: /data/storage
+  LABEL_NAME: ${LABEL_NAME:-River Of Styxx}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_WORKSPACE_ID: ${ANTHROPIC_WORKSPACE_ID:-}
+  VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+  VOYAGE_MODEL: ${VOYAGE_MODEL:-voyage-4}
+  SPOTSCRAPER_API_KEY: ${SPOTSCRAPER_API_KEY:-}
   YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
   METRICS_TOKEN: ${METRICS_TOKEN:-}
   LOG_LEVEL: ${LOG_LEVEL:-info}
