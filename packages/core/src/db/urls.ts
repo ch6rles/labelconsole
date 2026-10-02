@@ -25,5 +25,6 @@ export function applyDerivedDatabaseUrls(e: NodeJS.ProcessEnv = process.env) {
   if ((e.DATABASE_URL && e.DATABASE_SYSTEM_URL) || !e.DATABASE_SUPERUSER_URL || !e.SIGNING_SECRET) return false;
   e.DATABASE_URL ||= derive(e.DATABASE_SUPERUSER_URL, DERIVED_DATABASE.appRole, e.SIGNING_SECRET);
   e.DATABASE_SYSTEM_URL ||= derive(e.DATABASE_SUPERUSER_URL, DERIVED_DATABASE.ownerRole, e.SIGNING_SECRET);
+  e.LC_DATABASE_URLS_DERIVED = '1';
   return true;
 }
