@@ -2,8 +2,12 @@
 
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
+import type { OrgSettings } from '@labelconsole/core/db/schema';
+import { Icon } from '@labelconsole/ui';
 import { api, ApiError, Button, useToast } from '@labelconsole/ui/client';
-import type { ApprovalPolicy } from '../schema';
+import type { AgentType } from '../agent-types';
+import { buildSystemPrompt } from '../runtime/prompt';
+import type { Agent, ApprovalPolicy } from '../schema';
 
 type ToolInfo = { name: string; module: string; description: string; risk: string; requiresApproval: boolean };
 type Option = { value: string; label: string };
@@ -32,7 +36,7 @@ const RISKS: Array<{ key: keyof ApprovalPolicy['risk']; label: string }> = [
 ];
 
 /** Edit an agent: goal, instructions, model, role, tools, approval policy, budget and limits. */
-export function AgentBuilder({ agentId, initial, models, roles, tools, disabled }: { agentId: string; initial: BuilderValues; models: Option[]; roles: Option[]; tools: ToolInfo[]; disabled?: boolean }) {
+export function AgentBuilder({ agentId, initial, models, roles, tools, type, org, disabled }: { agentId: string; initial: BuilderValues; models: Option[]; roles: Option[]; tools: ToolInfo[]; type?: AgentType; org: { name: string; settings: OrgSettings }; disabled?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [v, setV] = useState<BuilderValues>(initial);
@@ -44,6 +48,9 @@ export function AgentBuilder({ agentId, initial, models, roles, tools, disabled 
     for (const t of tools) m.set(t.module, [...(m.get(t.module) ?? []), t]);
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [tools]);
+
+  // Exactly what the model is given as its standing prompt, rebuilt as the fields change.
+  const prompt = useMemo(() => buildSystemPrompt({ name: v.name, goal: v.goal, instructions: v.instructions } as Agent, type, org), [v.name, v.goal, v.instructions, type, org]);
 
   const save = async () => {
     setBusy(true);
@@ -76,15 +83,30 @@ export function AgentBuilder({ agentId, initial, models, roles, tools, disabled 
             <option value="paused">Paused (no new runs)</option>
           </select>
         </label>
+        <div className="lc-banner" style={{ gridColumn: '1 / -1' }}>
+          <Icon name="info" />
+          <div className="lc-stack" style={{ gap: 4 }}>
+            <strong>How this agent is prompted</strong>
+            <span>
+              Every run starts from the same standing prompt: the {type ? <>built-in <em>{type.name}</em> role</> : 'built-in role'}, then the <strong>goal</strong> and the <strong>instructions</strong> below. The <strong>task</strong> you type in <em>Run now</em> (or a schedule&apos;s or trigger&apos;s task) is the request for that one run, sent on top. To change how the agent always behaves, edit the instructions. To ask for something specific, use the task.
+            </span>
+          </div>
+        </div>
         <label className="lc-field" style={{ gridColumn: '1 / -1' }}>
           <span className="lc-field-label">Goal</span>
           <textarea className="lc-textarea" rows={2} value={v.goal} disabled={disabled} onChange={(e) => set('goal', e.target.value)} />
+          <span className="lc-field-hint">One or two sentences on what the agent is for. Scheduled runs without a task work toward this.</span>
         </label>
         <label className="lc-field" style={{ gridColumn: '1 / -1' }}>
-          <span className="lc-field-label">Instructions from the label</span>
-          <textarea className="lc-textarea" rows={4} value={v.instructions} disabled={disabled} placeholder="House style, who to notify, what never to do…" onChange={(e) => set('instructions', e.target.value)} />
-          <span className="lc-field-hint">Added to the agent type&apos;s own instructions.</span>
+          <span className="lc-field-label">Instructions (the agent&apos;s prompt)</span>
+          <textarea className="lc-textarea" rows={8} value={v.instructions} disabled={disabled} placeholder={'How to do the job, what to look for, what to return, who to notify, what never to do.\nFor example: Only research funk and phonk editors. Skip accounts under 10K followers. Save profile pictures to Drive under Research/Editors.'} onChange={(e) => set('instructions', e.target.value)} />
+          <span className="lc-field-hint">Your standing orders, used on every run. They come after the {type?.name ?? 'agent type'}&apos;s built-in role and win where they differ.</span>
         </label>
+        <details style={{ gridColumn: '1 / -1' }}>
+          <summary className="lc-field-label" style={{ cursor: 'pointer' }}>See the full prompt the agent gets</summary>
+          <pre className="lc-code" style={{ marginTop: 8, maxHeight: 420 }}>{prompt}</pre>
+          <span className="lc-field-hint">Plus, as the first message of each run: the task (or &quot;work toward your goal&quot;), who started it, the platforms chosen and relevant memories.</span>
+        </details>
         <label className="lc-field">
           <span className="lc-field-label">Model</span>
           <select className="lc-select" value={v.model} disabled={disabled} onChange={(e) => set('model', e.target.value)}>

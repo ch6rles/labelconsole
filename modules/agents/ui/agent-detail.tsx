@@ -6,6 +6,7 @@ import { BUILT_IN_ROLES, ROLE_LABELS } from '@labelconsole/core/permissions';
 import { PLATFORM_LABELS, SOCIAL_PLATFORMS } from '@labelconsole/core/tools';
 import { Card, DataTable, Icon, KV, markdownPreview, Page, PageHeader, StatCard, Tag, fmt } from '@labelconsole/ui';
 import { ActionButton, ApiToggle, FormModal } from '@labelconsole/ui/client';
+import type { OrgSettings } from '@labelconsole/core/db/schema';
 import { agentType } from '../agent-types';
 import type { TriggerConfig } from '../schema';
 import * as svc from '../service';
@@ -43,10 +44,11 @@ export default async function AgentDetailPage({ run, params, session }: PageProp
                 trigger={{ label: 'Run now', icon: 'play_arrow', variant: 'primary' }}
                 endpoint={`/agents/${agent.id}/run`}
                 fields={[
-                  { name: 'task', label: 'Task (optional)', type: 'textarea', placeholder: 'Leave empty to work toward its goal' },
+                  { name: 'task', label: 'Task for this run', type: 'textarea', rows: 5, placeholder: 'e.g. Find 5 funk edit editors on TikTok posting this week, and save their profile pictures to Research/Editors', hint: 'Sent on top of the agent\'s goal and instructions, for this run only. Leave empty to work toward the goal.' },
                   ...(platforms.length > 1 ? [{ name: 'platforms', label: 'Platforms', type: 'multiselect' as const, options: platforms.map((p) => ({ value: p, label: PLATFORM_LABELS[p] })), hint: 'Tick some to research only there. Leave all unticked for every platform.' }] : []),
                 ]}
                 columns={1}
+                submitLabel="Start run"
                 redirectTo="/agents/runs/{id}"
                 success="Run started"
               />
@@ -122,6 +124,8 @@ export default async function AgentDetailPage({ run, params, session }: PageProp
           models={MODELS.map((m) => ({ value: m.id, label: `${m.label} · $${m.input}/$${m.output} per M tokens` }))}
           roles={BUILT_IN_ROLES.filter((r) => r !== 'owner').map((r) => ({ value: r, label: ROLE_LABELS[r] ?? r }))}
           tools={tools.map((t) => ({ name: t.name, module: t.module, description: t.description, risk: t.risk, requiresApproval: Boolean(t.requiresApproval) }))}
+          type={type}
+          org={{ name: session.org.name, settings: session.org.settings as OrgSettings }}
         />
       </Card>
       <Link href="/agents" className="lc-btn lc-btn--link"><Icon name="arrow_back" />All agents</Link>
