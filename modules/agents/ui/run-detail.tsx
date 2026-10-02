@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { PageProps } from '@labelconsole/core/web';
-import { Banner, Card, Icon, KV, Page, PageHeader, StatCard, fmt } from '@labelconsole/ui';
+import { Banner, Card, Icon, KV, Markdown, Page, PageHeader, StatCard, fmt } from '@labelconsole/ui';
 import { ActionButton } from '@labelconsole/ui/client';
 import type { Step } from '../schema';
 import * as svc from '../service';
@@ -19,9 +19,13 @@ function StepRow({ s }: { s: Step }) {
       <span className="lc-row" style={{ gap: 12, alignItems: 'flex-start', flex: 1, minWidth: 0 }}>
         <Icon name={STEP_ICON[s.kind] ?? 'circle'} size={18} style={{ color: s.isError ? 'var(--lc-danger)' : 'var(--lc-muted)', marginTop: 2 }} />
         <span className="lc-stack" style={{ gap: 4, minWidth: 0, flex: 1 }}>
-          <span style={{ fontSize: 14, fontWeight: s.kind === 'plan' ? 600 : 400, color: s.isError ? 'var(--lc-danger)' : undefined, whiteSpace: 'pre-wrap' }}>
-            {s.kind === 'message' || s.kind === 'plan' ? text || s.summary : s.summary}
-          </span>
+          {s.kind === 'message' && text ? (
+            <Markdown text={text} />
+          ) : (
+            <span style={{ fontSize: 14, fontWeight: s.kind === 'plan' ? 600 : 400, color: s.isError ? 'var(--lc-danger)' : undefined, whiteSpace: 'pre-wrap' }}>
+              {s.kind === 'plan' ? text || s.summary : s.summary}
+            </span>
+          )}
           {thinking && (
             <details>
               <summary className="lc-cell-sub">Reasoning summary</summary>
@@ -80,7 +84,11 @@ export default async function RunDetailPage({ run, params, session }: PageProps)
           )
         }
       />
-      {r.status === 'completed' && r.result && <Banner icon="task_alt">{r.result}</Banner>}
+      {r.status === 'completed' && r.result && (
+        <Card title={<span className="lc-row" style={{ gap: 8 }}><Icon name="task_alt" size={18} style={{ color: 'var(--lc-accent)' }} />Result</span>}>
+          <Markdown text={r.result} />
+        </Card>
+      )}
       {r.error && <Banner icon="error" warn>{r.error}</Banner>}
       <div className="lc-grid-stats">
         <StatCard label="NOW" icon="pending" value={<span style={{ fontSize: 20, lineHeight: 1.3, display: 'block' }}>{r.currentTask ?? '—'}</span>} note={r.desiredState !== 'run' && active ? `${r.desiredState} requested` : `${TRIGGER_LABEL[r.triggerKind] ?? r.triggerKind} run`} />

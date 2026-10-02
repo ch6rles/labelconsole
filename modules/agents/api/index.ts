@@ -24,6 +24,8 @@ export const routes = defineRoutes('agents', [
   route({ method: 'PATCH', path: '/agent-triggers/:id', permission: 'agents:manage', body: z.object({ enabled: z.boolean() }), handler: (ctx, req) => svc.setTriggerEnabled(ctx, req.params.id, req.body.enabled) }),
   route({ method: 'DELETE', path: '/agent-triggers/:id', permission: 'agents:manage', handler: (ctx, req) => svc.deleteTrigger(ctx, req.params.id) }),
 
+  // The top bar's agent indicator re-reads these whenever a run or approval changes.
+  route({ method: 'GET', path: '/agent-activity', permission: 'agents:read', handler: async (ctx) => ({ running: await svc.activeRunCount(ctx), pendingApprovals: ctx.can('agents:approve') ? await svc.pendingApprovalCount(ctx) : 0 }) }),
   route({ method: 'GET', path: '/agent-runs', permission: 'agents:read', query: svc.RunQuery, handler: (ctx, req) => svc.listRuns(ctx, req.query) }),
   route({ method: 'GET', path: '/agent-runs/:id', permission: 'agents:read', handler: (ctx, req) => svc.getRun(ctx, req.params.id) }),
   route({ method: 'POST', path: '/agent-runs/:id/control', permission: 'agents:run', body: z.object({ action: z.enum(['pause', 'resume', 'stop']) }), handler: (ctx, req) => svc.controlRun(ctx, req.params.id, req.body.action) }),

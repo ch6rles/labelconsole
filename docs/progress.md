@@ -250,6 +250,8 @@ The owner asked for an agent that researches editors and creators on TikTok, Ins
   - **Social Scout:** searches, shortlists, profiles, and gives each creator a "buy now", "watch" or "skip" verdict with the deciding numbers. It adds strong finds to the network and saves images when asked.
   - **Custom Agent:** a blank agent. Staff write its goal and instructions, tick its tools, and give each run a task.
   - **Existing types:** Creator Outreach, Trend & Social Monitor and A&R Scout get the social tools too. Agents created before this keep their tool lists; tick the new tools in their configuration.
+- **Readable results:** an agent's final answer is shown as formatted text (headings, tables, lists, bold, links) on the run page and in its activity. The renderer (`packages/ui/src/markdown.tsx`) builds React elements and never raw HTML, and only allows web, mail and in-console links. Lists of agents and runs show a one-line plain preview.
+- **Agent indicator:** the top bar's "running" count no longer sticks after a run ends. It used to count events up and down, so a run already going when the page loaded never counted down. It now re-reads the real numbers (`GET /agent-activity`) after any run or approval event, after a reconnect, and every minute while something runs.
 - **Bug fixed along the way:** cutting text with `slice()` could split an emoji. Half an emoji is invalid Unicode, which Postgres refuses in json columns, so the whole step failed. `clip()` now does this safely in tool results and runtime truncation.
 - **Verified live:**
   - Every scraper was run against Apify, and an image was downloaded from TikTok's CDN.

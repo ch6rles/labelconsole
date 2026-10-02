@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { llmConfigured } from '@labelconsole/core/usage';
 import type { PageProps } from '@labelconsole/core/web';
-import { Banner, DataTable, Icon, Page, PageHeader, Summary, fmt, type Column } from '@labelconsole/ui';
+import { Banner, DataTable, Icon, markdownPreview, Page, PageHeader, Summary, fmt, type Column } from '@labelconsole/ui';
 import { ActionButton, FormModal } from '@labelconsole/ui/client';
 import * as svc from '../service';
 import { LiveRefresh } from './live';
@@ -39,7 +39,7 @@ export default async function AgentsPage({ run, session }: PageProps) {
         a.lastRun ? (
           <span className="lc-row" style={{ gap: 8, flexWrap: 'nowrap', minWidth: 0 }}>
             <RunChip status={a.lastRun.status} />
-            <span className="lc-cell-sub lc-ellipsis">{(a.lastRun.status === 'completed' ? a.lastRun.result : null) ?? a.lastRun.currentTask ?? a.lastRun.endReason ?? ''}</span>
+            <span className="lc-cell-sub lc-ellipsis">{(a.lastRun.status === 'completed' && a.lastRun.result ? markdownPreview(a.lastRun.result) : null) ?? a.lastRun.currentTask ?? a.lastRun.endReason ?? ''}</span>
           </span>
         ) : (
           <span className="lc-muted" style={{ fontSize: 13 }}>Never run</span>

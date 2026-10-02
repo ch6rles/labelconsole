@@ -4,7 +4,7 @@ import { env } from '@labelconsole/core/env';
 import { MODELS } from '@labelconsole/core/llm-models';
 import { BUILT_IN_ROLES, ROLE_LABELS } from '@labelconsole/core/permissions';
 import { PLATFORM_LABELS, SOCIAL_PLATFORMS } from '@labelconsole/core/tools';
-import { Card, DataTable, Icon, KV, Page, PageHeader, StatCard, Tag, fmt } from '@labelconsole/ui';
+import { Card, DataTable, Icon, KV, markdownPreview, Page, PageHeader, StatCard, Tag, fmt } from '@labelconsole/ui';
 import { ActionButton, ApiToggle, FormModal } from '@labelconsole/ui/client';
 import { agentType } from '../agent-types';
 import type { TriggerConfig } from '../schema';
@@ -106,7 +106,7 @@ export default async function AgentDetailPage({ run, params, session }: PageProp
         empty="No runs yet."
         columns={[
           { key: 's', header: 'Status', width: '140px', render: (r) => <RunChip status={r.status} /> },
-          { key: 't', header: 'Task', width: 'minmax(220px,1.5fr)', render: (r) => <span className="lc-cell-stack"><span className="lc-ellipsis">{r.task ?? 'Scheduled work'}</span><span className="lc-cell-sub lc-ellipsis">{r.result ?? r.error ?? r.currentTask ?? ''}</span></span> },
+          { key: 't', header: 'Task', width: 'minmax(220px,1.5fr)', render: (r) => <span className="lc-cell-stack"><span className="lc-ellipsis">{r.task ?? 'Scheduled work'}</span><span className="lc-cell-sub lc-ellipsis">{(r.result ? markdownPreview(r.result) : null) ?? r.error ?? r.currentTask ?? ''}</span></span> },
           { key: 'k', header: 'Trigger', width: '100px', render: (r) => <span style={{ fontSize: 13 }}>{TRIGGER_LABEL[r.triggerKind] ?? r.triggerKind}</span> },
           { key: 'n', header: 'Steps', width: '70px', align: 'right', render: (r) => <span className="lc-cell-num">{r.stepCount}</span> },
           { key: 'c', header: 'Cost', width: '80px', align: 'right', render: (r) => <span className="lc-cell-num">{usd(r.costUsd)}</span> },

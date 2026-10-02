@@ -370,24 +370,32 @@ function NotificationsTray({ userId, initialUnread }: { userId: string; initialU
 function AgentIndicator({ initialRunning, pendingApprovals }: { initialRunning: number; pendingApprovals: number }) {
   const [running, setRunning] = useState(initialRunning);
   const [approvals, setApprovals] = useState(pendingApprovals);
-  const live = useRef(new Map<string, string>());
   useEffect(() => setRunning(initialRunning), [initialRunning]);
   useEffect(() => setApprovals(pendingApprovals), [pendingApprovals]);
-  useRealtime('agents.run.updated', (e) => {
-    const { runId, status, delta } = e.data as { runId: string; status: string; delta?: number };
-    const wasRunning = live.current.get(runId) === 'running';
-    live.current.set(runId, status);
-    if (status === 'running' && !wasRunning) setRunning((n) => n + 1);
-    else if (status !== 'running' && wasRunning) setRunning((n) => Math.max(0, n - 1));
-    else if (delta) setRunning((n) => Math.max(0, n + delta));
-  });
-  // A new approval request adds one; a decision (or expiry) takes one away.
-  useRealtime('agents.approval.requested', () => setApprovals((n) => n + 1));
-  useRealtime('agents.approval.updated', (e) => {
-    const { pending, status } = e.data as { pending?: number; status?: string };
-    if (typeof pending === 'number') setApprovals(pending);
-    else if (status && status !== 'pending') setApprovals((n) => Math.max(0, n - 1));
-  });
+  // Counting events up and down drifts: a run already going when the page loaded never
+  // counted down, and events sent while disconnected are lost. So any agent event re-reads
+  // the real numbers, batched so a burst of events costs one request.
+  const sync = useDebouncedCallback(() => {
+    api<{ running: number; pendingApprovals: number }>('/agent-activity').then(
+      (r) => {
+        setRunning(r.running);
+        setApprovals(r.pendingApprovals);
+      },
+      () => undefined,
+    );
+  }, 400);
+  const connected = useRealtime('agents.run.updated', sync);
+  useRealtime('agents.approval.requested', sync);
+  useRealtime('agents.approval.updated', sync);
+  // After a reconnect, and every minute while something runs, in case an event was missed.
+  useEffect(() => {
+    if (connected) sync();
+  }, [connected, sync]);
+  useEffect(() => {
+    if (running === 0) return;
+    const t = setInterval(sync, 60_000);
+    return () => clearInterval(t);
+  }, [running, sync]);
   const warn = approvals > 0;
   return (
     <Link href={warn ? '/inbox/approvals' : '/agents/runs'} className="lc-agent-indicator" title="Agent activity">
