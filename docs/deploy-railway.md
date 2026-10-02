@@ -81,34 +81,37 @@ YOUTUBE_API_KEY=
    - **Service name:** `worker`
    - **Source → Branch:** the same branch as the website.
    - It needs **no** domain.
-3. In **worker → Variables → Raw Editor**, paste this block as is. It points at the website's values, so there's nothing to fill in:
+3. In **worker → Variables → Raw Editor**, paste this block. Fill in the **same** secrets and API keys as the website. Copy them from **web → Variables** with the eye icon. They must match exactly: `VAULT_MASTER_KEY` decrypts stored keys, and `SIGNING_SECRET` derives the database passwords.
 
 ```
 LC_TARGET=worker
-LC_RELEASE_ON_START=1
-LABEL_NAME=${{web.LABEL_NAME}}
-APP_URL=${{web.APP_URL}}
-VAULT_MASTER_KEY=${{web.VAULT_MASTER_KEY}}
-SIGNING_SECRET=${{web.SIGNING_SECRET}}
-DATABASE_SUPERUSER_URL=${{web.DATABASE_SUPERUSER_URL}}
-REDIS_URL=${{web.REDIS_URL}}
+LABEL_NAME="River Of Styxx"
+APP_URL=https://your-web-address.up.railway.app
+VAULT_MASTER_KEY=paste-the-same-value-as-web
+SIGNING_SECRET=paste-the-same-value-as-web
+DATABASE_SUPERUSER_URL=${{postgres.DATABASE_URL}}
+REDIS_URL=${{redis.REDIS_URL}}
 STORAGE_DRIVER=s3
-S3_BUCKET=${{web.S3_BUCKET}}
-S3_ENDPOINT=${{web.S3_ENDPOINT}}
-S3_REGION=${{web.S3_REGION}}
-S3_ACCESS_KEY_ID=${{web.S3_ACCESS_KEY_ID}}
-S3_SECRET_ACCESS_KEY=${{web.S3_SECRET_ACCESS_KEY}}
+S3_BUCKET=${{bucket.BUCKET}}
+S3_ENDPOINT=${{bucket.ENDPOINT}}
+S3_REGION=${{bucket.REGION}}
+S3_ACCESS_KEY_ID=${{bucket.ACCESS_KEY_ID}}
+S3_SECRET_ACCESS_KEY=${{bucket.SECRET_ACCESS_KEY}}
 S3_FORCE_PATH_STYLE=false
-ANTHROPIC_API_KEY=${{web.ANTHROPIC_API_KEY}}
-VOYAGE_API_KEY=${{web.VOYAGE_API_KEY}}
-SPOTSCRAPER_API_KEY=${{web.SPOTSCRAPER_API_KEY}}
-YOUTUBE_API_KEY=${{web.YOUTUBE_API_KEY}}
+ANTHROPIC_API_KEY=paste-the-same-value-as-web
+VOYAGE_API_KEY=paste-the-same-value-as-web
+SPOTSCRAPER_API_KEY=paste-the-same-value-as-web
+YOUTUBE_API_KEY=
 ```
 
-What the first two lines do:
+Then check the worker has **no** `DATABASE_URL` or `DATABASE_SYSTEM_URL`. Railway sometimes adds `DATABASE_URL` by itself when services are linked; it would point the worker at a different database from the website.
+
+Why the values are pasted directly rather than written as `${{web.…}}`: Railway leaves out a reference it can't resolve, for example to a sealed variable. The worker then starts without its secrets.
+
+What the first line does:
 
 - `LC_TARGET=worker` makes this service start as the worker. Both services run the same image, which contains the website and the worker; this variable picks one when the service starts.
-- `LC_RELEASE_ON_START=1` makes the worker create the database and apply updates each time it starts. This is safe to repeat. The website does the same on its own, so the order the two start in doesn't matter.
+- Both services create the database and apply updates each time they start. This is safe to repeat, and the order they start in doesn't matter.
 
 ## 6. Deploy and set up the label
 
@@ -124,7 +127,7 @@ Open the service, then **Deployments → View logs**. The message at the end usu
 
 | You see | What it means |
 |---|---|
-| `Invalid environment configuration: VAULT_MASTER_KEY …` | A variable is missing or malformed. Check the Raw Editor block, and that the secrets were pasted without spaces. |
+| `Invalid environment configuration: VAULT_MASTER_KEY …` (on the worker) | The worker doesn't have the secrets. Paste the same `VAULT_MASTER_KEY` and `SIGNING_SECRET` as the website directly, not as `${{web.…}}` references. |
 | `DATABASE_SUPERUSER_URL must be set` or `could not translate host name` | A reference doesn't match a service name. The services must be named exactly `web`, `postgres`, `redis` and `bucket`, or you must edit the `${{…}}` names to match. |
 | `extension "vector" is not available` | The database isn't the pgvector template. Replace it with **pgvector-pg17**. |
 | The website shows "This page couldn't load" | Open `https://<your-address>/api/health?deep=1`. It names what's wrong: the database (with the exact error), Redis, or a missing worker. A database error right after the first deploy usually clears within a minute. |
