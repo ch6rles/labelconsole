@@ -1,0 +1,221 @@
+[
+ {
+  "username": "natgeo",
+  "url": "https://www.instagram.com/natgeo",
+  "fullName": "National Geographic",
+  "followersCount": 268462733,
+  "followsCount": 194,
+  "isBusinessAccount": true,
+  "businessCategoryName": "None",
+  "private": false,
+  "verified": true,
+  "postsCount": 32035,
+  "externalUrl": "http://visitstore.bio/natgeo",
+  "biography": "Step into wonder and find your inner explorer with National Geographic 🌎",
+  "profilePicUrlHD": "https://cdn.example.com/natgeo-avatar.jpg",
+  "latestPosts": [
+   {
+    "type": "Video",
+    "shortCode": "DdG4RIxIPyf",
+    "commentsCount": 515,
+    "likesCount": 77998,
+    "videoViewCount": 865940,
+    "timestamp": "2026-09-10T13:00:14.000Z",
+    "paidPartnership": true,
+    "isPinned": true,
+    "productType": "clips",
+    "caption": "Presented by @Rolex. Welcome to Africa 🌍 Africa Earth’s Wild Home takes you deep into the heart of our wildest continen",
+    "hashtags": [
+     "Rolex",
+     "PerpetualPlanet"
+    ],
+    "url": "https://www.instagram.com/p/DdG4RIxIPyf/",
+    "displayUrl": "https://cdn.example.com/natgeo-0.jpg",
+    "ownerUsername": "natgeo"
+   },
+   {
+    "type": "Video",
+    "shortCode": "DbIdlf0j6uA",
+    "commentsCount": 316,
+    "likesCount": 27953,
+    "videoViewCount": 72780,
+    "timestamp": "2026-07-23T13:00:03.000Z",
+    "paidPartnership": false,
+    "isPinned": true,
+    "productType": "clips",
+    "caption": "Describe Pompeii: Out of Time in 3 words? It's Now Streaming.\n\n#PompeiiOutOfTime with @twhiddleston is now streaming on ",
+    "hashtags": [
+     "PompeiiOutOfTime"
+    ],
+    "url": "https://www.instagram.com/p/DbIdlf0j6uA/",
+    "displayUrl": "https://cdn.example.com/natgeo-1.jpg",
+    "ownerUsername": "natgeo"
+   },
+   {
+    "type": "Image",
+    "shortCode": "Dd8u0tIFz1F",
+    "commentsCount": 50,
+    "likesCount": 16795,
+    "timestamp": "2026-10-02T01:00:00.000Z",
+    "paidPartnership": false,
+    "caption": "Presented by @Rolex. Until 2023, the world’s biggest rhino herd was owned by a single millionaire on a ranch in northern",
+    "hashtags": [
+     "Rolex",
+     "AfricaEarthsWildHome.",
+     "PerpetualPlanet"
+    ],
+    "url": "https://www.instagram.com/p/Dd8u0tIFz1F/",
+    "displayUrl": "https://cdn.example.com/natgeo-2.jpg",
+    "ownerUsername": "natgeo"
+   },
+   {
+    "type": "Video",
+    "shortCode": "Dd97mt9AeqL",
+    "commentsCount": 448,
+    "likesCount": 87036,
+    "videoViewCount": 1834858,
+    "timestamp": "2026-10-01T22:00:15.000Z",
+    "paidPartnership": false,
+    "productType": "clips",
+    "caption": "Over the past few years, fishermen off Cape Cod in Massachusetts have noticed fish being reeled out of the water with bi",
+    "hashtags": [],
+    "url": "https://www.instagram.com/p/Dd97mt9AeqL/",
+    "displayUrl": "https://cdn.example.com/natgeo-3.jpg",
+    "ownerUsername": "natgeo"
+   },
+   {
+    "type": "Video",
+    "shortCode": "Dd9nPU7Azb6",
+    "commentsCount": 76,
+    "likesCount": 27857,
+    "videoViewCount": 676617,
+    "timestamp": "2026-10-01T19:02:23.000Z",
+    "paidPartnership": false,
+    "productType": "clips",
+    "caption": "Presented by @Rolex. It's not easy to find water in one of Africa's driest landscapes, but flying saucer beetles have a ",
+    "hashtags": [
+     "Rolex",
+     "PerpetualPlanet",
+     "AfricaEarthsWildHome"
+    ],
+    "url": "https://www.instagram.com/p/Dd9nPU7Azb6/",
+    "displayUrl": "https://cdn.example.com/natgeo-4.jpg",
+    "ownerUsername": "natgeo"
+   },
+   {
+    "type": "Video",
+    "shortCode": "Dd9IsqgFYoS",
+    "commentsCount": 118,
+    "likesCount": 24173,
+    "videoViewCount": 177056,
+    "timestamp": "2026-10-01T16:00:04.000Z",
+    "paidPartnership": false,
+    "productType": "clips",
+    "caption": "Some people leave the world better than they found it. One year after her passing, we remember Jane Goodall for the curi",
+    "hashtags": [],
+    "url": "https://www.instagram.com/p/Dd9IsqgFYoS/",
+    "displayUrl": "https://cdn.example.com/natgeo-5.jpg",
+    "ownerUsername": "natgeo"
+   },
+   {
+    "type": "Video",
+    "shortCode": "Dd8_vklopMD",
+    "commentsCount": 163,
+    "likesCount": 26567,
+    "videoViewCount": 192171,
+    "timestamp": "2026-10-01T13:19:55.000Z",
+    "paidPartnership": true,
+    "productType": "clips",
+    "caption": "Presented by @rolex. Africa is a place where we can still discover new things about nature—including how humans can live",
+    "hashtags": [
+     "Rolex",
+     "PerpetualPlanet",
+     "AfricaEarthsWildHome"
+    ],
+    "url": "https://www.instagram.com/p/Dd8_vklopMD/",
+    "displayUrl": "https://cdn.example.com/natgeo-6.jpg",
+    "ownerUsername": "natgeo"
+   },
+   {
+    "type": "Image",
+    "shortCode": "Dd5N1bUF8AH",
+    "commentsCount": 679,
+    "likesCount": 22744,
+    "timestamp": "2026-09-30T22:00:00.000Z",
+    "paidPartnership": false,
+    "caption": "More than 80 years after experts first identified lipedema, its causes remain poorly understood. The condition primarily",
+    "hashtags": [],
+    "url": "https://www.instagram.com/p/Dd5N1bUF8AH/",
+    "displayUrl": "https://cdn.example.com/natgeo-7.jpg",
+    "ownerUsername": "natgeo"
+   },
+   {
+    "type": "Video",
+    "shortCode": "Dd7CupPAMOs",
+    "commentsCount": 332,
+    "likesCount": 109791,
+    "videoViewCount": 1886949,
+    "timestamp": "2026-09-30T19:04:42.000Z",
+    "paidPartnership": false,
+    "productType": "clips",
+    "caption": "Presented by @rolex. Sound on to hear the snuffing, chuffing, and huffing of this foraging pangolin, filmed by National ",
+    "hashtags": [
+     "Rolex",
+     "AfricaEarthsWildHome.",
+     "PerpetualPlanet"
+    ],
+    "url": "https://www.instagram.com/p/Dd7CupPAMOs/",
+    "displayUrl": "https://cdn.example.com/natgeo-8.jpg",
+    "ownerUsername": "natgeo"
+   },
+   {
+    "type": "Video",
+    "shortCode": "Dd6S9pflfBf",
+    "commentsCount": 111,
+    "likesCount": 27720,
+    "videoViewCount": 324958,
+    "timestamp": "2026-09-30T13:00:03.000Z",
+    "paidPartnership": false,
+    "productType": "clips",
+    "caption": "Bad news, you can't take a deep breath without an oxygen supply on Mars. Good news, you won't get blown over by a stiff ",
+    "hashtags": [],
+    "url": "https://www.instagram.com/p/Dd6S9pflfBf/",
+    "displayUrl": "https://cdn.example.com/natgeo-9.jpg",
+    "ownerUsername": "editor_10",
+    "ownerFullName": "An Editor"
+   },
+   {
+    "type": "Sidecar",
+    "shortCode": "Dd4oFPuF27g",
+    "commentsCount": 120,
+    "likesCount": 109644,
+    "timestamp": "2026-09-29T22:00:01.000Z",
+    "paidPartnership": false,
+    "caption": "Presented by @rolex. Until 2021, giant ground pangolins hadn't been documented in Kenya for 50 years. Since then, conser",
+    "hashtags": [
+     "Rolex",
+     "AfricaEarthsWildHome.",
+     "PerpetualPlanet"
+    ],
+    "url": "https://www.instagram.com/p/Dd4oFPuF27g/",
+    "displayUrl": "https://cdn.example.com/natgeo-10.jpg",
+    "ownerUsername": "natgeo"
+   },
+   {
+    "type": "Sidecar",
+    "shortCode": "Dd4ZM_uFztu",
+    "commentsCount": 133,
+    "likesCount": 90651,
+    "timestamp": "2026-09-29T19:00:01.000Z",
+    "paidPartnership": false,
+    "caption": "Photos by @joelsartore | Red giant flying squirrels are capable of gliding up to 75 meters (246 feet). These skilled nav",
+    "hashtags": [
+     "PhotoArk"
+    ],
+    "url": "https://www.instagram.com/p/Dd4ZM_uFztu/",
+    "displayUrl": "https://cdn.example.com/natgeo-11.jpg",
+    "ownerUsername": "natgeo"
+   }
+  ]
+ }
+]

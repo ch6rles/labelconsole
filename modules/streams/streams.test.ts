@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPublicHttps } from './jobs';
+import { isPublicHttps } from '@labelconsole/core/net';
 import { evaluateRules, type RuleLike } from './service/alerts';
 import { statementPeriodTotals } from './sources/statements';
 import { platformSlug } from './sources/types';

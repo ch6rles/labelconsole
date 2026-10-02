@@ -11,7 +11,7 @@ import { toolByName } from '@labelconsole/core/modules';
 import { PermissionSet } from '@labelconsole/core/permissions';
 import type { JobContext } from '@labelconsole/core/queue';
 import { acquire } from '@labelconsole/core/ratelimit';
-import { toolJsonSchema, type ToolContext, type ToolDefinition } from '@labelconsole/core/tools';
+import { clip, toolJsonSchema, type ToolContext, type ToolDefinition } from '@labelconsole/core/tools';
 import { llmProviderFor, monthUsage, recordUsage } from '@labelconsole/core/usage';
 import { getCredentialHandle } from '@labelconsole/core/vault';
 import { agentType } from '../agent-types';
@@ -19,7 +19,7 @@ import { agents, approvals, runs, steps, TERMINAL_STATUSES, type Agent, type Che
 import { recall, remember } from '../service/memory';
 import { agentSpendToday, concurrencyLimit, publishRun, queueRun, startRun } from '../service/runs';
 import { trackRun } from './control';
-import { approxTokens, buildFirstMessage, buildSystemPrompt } from './prompt';
+import { approxTokens, buildFirstMessage, buildSystemPrompt, runPlatforms } from './prompt';
 
 const LEASE_MS = 90_000;
 const HEARTBEAT_MS = 20_000;
@@ -204,10 +204,12 @@ export async function executeRun(job: JobContext, runId: string) {
 async function initCheckpoint(sys: <T>(fn: (ctx: ServiceContext) => Promise<T>) => Promise<T>, agent: Agent, run: Run, orgName: string, settings: OrgSettings): Promise<Checkpoint> {
   const type = agentType(agent.type);
   const perms = new PermissionSet(run.permissions);
-  // Only tools the agent is allowed AND whose permission its run actually holds.
+  const platforms = runPlatforms(run);
+  // Only tools the agent is allowed AND whose permission its run actually holds;
+  // a run started for some platforms leaves out the other platforms' tools.
   const toolNames = agent.toolAllowlist.filter((n) => {
     const t = toolByName(n);
-    return t && perms.has(t.permission);
+    return t && perms.has(t.permission) && (!t.platform || !platforms || platforms.includes(t.platform));
   });
   const mems = await sys((ctx) => recall(ctx, agent.id, `${run.task ?? ''} ${agent.goal}`, 8));
   return { system: buildSystemPrompt(agent, type, { name: orgName, settings }), tools: toolNames, messages: [{ role: 'user', content: buildFirstMessage(run, mems) }], results: {}, pending: [], compactions: 0 };
@@ -328,7 +330,7 @@ async function executeTool(sys: <T>(fn: (ctx: ServiceContext) => Promise<T>) => 
     const out = await runWithRetries(tool, () => withTimeout(tool.execute(toolCtx, input as never), tool.timeoutMs ?? 60_000, env.signal));
     const childRunId = isDelegation ? (out as { childRunId?: string }).childRunId : undefined;
     const content = typeof out === 'string' ? out : JSON.stringify(out ?? null);
-    outcome = { content: content.length > 20_000 ? `${content.slice(0, 20_000)}… (truncated)` : content, isError: false, ...(childRunId ? { childRunId } : {}) };
+    outcome = { content: content.length > 20_000 ? `${clip(content, 20_000)}… (truncated)` : content, isError: false, ...(childRunId ? { childRunId } : {}) };
   } catch (err) {
     if (env.signal.aborted) throw err;
     if (err instanceof RateLimitedError) {

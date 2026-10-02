@@ -14,5 +14,5 @@ export const manifest: ModuleManifest = {
   ],
   nav: [{ section: { id: 'drive', label: 'Drive', icon: 'folder_open', sub: 'Label file storage', order: 70 }, tabs: [{ id: 'files', label: 'Files', href: '/drive', permission: 'drive:read' }] }],
   events: { emits: ['drive.file.uploaded', 'drive.folder.synced'], listens: [] },
-  tools: ['drive_list_files', 'drive_read_file', 'drive_save_file'],
+  tools: ['drive_list_files', 'drive_read_file', 'drive_save_file', 'drive_save_images'],
 };

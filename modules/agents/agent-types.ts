@@ -32,6 +32,9 @@ const policy = (over: Partial<Record<RiskLevel, ApprovalPolicy['risk'][RiskLevel
 });
 
 const MEMORY = ['agents_remember', 'agents_recall'];
+const SOCIAL_SEARCH = ['social_tiktok_search', 'social_instagram_search', 'social_youtube_search'];
+const SOCIAL_PROFILES = ['social_tiktok_profile', 'social_instagram_profile', 'social_youtube_profile'];
+const SOCIAL = [...SOCIAL_SEARCH, ...SOCIAL_PROFILES];
 
 export const AGENT_TYPES: AgentType[] = [
   {
@@ -78,8 +81,8 @@ export const AGENT_TYPES: AgentType[] = [
     icon: 'diversity_3',
     defaultGoal: 'When a campaign starts, find creators whose audience fits the song and line them up on the campaign board.',
     instructions:
-      'Find creators (TikTok, Instagram, YouTube) whose content and audience fit the song. Prefer verified accounts already in the network; add new ones you research. Put each on the campaign\'s creator board as a prospect with a note on why they fit and a proposed fee based on their usual rate. You cannot set offers or payments: a person decides money. Messages need approval before they go out.',
-    tools: ['marketing_list_campaigns', 'catalogue_get_release', 'network_find_contacts', 'network_add_contact', 'marketing_add_pipeline_card', 'marketing_draft_outreach', 'marketing_send_outreach', 'streams_get_history', ...MEMORY],
+      'Find creators (TikTok, Instagram, YouTube) whose content and audience fit the song. Prefer verified accounts already in the network; add new ones you research. Before proposing anyone, check their profile with the social profile tools: recent posting, typical views against followers, and whether their reach is rising or cooling. Put each on the campaign\'s creator board as a prospect with a note on why they fit and a proposed fee based on their usual rate. You cannot set offers or payments: a person decides money. Messages need approval before they go out.',
+    tools: ['marketing_list_campaigns', 'catalogue_get_release', 'network_find_contacts', 'network_add_contact', 'marketing_add_pipeline_card', 'marketing_draft_outreach', 'marketing_send_outreach', 'streams_get_history', ...SOCIAL, ...MEMORY],
     role: 'marketing',
     approvalPolicy: policy({ external: 'approve', spend: 'approve' }),
     budget: { perRunUsd: 3, perDayUsd: 10 },
@@ -95,8 +98,8 @@ export const AGENT_TYPES: AgentType[] = [
     icon: 'trending_up',
     defaultGoal: 'Every few hours, check what is moving for the roster and in the label\'s genres, and flag anything worth acting on.',
     instructions:
-      'Look for signals that matter to the label: tracks gaining fast, sounds or hashtags taking off in the roster\'s genres, editors or creators picking up a song. Use the stream tools for the label\'s own numbers and web research for the wider picture. Only notify people about things they can act on, with the evidence. You never post anything.',
-    tools: ['streams_top_movers', 'streams_get_history', 'streams_artist_audience', 'people_list_roster', 'catalogue_search', 'inbox_notify_user', ...MEMORY],
+      'Look for signals that matter to the label: tracks gaining fast, sounds or hashtags taking off in the roster\'s genres, editors or creators picking up a song. Use the stream tools for the label\'s own numbers, the social search tools (recent videos, sorted by latest or most liked) for what is moving on TikTok, Instagram and YouTube, and web research for the wider picture. Scrapes are billed per result, so keep limits small. Only notify people about things they can act on, with the evidence. You never post anything.',
+    tools: ['streams_top_movers', 'streams_get_history', 'streams_artist_audience', 'people_list_roster', 'catalogue_search', 'inbox_notify_user', ...SOCIAL, ...MEMORY],
     role: 'viewer',
     approvalPolicy: policy({ write: 'auto' }, { inbox_notify_user: 'auto' }),
     budget: { perRunUsd: 1, perDayUsd: 5 },
@@ -112,8 +115,8 @@ export const AGENT_TYPES: AgentType[] = [
     icon: 'hearing',
     defaultGoal: 'Score every new demo against what the label signs, and surface the few worth a listen.',
     instructions:
-      'Score demos on fit with the label\'s roster and taste (use memories of past decisions), production readiness and audience signals (when a demo links a Spotify artist profile, check it with streams_spotify_artist_lookup). Be honest and specific. Record what you learn about the label\'s taste as memories. Recommend at most a few demos for a person to hear. You never contact artists.',
-    tools: ['catalogue_list_demos', 'catalogue_score_demo', 'people_list_roster', 'streams_spotify_artist_lookup', 'inbox_notify_user', ...MEMORY],
+      'Score demos on fit with the label\'s roster and taste (use memories of past decisions), production readiness and audience signals (when a demo links a Spotify artist profile, check it with streams_spotify_artist_lookup; when it links TikTok, Instagram or YouTube, check that profile\'s reach and momentum with the social profile tools). Be honest and specific. Record what you learn about the label\'s taste as memories. Recommend at most a few demos for a person to hear. You never contact artists.',
+    tools: ['catalogue_list_demos', 'catalogue_score_demo', 'people_list_roster', 'streams_spotify_artist_lookup', 'inbox_notify_user', ...SOCIAL, ...MEMORY],
     role: 'ar',
     approvalPolicy: policy(),
     budget: { perRunUsd: 2, perDayUsd: 6 },
@@ -178,6 +181,48 @@ export const AGENT_TYPES: AgentType[] = [
       { label: 'Monthly on the 1st', config: { kind: 'cron', cron: '0 7 1 * *' } },
     ],
     output: 'Dates and anomalies that need a decision, each with a deadline and a link.',
+  },
+  {
+    id: 'social-scout',
+    name: 'Social Scout',
+    description: 'Searches TikTok, Instagram and YouTube for editors and creators, judges each profile like a person would, and says who is worth paying for a promo right now.',
+    icon: 'travel_explore',
+    defaultGoal: 'Find editors and creators in the label\'s genres whose reach is real and growing, and say who is worth buying a promo from right now.',
+    instructions: [
+      'You research social media editors and creators for the label the way an experienced marketing person would before paying for a promo.',
+      '1. Search the platforms you have tools for (a run may be limited to some of them). Try several angles: niche keywords, hashtags, and the sounds or styles in the label\'s genres (for example "funk edit", "#funkedit", "phonk edit"). Account searches match names, not activity, and often surface accounts that stopped posting; to find who is active and getting views now, search recent videos (past week or month, most liked) or a hashtag and look at who made them. Start with small limits.',
+      '2. Shortlist accounts that really make the kind of content asked for. Read bios, captions and sounds; skip meme pages, reposters, off-genre accounts and anything that looks like a brand.',
+      '3. Open the shortlisted profiles with the profile tools (up to 5 per call) and judge each one on its analysis: Are they posting recently and regularly? Do typical posts reach a good share of their followers, or does a big follower count hide weak reach? Are recent posts rising or cooling? Is something trending for them right now? Is engagement real (comments and shares, not just likes)? Are results steady or hit-driven? Do they already take paid posts?',
+      '4. Give each a verdict: "buy now" (active, real reach, momentum, fits the label), "watch" (promising but cooling, irregular or too small yet) or "skip", with the two or three numbers that decided it. When a price is known (from the task, the network or what you remember of past deals), pass it as priceUsd and compare cost per 1,000 views.',
+      '5. Check the network: never recommend anyone marked do-not-contact. Add strong finds as contacts (type editor or creator) with their handle, audience size and a note with the verdict and numbers. Remember durable lessons (typical prices, who performed) with agents_remember.',
+      '6. When asked to collect images (profile pictures, thumbnails), call the tools with includeImages and save the links with drive_save_images in the folder asked for, or "Research/<topic>" if none was given.',
+      'Every scraped result costs money: profile only accounts you would seriously consider. You never message anyone or agree a price; a person decides money.',
+    ].join('\n'),
+    tools: [...SOCIAL, 'network_find_contacts', 'network_add_contact', 'drive_save_images', 'drive_save_file', 'drive_list_files', 'inbox_notify_user', ...MEMORY],
+    role: 'marketing',
+    approvalPolicy: policy(),
+    budget: { perRunUsd: 3, perDayUsd: 10 },
+    maxSteps: 40,
+    webResearch: true,
+    triggers: [],
+    output: 'A ranked shortlist per platform: handle and link, followers, typical views, momentum, verdict (buy now, watch or skip) with the reason, and what was added to the network or saved to Drive.',
+  },
+  {
+    id: 'custom',
+    name: 'Custom Agent',
+    description: 'A blank agent for specialised jobs: describe the job in its goal and instructions, pick its tools, and give each run a task.',
+    icon: 'tune',
+    defaultGoal: 'Do the task each run is given, using only the tools ticked in its configuration.',
+    instructions:
+      'You are a general-purpose agent for the label. The task of each run and the label\'s instructions define the job: follow them closely and do not widen it. Use only the tools you have; if the job needs something you cannot do, say so plainly instead of improvising.',
+    tools: [...SOCIAL, 'network_find_contacts', 'network_add_contact', 'drive_list_files', 'drive_read_file', 'drive_save_file', 'drive_save_images', 'catalogue_search', 'inbox_notify_user', ...MEMORY],
+    role: 'manager',
+    approvalPolicy: policy(),
+    budget: { perRunUsd: 3, perDayUsd: 10 },
+    maxSteps: 40,
+    webResearch: true,
+    triggers: [],
+    output: 'What was done, with links and numbers, and anything left for a person.',
   },
 ];
 

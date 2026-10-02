@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { defineRoutes, route } from '@labelconsole/core/router';
+import { SOCIAL_PLATFORMS } from '@labelconsole/core/tools';
 import * as svc from '../service';
 
 export const routes = defineRoutes('agents', [
@@ -11,7 +12,13 @@ export const routes = defineRoutes('agents', [
   route({ method: 'GET', path: '/agents/:id', permission: 'agents:read', handler: async (ctx, req) => ({ agent: await svc.getAgentRow(ctx, req.params.id), triggers: await svc.triggersFor(ctx, req.params.id), runs: await svc.recentRunsFor(ctx, req.params.id) }) }),
   route({ method: 'PATCH', path: '/agents/:id', permission: 'agents:manage', body: svc.AgentPatch, handler: (ctx, req) => svc.updateAgent(ctx, req.params.id, req.body) }),
   route({ method: 'DELETE', path: '/agents/:id', permission: 'agents:manage', handler: (ctx, req) => svc.deleteAgent(ctx, req.params.id) }),
-  route({ method: 'POST', path: '/agents/:id/run', permission: 'agents:run', body: z.object({ task: z.string().trim().max(4000).optional() }), handler: (ctx, req) => svc.startRun(ctx, { agentId: req.params.id, triggerKind: 'manual', task: req.body.task || null }) }),
+  route({
+    method: 'POST',
+    path: '/agents/:id/run',
+    permission: 'agents:run',
+    body: z.object({ task: z.string().trim().max(4000).nullish(), platforms: z.array(z.enum(SOCIAL_PLATFORMS)).max(SOCIAL_PLATFORMS.length).nullish() }),
+    handler: (ctx, req) => svc.startRun(ctx, { agentId: req.params.id, triggerKind: 'manual', task: req.body.task || null, input: req.body.platforms?.length ? { platforms: req.body.platforms } : undefined }),
+  }),
   route({ method: 'GET', path: '/agents/:id/triggers', permission: 'agents:read', handler: (ctx, req) => svc.triggersFor(ctx, req.params.id) }),
   route({ method: 'POST', path: '/agents/:id/triggers', permission: 'agents:manage', body: svc.TriggerInput, handler: (ctx, req) => svc.addTrigger(ctx, req.params.id, req.body) }),
   route({ method: 'PATCH', path: '/agent-triggers/:id', permission: 'agents:manage', body: z.object({ enabled: z.boolean() }), handler: (ctx, req) => svc.setTriggerEnabled(ctx, req.params.id, req.body.enabled) }),

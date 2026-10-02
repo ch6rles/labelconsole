@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { compact, defineTool } from '@labelconsole/core/tools';
 import { CONTACT_TYPES } from '../schema';
 import * as svc from '../service';
+import { tools as socialTools } from './social';
 
 export const tools = [
   defineTool({
@@ -47,4 +48,5 @@ export const tools = [
     idempotent: false,
     execute: (t, i) => t.withOrg(async (ctx) => ({ id: (await svc.logInteraction(ctx, i.contactId, i)).id })),
   }),
+  ...socialTools,
 ];

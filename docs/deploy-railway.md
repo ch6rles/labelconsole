@@ -69,6 +69,7 @@ S3_FORCE_PATH_STYLE=false
 ANTHROPIC_API_KEY=
 VOYAGE_API_KEY=
 SPOTSCRAPER_API_KEY=
+APIFY_API_TOKEN=
 YOUTUBE_API_KEY=
 ```
 
@@ -101,6 +102,7 @@ S3_FORCE_PATH_STYLE=false
 ANTHROPIC_API_KEY=paste-the-same-value-as-web
 VOYAGE_API_KEY=paste-the-same-value-as-web
 SPOTSCRAPER_API_KEY=paste-the-same-value-as-web
+APIFY_API_TOKEN=paste-the-same-value-as-web
 YOUTUBE_API_KEY=
 ```
 

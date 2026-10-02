@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Memory, Run } from '../schema';
-import { buildFirstMessage } from './prompt';
+import { buildFirstMessage, runPlatforms } from './prompt';
 
 const run = (over: Partial<Run>) => ({ task: null, triggerKind: 'manual', input: {}, ...over }) as Run;
 
@@ -18,5 +18,19 @@ describe('buildFirstMessage', () => {
   });
   it('describes a scheduled run without a task', () => {
     expect(buildFirstMessage(run({ triggerKind: 'cron' }), [])).toContain('work toward your goal now');
+  });
+});
+
+describe('platform limits', () => {
+  it('reads the platforms a person picked, ignoring unknown ones and webhook payloads', () => {
+    expect(runPlatforms(run({ input: { platforms: ['youtube', 'tiktok', 'myspace'] } }))).toEqual(['tiktok', 'youtube']);
+    expect(runPlatforms(run({ input: { platforms: [] } }))).toBeNull();
+    expect(runPlatforms(run({ input: {} }))).toBeNull();
+    expect(runPlatforms(run({ triggerKind: 'webhook', input: { platforms: ['tiktok'] } }))).toBeNull();
+  });
+  it('tells the agent which platforms to stay on, instead of passing them as raw details', () => {
+    const msg = buildFirstMessage(run({ task: 'Find editors', input: { platforms: ['instagram', 'tiktok'] } }), []);
+    expect(msg).toContain('Platforms: research TikTok and Instagram only.');
+    expect(msg).not.toContain('Details:');
   });
 });

@@ -109,6 +109,31 @@ export async function ensureSystemFolder(ctx: ServiceContext, name: string) {
   return row;
 }
 
+/**
+ * Find or create a nested folder by path, e.g. "Research/Funk editors".
+ * Existing folders are matched case-insensitively; new ones need edit access
+ * to their parent, like creating them by hand.
+ */
+export async function ensureFolderPath(ctx: ServiceContext, path: string) {
+  const parts = path
+    .split('/')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length === 0 || parts.length > 8) throw new ValidationError('Give a folder path of one to eight names, e.g. "Research/Funk editors"');
+  let parent = null as DriveFolder | null;
+  for (const name of parts) {
+    if (name.length > 200 || name === '.' || name === '..') throw new ValidationError(`"${name.slice(0, 40)}" is not a valid folder name`);
+    const [existing] = await ctx.tx
+      .select()
+      .from(folders)
+      .where(and(parent ? eq(folders.parentId, parent.id) : isNull(folders.parentId), sql`lower(${folders.name}) = lower(${name})`))
+      .limit(1);
+    parent = existing ?? (await createFolder(ctx, { name, parentId: parent?.id ?? null }));
+  }
+  await requireFolderAccess(ctx, parent, 'edit');
+  return parent!;
+}
+
 export async function renameFolder(ctx: ServiceContext, id: string, name: string) {
   const f = await getFolder(ctx, id);
   await requireFolderAccess(ctx, f, 'edit');

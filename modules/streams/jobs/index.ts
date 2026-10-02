@@ -7,6 +7,7 @@ import { organizations } from '@labelconsole/core/db/schema';
 import { env } from '@labelconsole/core/env';
 import { isTransient, RateLimitedError } from '@labelconsole/core/errors';
 import { enabledModuleIds } from '@labelconsole/core/modules';
+import { isPublicHttps } from '@labelconsole/core/net';
 import { defineJob, enqueue, type JobContext } from '@labelconsole/core/queue';
 import { pickIsrcMatch, spotifyIdFrom, spotScraperFor, type SpotScraperClient } from '@labelconsole/core/spotscraper';
 import { recordUsage } from '@labelconsole/core/usage';
@@ -97,22 +98,6 @@ async function matchSpotify(job: JobContext, client: SpotScraperClient, trackIds
 async function streamsEnabled(orgId: string) {
   const [org] = await systemDb().select({ id: organizations.id, plan: organizations.plan }).from(organizations).where(eq(organizations.id, orgId));
   return org ? (await enabledModuleIds(systemDb(), org)).has('streams') : false;
-}
-
-/** Labels configure the URL, so refuse anything that could reach the platform's own network. */
-export function isPublicHttps(raw: string) {
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    return false;
-  }
-  if (u.protocol !== 'https:') return false;
-  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) return false;
-  if (/^(0|10|127)\./.test(h) || /^169\.254\./.test(h) || /^192\.168\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h)) return false;
-  if (h === '::1' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80') || h.startsWith('::ffff:')) return false;
-  return true;
 }
 
 /** Signed batch POST to the label's webhook, if it configured one. Failures are logged, never retried in a loop. */

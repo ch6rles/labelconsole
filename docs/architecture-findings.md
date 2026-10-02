@@ -61,7 +61,8 @@ Turning a module off for a label (or a plan that lacks it) removes its nav, its 
 | Spotify Web API in metadata lookup | Adapter present, used only with the label's own credentials | Commercial use needs extended access; Deezer, MusicBrainz and Apple cover ISRC/UPC |
 | Observability: OpenTelemetry traces, Sentry | Structured logs (pino), Prometheus metrics, Grafana dashboard, alert rules, deep health check | Sentry is a paid service and a tracing backend is a choice to make; metrics cover dashboards and alerting now |
 | Billing | Plan tiers gate modules; per-plan limits on seats, tracked tracks and storage, enforced when something is added; usage on Settings → Plan & usage | Taking payments needs a payment provider (paid); limits are placeholders until pricing is set |
-| Agent types: "first three" in Phase 6 | All eight types from the spec | The registry made them cheap to add as files |
+| Agent types: "first three" in Phase 6 | All eight types from the spec, plus Social Scout and a Custom agent | The registry made them cheap to add as files |
+| Social signals from official platform APIs | TikTok, Instagram and YouTube profiles, posts and searches come from Apify scrapers (`packages/core/src/apify.ts`), read-only, through agent tools | The owner's decision. The platforms' own APIs don't offer search or other people's stats. Results are normalised in `modules/network/social/` before an agent sees them, and nothing is posted or sent through them |
 | Agents act as a service principal "capped at the permissions of the user who created it" | Role ∩ owner's permissions, ∩ the parent run's for delegated runs; frozen when a run starts | Stricter-of-both rule from the delegation section applied consistently |
 | Artist portal | Not built; artist-scoped access exists for staff (`artistScope` on the service context) | The spec marks the portal as a later phase |
 
@@ -74,4 +75,6 @@ Turning a module off for a label (or a plan that lacks it) removes its nav, its 
 - **Role changes stay within the actor's own access.** Nobody can assign, change or remove a role that holds permissions they don't have.
 - **Every permission key must be declared by a module.** A unit test fails on undeclared keys, because a typo silently hides a feature.
 - **Agent tools never see secrets or raw Spotify responses.** They receive credential handles and derived numbers. SpotScraper responses are normalised inside its client and stored as numbers; tools read those.
+- **Outbound fetches of links someone else chose use `fetchPublicFile` (`packages/core/src/net.ts`).** It allows only public https addresses, checks every resolved address at connect time and every redirect, and caps size and time. Use it for anything an agent or a label supplies.
+- **Cut text with `clip()` from `@labelconsole/core/tools`, not `slice()`, before it goes into a json column.** Half of an emoji is invalid Unicode, and Postgres refuses the whole row.
 - **One Spotify ID per tracked track.** Streams polls the identity with variant `primary`. Adding another Spotify identity never changes the polled one unless staff choose it, and `upsertIdentity` keeps an existing variant unless a new one is given.

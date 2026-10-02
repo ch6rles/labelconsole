@@ -3,6 +3,7 @@ import type { PageProps } from '@labelconsole/core/web';
 import { env } from '@labelconsole/core/env';
 import { MODELS } from '@labelconsole/core/llm-models';
 import { BUILT_IN_ROLES, ROLE_LABELS } from '@labelconsole/core/permissions';
+import { PLATFORM_LABELS, SOCIAL_PLATFORMS } from '@labelconsole/core/tools';
 import { Card, DataTable, Icon, KV, Page, PageHeader, StatCard, Tag, fmt } from '@labelconsole/ui';
 import { ActionButton, ApiToggle, FormModal } from '@labelconsole/ui/client';
 import { agentType } from '../agent-types';
@@ -19,6 +20,8 @@ export default async function AgentDetailPage({ run, params, session }: PageProp
     Promise.all([svc.getAgentRow(ctx, params.id), svc.triggersFor(ctx, params.id), svc.recentRunsFor(ctx, params.id), svc.availableTools(ctx), svc.listMemories(ctx, { agentId: params.id }), svc.agentSpendToday(ctx, params.id)]),
   );
   const type = agentType(agent.type);
+  // Social platforms this agent has tools for; a run can be limited to some of them.
+  const platforms = SOCIAL_PLATFORMS.filter((p) => tools.some((t) => t.platform === p && agent.toolAllowlist.includes(t.name)));
   const describe = (c: TriggerConfig) => (c.kind === 'cron' ? `${describeCron(c.cron)} (${c.timezone ?? 'UTC'})` : c.kind === 'event' ? `On ${c.eventType}` : c.kind === 'webhook' ? 'Inbound webhook' : 'Manual');
 
   return (
@@ -35,7 +38,18 @@ export default async function AgentDetailPage({ run, params, session }: PageProp
         actions={
           <>
             {can('agents:run') && agent.status === 'active' && (
-              <FormModal title={`Run ${agent.name}`} trigger={{ label: 'Run now', icon: 'play_arrow', variant: 'primary' }} endpoint={`/agents/${agent.id}/run`} fields={[{ name: 'task', label: 'Task (optional)', type: 'textarea', placeholder: 'Leave empty to work toward its goal' }]} columns={1} redirectTo="/agents/runs/{id}" success="Run started" />
+              <FormModal
+                title={`Run ${agent.name}`}
+                trigger={{ label: 'Run now', icon: 'play_arrow', variant: 'primary' }}
+                endpoint={`/agents/${agent.id}/run`}
+                fields={[
+                  { name: 'task', label: 'Task (optional)', type: 'textarea', placeholder: 'Leave empty to work toward its goal' },
+                  ...(platforms.length > 1 ? [{ name: 'platforms', label: 'Platforms', type: 'multiselect' as const, options: platforms.map((p) => ({ value: p, label: PLATFORM_LABELS[p] })), hint: 'Tick some to research only there. Leave all unticked for every platform.' }] : []),
+                ]}
+                columns={1}
+                redirectTo="/agents/runs/{id}"
+                success="Run started"
+              />
             )}
             {can('agents:manage') && <ActionButton endpoint={`/agents/${agent.id}`} method="DELETE" label={runRows.length ? 'Archive' : 'Delete'} icon="archive" variant="ghost" confirm={`${runRows.length ? 'Archive' : 'Delete'} ${agent.name}? ${runRows.length ? 'Its history stays for audit.' : ''}`} redirectTo="/agents" />}
           </>

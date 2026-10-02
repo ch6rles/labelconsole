@@ -18,5 +18,6 @@ export const TEST_ENV: Record<string, string> = {
   ANTHROPIC_WORKSPACE_ID: '',
   VOYAGE_API_KEY: '',
   SPOTSCRAPER_API_KEY: '',
+  APIFY_API_TOKEN: '',
   YOUTUBE_API_KEY: '',
 };

@@ -8,7 +8,7 @@ A multi-tenant workspace for record labels: catalogue, roster, marketing, contra
 - **Drive:** label file storage with folders and per-folder permissions, links to any record, an optional Google Drive connection.
 - **Streams:** YouTube view tracking (official API, quota-aware), exact counts from distributor statements, an interface for a licensed Spotify data vendor, alerts on spikes, drops and milestones (`/v1/streams/...`).
 - **Network and Marketing:** a creator, editor and press CRM; campaigns with KPIs and stream deltas; pipeline boards that double as the booking ledger; a pitch tracker that sends through the label's mailbox; sketchboards.
-- **Agents:** eight agent types (Label Manager, Playlist & Editor Outreach, Creator Outreach, Trend & Social Monitor, A&R Scout, Stream Watch, Release Ops, Contract & Statement Watch).
+- **Agents:** ten agent types (Label Manager, Playlist & Editor Outreach, Creator Outreach, Trend & Social Monitor, A&R Scout, Social Scout, Stream Watch, Release Ops, Contract & Statement Watch, and a Custom agent you configure yourself). Social research on TikTok, Instagram and YouTube runs through Apify.
   - Agents run in the background with schedules, event and webhook triggers, delegation, memory, budgets and approvals for anything risky.
   - Each run is checkpointed after every step and resumes after a crash.
 - **Inbox, Admin and Settings:** notifications, the approvals queue, an activity feed, roles and custom roles, an audit log, an integrations vault, plan and usage, and full data export.
@@ -29,7 +29,7 @@ pnpm dev                        # web on http://localhost:3000 and the worker
 Then open http://localhost:3000. The first visit sets up the label (`LABEL_NAME`, "River Of Styxx" by default) and its owner account. There is no public sign-up: once the label exists, setup closes, and your team joins by invitation (Admin → Users).
 
 - Forgot the password, or need a second owner: `pnpm owner --email you@example.com` (with Docker: `docker compose run --rm worker node dist/owner.js --email you@example.com`). It asks for the password without showing it, and creates the label and account if they don't exist yet.
-- Add `ANTHROPIC_API_KEY` (agents, contract reading), `VOYAGE_API_KEY` (agent memory), `SPOTSCRAPER_API_KEY` (Spotify plays, credits, audiences) and `YOUTUBE_API_KEY` (YouTube views) to `.env`, or add them under Settings → Integrations.
+- Add `ANTHROPIC_API_KEY` (agents, contract reading), `VOYAGE_API_KEY` (agent memory), `SPOTSCRAPER_API_KEY` (Spotify plays, credits, audiences), `APIFY_API_TOKEN` (TikTok, Instagram and YouTube research) and `YOUTUBE_API_KEY` (YouTube views) to `.env`, or add them under Settings → Integrations.
 - `LC_DEV_SEED=1 pnpm db:seed` creates a sample label (demo@northline.test / correct horse battery) for development. Seeding first closes setup, so use `pnpm owner` afterwards for your own label.
 
 Or run everything in containers: `docker compose up --build`.

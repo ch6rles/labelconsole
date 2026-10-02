@@ -216,6 +216,53 @@ Netlify can't host Label Console: it needs an always-on worker, Postgres and Red
   - A file uploaded, and its signed download link (virtual-hosted) returned it.
   - A worker restart re-ran the release cleanly, and the owner command worked inside the worker container.
 
+## Social research (Apify) and custom agents
+
+The owner asked for an agent that researches editors and creators on TikTok, Instagram and YouTube like a person would, limited to chosen platforms when asked, and that can save images to Drive. The owner chose Apify; the scrapers are called from the app's own agent tools rather than through Apify's MCP server, which is meant for chat clients.
+
+- **Apify client** (`packages/core/src/apify.ts`): one synchronous call per scrape (`run-sync-get-dataset-items`), never retried automatically because every result is billed. A run refused for the plan's concurrent-run limit waits and retries. Token problems, lack of credit and unknown Actors get plain messages.
+  - **Token:** the label's own (Settings → Integrations → Apify), else the platform `APIFY_API_TOKEN`. Results are counted in the label's `apify_results` usage counter.
+  - **Actors:** `clockworks/tiktok-scraper`, `apify/instagram-scraper` and `streamers/youtube-scraper`. Their inputs and outputs were checked against live runs.
+- **Normalised data** (`modules/network/social/`): every platform becomes the same creator and post shape. Hidden counts (Instagram's −1 likes, YouTube's 0 likes on a watched video) become "unknown" rather than numbers.
+- **Analysis**, the checks a buyer makes before paying for a promo:
+  - **Activity:** days since the last post, and posts per week.
+  - **Reach:** median and average views, engagement, and views versus followers. The last one exposes bought or dead followers.
+  - **Momentum:** whether recent posts are rising or cooling compared with earlier ones. Posts younger than two days are still collecting views, so they are left out of the trend; one that already beats the usual is flagged as trending now. Pinned posts are ignored.
+  - **Other:** breakout hits, paid partnerships, and cost per 1,000 views when a price is given.
+  - **Signals:** each finding is also written as a plain sentence.
+- **Six agent tools** in the network module:
+  - `social_tiktok_search` (creators, videos with period and sort, or a hashtag) and `social_tiktok_profile`.
+  - `social_instagram_search` (a hashtag's recent posters, or accounts) and `social_instagram_profile`.
+  - `social_youtube_search` (sort and upload date) and `social_youtube_profile` (videos and Shorts).
+  - The profile tools take up to five accounts per call.
+  - Creators already in the network are marked, including do-not-contact.
+  - Image links are included only when asked for (`includeImages`).
+- **Platform limits:** tools declare a `platform`. "Run now" shows a Platforms choice for agents with tools for more than one platform. A run started for some platforms only gets those platforms' tools, and the agent is told to keep web research there too. Webhook payloads can't set platforms.
+- **`drive_save_images`:** saves up to 20 images from public links into a folder path such as "Research/Funk editors", creating missing folders.
+  - **Downloads** go through `fetchPublicFile` (`packages/core/src/net.ts`):
+    - https only;
+    - every resolved address is checked at connect time, so DNS rebinding can't reach internal hosts;
+    - redirects are re-checked;
+    - image types only, under 15 MB, with a timeout.
+  - **Safety checks:** files then go through the usual upload checks (type sniffing, size, plan storage, virus scan).
+  - **Moved code:** the stream webhook's URL check moved into the same file.
+- **New agent types:**
+  - **Social Scout:** searches, shortlists, profiles, and gives each creator a "buy now", "watch" or "skip" verdict with the deciding numbers. It adds strong finds to the network and saves images when asked.
+  - **Custom Agent:** a blank agent. Staff write its goal and instructions, tick its tools, and give each run a task.
+  - **Existing types:** Creator Outreach, Trend & Social Monitor and A&R Scout get the social tools too. Agents created before this keep their tool lists; tick the new tools in their configuration.
+- **Bug fixed along the way:** cutting text with `slice()` could split an emoji. Half an emoji is invalid Unicode, which Postgres refuses in json columns, so the whole step failed. `clip()` now does this safely in tool results and runtime truncation.
+- **Verified live:**
+  - Every scraper was run against Apify, and an image was downloaded from TikTok's CDN.
+  - A real Social Scout run (Claude and Apify, TikTok only) was offered only TikTok's tools. It searched, profiled two editors, gave verdicts with the numbers, and saved a profile picture to Drive.
+  - The run cost $0.16 of model usage and 21 Apify results.
+- **Tests:** 179 passing.
+  - **Parsers and analysis:** checked against recorded live results, with small accounts renamed.
+  - **Apify client:** request shape, concurrency retry, and error messages.
+  - **Downloader safety:** the address checks above.
+  - **Tools:** with a fake Apify.
+  - **Full Social Scout run:** a scripted model with the TikTok-only limit and images saved to Drive.
+  - **Custom agent creation.**
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.
@@ -226,7 +273,7 @@ Netlify can't host Label Console: it needs an always-on worker, Postgres and Red
 
 These need the owner. Nothing paid was added without asking.
 
-- **API keys:** Anthropic, Voyage AI and SpotScraper are set and verified live. A YouTube Data API key is still needed for YouTube views.
+- **API keys:** Anthropic, Voyage AI, SpotScraper and Apify are set and verified live. A YouTube Data API key is still needed for YouTube views.
 - **Spotify data source:** SpotScraper was chosen by the owner. It most likely works by scraping Spotify, which the original spec ruled out; that trade-off is the owner's call. A licensed vendor can still be added later through `modules/streams/sources/licensed.ts`.
 - **Real plan limits.** No payment provider is needed while the owner is the only user. Limits are placeholders in `packages/core/src/plans.ts`.
 - **Error tracking and tracing** (Sentry, or an OpenTelemetry backend such as Grafana Tempo or Honeycomb). Metrics, dashboards and alerts are in place.

@@ -50,6 +50,15 @@ export async function findDuplicate(ctx: ServiceContext, input: { email?: string
   return row ?? null;
 }
 
+/** Contacts holding any of these handles on one platform, keyed by normalised handle. */
+export async function contactsByHandles(ctx: ServiceContext, platform: 'instagram' | 'tiktok' | 'youtube', handles: string[]) {
+  ctx.assert('network:read');
+  const wanted = [...new Set(handles.map(normalizeHandle).filter(Boolean))];
+  if (wanted.length === 0) return new Map<string, Contact>();
+  const rows = await ctx.tx.select().from(contacts).where(inArray(sql`lower(${contacts.handles} ->> ${platform})`, wanted));
+  return new Map(rows.map((r) => [normalizeHandle(r.handles[platform] ?? ''), r]));
+}
+
 export async function createContact(ctx: ServiceContext, input: z.input<typeof ContactInput>) {
   ctx.assert('network:write');
   const data = ContactInput.parse(input);

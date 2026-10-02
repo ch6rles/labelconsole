@@ -23,5 +23,5 @@ export const manifest: ModuleManifest = {
     },
   ],
   events: { emits: ['network.contact.created', 'network.interaction.logged'], listens: [] },
-  tools: ['network_find_contacts', 'network_add_contact', 'network_log_interaction'],
+  tools: ['network_find_contacts', 'network_add_contact', 'network_log_interaction', 'social_tiktok_search', 'social_tiktok_profile', 'social_instagram_search', 'social_instagram_profile', 'social_youtube_search', 'social_youtube_profile'],
 };

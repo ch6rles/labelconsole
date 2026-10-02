@@ -1,7 +1,7 @@
 /** Third-party connections a label can configure. Secrets go to the vault, never back to the browser. */
 export type IntegrationField = { name: string; label: string; secret?: boolean; hint?: string; optional?: boolean };
 /** `platformKey` names the environment variable that serves labels without their own key. */
-export type Integration = { provider: string; name: string; icon: string; description: string; fields: IntegrationField[]; usedBy: string[]; docs?: string; platformKey?: 'ANTHROPIC_API_KEY' | 'VOYAGE_API_KEY' | 'YOUTUBE_API_KEY' | 'SPOTSCRAPER_API_KEY' };
+export type Integration = { provider: string; name: string; icon: string; description: string; fields: IntegrationField[]; usedBy: string[]; docs?: string; platformKey?: 'ANTHROPIC_API_KEY' | 'VOYAGE_API_KEY' | 'YOUTUBE_API_KEY' | 'SPOTSCRAPER_API_KEY' | 'APIFY_API_TOKEN' };
 
 export const INTEGRATIONS: Integration[] = [
   {
@@ -46,6 +46,16 @@ export const INTEGRATIONS: Integration[] = [
     usedBy: ['Streams', 'Catalogue', 'People', 'Network'],
     docs: 'https://spotscraper.readme.io',
     platformKey: 'SPOTSCRAPER_API_KEY',
+  },
+  {
+    provider: 'apify',
+    name: 'Apify (TikTok, Instagram, YouTube)',
+    icon: 'travel_explore',
+    description: 'Lets agents research creators and editors: search TikTok, Instagram and YouTube, read profiles and recent posts, and judge whether someone is trending. Apify bills per result on your Apify account.',
+    fields: [{ name: 'apiKey', label: 'API token', secret: true }],
+    usedBy: ['Agents', 'Network'],
+    docs: 'https://console.apify.com/settings/integrations',
+    platformKey: 'APIFY_API_TOKEN',
   },
   {
     provider: 'spotify',

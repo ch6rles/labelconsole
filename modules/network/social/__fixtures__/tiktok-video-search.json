@@ -1,0 +1,232 @@
+[
+ {
+  "id": "7691013935557856519",
+  "createTimeISO": "2026-09-29T17:42:17.000Z",
+  "diggCount": 31,
+  "shareCount": 3,
+  "playCount": 272,
+  "collectCount": 7,
+  "commentCount": 8,
+  "isSlideshow": false,
+  "isPinned": false,
+  "isSponsored": false,
+  "isAd": false,
+  "searchQuery": "sem demora",
+  "text": "funk edit #edit #funk",
+  "webVideoUrl": "https://www.tiktok.com/@editor_5/video/7691013935557856519",
+  "hashtags": [
+   {
+    "name": "edit"
+   },
+   {
+    "name": "funk"
+   }
+  ],
+  "authorMeta": {
+   "name": "editor_5",
+   "nickName": "Editor 5",
+   "verified": false,
+   "signature": "edits daily",
+   "avatar": "https://cdn.example.com/editor_5-avatar.jpg",
+   "profileUrl": "https://www.tiktok.com/@editor_5",
+   "privateAccount": false,
+   "fans": 2353,
+   "heart": 44600,
+   "video": 184,
+   "following": 23
+  },
+  "musicMeta": {
+   "musicName": "original sound",
+   "musicAuthor": "Editor 5",
+   "musicOriginal": true
+  },
+  "videoMeta": {
+   "duration": 40.517,
+   "coverUrl": "https://cdn.example.com/editor_5-0.jpg"
+  }
+ },
+ {
+  "id": "7690060621387255060",
+  "createTimeISO": "2026-09-27T04:02:51.000Z",
+  "diggCount": 54,
+  "shareCount": 0,
+  "playCount": 517,
+  "collectCount": 6,
+  "commentCount": 2,
+  "isSlideshow": false,
+  "isPinned": false,
+  "isSponsored": false,
+  "isAd": false,
+  "searchQuery": "sem demora",
+  "text": "funk edit #edit #funk",
+  "webVideoUrl": "https://www.tiktok.com/@editor_6/video/7690060621387255060",
+  "hashtags": [
+   {
+    "name": "edit"
+   },
+   {
+    "name": "funk"
+   }
+  ],
+  "authorMeta": {
+   "name": "editor_6",
+   "nickName": "Editor 6",
+   "verified": false,
+   "signature": "edits daily",
+   "avatar": "https://cdn.example.com/editor_6-avatar.jpg",
+   "profileUrl": "https://www.tiktok.com/@editor_6",
+   "privateAccount": false,
+   "fans": 10100,
+   "heart": 318400,
+   "video": 1014,
+   "following": 91
+  },
+  "musicMeta": {
+   "musicName": "original sound",
+   "musicAuthor": "Editor 6",
+   "musicOriginal": false
+  },
+  "videoMeta": {
+   "duration": 103.934,
+   "coverUrl": "https://cdn.example.com/editor_6-1.jpg"
+  }
+ },
+ {
+  "id": "7689180679292063009",
+  "createTimeISO": "2026-09-24T19:08:09.000Z",
+  "diggCount": 84,
+  "shareCount": 2,
+  "playCount": 1324,
+  "collectCount": 6,
+  "commentCount": 1,
+  "isSlideshow": false,
+  "isPinned": false,
+  "isSponsored": false,
+  "isAd": false,
+  "searchQuery": "sem demora",
+  "text": "funk edit #edit #funk",
+  "webVideoUrl": "https://www.tiktok.com/@editor_7/video/7689180679292063009",
+  "hashtags": [
+   {
+    "name": "edit"
+   },
+   {
+    "name": "funk"
+   }
+  ],
+  "authorMeta": {
+   "name": "editor_7",
+   "nickName": "Editor 7",
+   "verified": false,
+   "signature": "edits daily",
+   "avatar": "https://cdn.example.com/editor_7-avatar.jpg",
+   "profileUrl": "https://www.tiktok.com/@editor_7",
+   "privateAccount": false,
+   "fans": 212,
+   "heart": 12800,
+   "video": 60,
+   "following": 1
+  },
+  "musicMeta": {
+   "musicName": "original sound",
+   "musicAuthor": "Editor 7",
+   "musicOriginal": false
+  },
+  "videoMeta": {
+   "duration": 27.767,
+   "coverUrl": "https://cdn.example.com/editor_7-2.jpg"
+  }
+ },
+ {
+  "id": "7689424156617755925",
+  "createTimeISO": "2026-09-25T10:53:04.000Z",
+  "diggCount": 19,
+  "shareCount": 8,
+  "playCount": 639,
+  "collectCount": 4,
+  "commentCount": 1,
+  "isSlideshow": false,
+  "isPinned": false,
+  "isSponsored": false,
+  "isAd": false,
+  "searchQuery": "sem demora",
+  "text": "funk edit #edit #funk",
+  "webVideoUrl": "https://www.tiktok.com/@editor_8/video/7689424156617755925",
+  "hashtags": [
+   {
+    "name": "edit"
+   },
+   {
+    "name": "funk"
+   }
+  ],
+  "authorMeta": {
+   "name": "editor_8",
+   "nickName": "Editor 8",
+   "verified": false,
+   "signature": "edits daily",
+   "avatar": "https://cdn.example.com/editor_8-avatar.jpg",
+   "profileUrl": "https://www.tiktok.com/@editor_8",
+   "privateAccount": false,
+   "fans": 54,
+   "heart": 19,
+   "video": 1,
+   "following": 66
+  },
+  "musicMeta": {
+   "musicName": "original sound",
+   "musicAuthor": "Editor 8",
+   "musicOriginal": true
+  },
+  "videoMeta": {
+   "duration": 45,
+   "coverUrl": "https://cdn.example.com/editor_8-3.jpg"
+  }
+ },
+ {
+  "id": "7684330146500726046",
+  "createTimeISO": "2026-09-11T17:25:53.000Z",
+  "diggCount": 38187,
+  "shareCount": 677,
+  "playCount": 337616,
+  "collectCount": 5943,
+  "commentCount": 656,
+  "isSlideshow": false,
+  "isPinned": false,
+  "isSponsored": false,
+  "isAd": false,
+  "searchQuery": "sem demora",
+  "text": "funk edit #edit #funk",
+  "webVideoUrl": "https://www.tiktok.com/@editor_9/video/7684330146500726046",
+  "hashtags": [
+   {
+    "name": "edit"
+   },
+   {
+    "name": "funk"
+   }
+  ],
+  "authorMeta": {
+   "name": "editor_9",
+   "nickName": "Editor 9",
+   "verified": false,
+   "signature": "edits daily",
+   "avatar": "https://cdn.example.com/editor_9-avatar.jpg",
+   "profileUrl": "https://www.tiktok.com/@editor_9",
+   "privateAccount": false,
+   "fans": 262700,
+   "heart": 10200000,
+   "video": 1168,
+   "following": 7
+  },
+  "musicMeta": {
+   "musicName": "original sound",
+   "musicAuthor": "Editor 9",
+   "musicOriginal": false
+  },
+  "videoMeta": {
+   "duration": 36.634,
+   "coverUrl": "https://cdn.example.com/editor_9-4.jpg"
+  }
+ }
+]

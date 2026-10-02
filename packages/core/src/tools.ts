@@ -11,6 +11,10 @@ import type { CredentialHandle } from './vault';
 export type RiskLevel = 'read' | 'write' | 'external' | 'destructive' | 'spend';
 export const RISK_LEVELS: RiskLevel[] = ['read', 'write', 'external', 'destructive', 'spend'];
 
+export const SOCIAL_PLATFORMS = ['tiktok', 'instagram', 'youtube'] as const;
+export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number];
+export const PLATFORM_LABELS: Record<SocialPlatform, string> = { tiktok: 'TikTok', instagram: 'Instagram', youtube: 'YouTube' };
+
 export interface ToolContext {
   orgId: string;
   agentId: string;
@@ -37,6 +41,8 @@ export interface ToolDefinition<I extends z.ZodType = z.ZodType, O = unknown> {
   input: I;
   permission: string;
   risk: RiskLevel;
+  /** The social platform a tool works on. A run started for some platforms only gets those platforms' tools. */
+  platform?: SocialPlatform;
   timeoutMs?: number;
   rateLimit?: { capacity: number; refillPerSec: number };
   /** True when repeating the call has no extra effect, so it can be retried freely. */
@@ -66,9 +72,19 @@ export function toolJsonSchema(tool: ToolDefinition): Record<string, unknown> {
   return schema;
 }
 
+/**
+ * Cut text to at most `max` UTF-16 units without splitting an emoji or other
+ * character outside the BMP: half of a surrogate pair is invalid Unicode, and
+ * Postgres refuses to store it in a json column.
+ */
+export function clip(text: string, max: number) {
+  if (text.length <= max) return text;
+  return text.slice(0, max).replace(/[\uD800-\uDBFF]$/, '');
+}
+
 /** Return value helper: keep tool results compact so prompts stay small. */
 export function compact<T>(value: T, maxChars = 12_000): T | { truncated: true; preview: string } {
   const text = JSON.stringify(value);
   if (text.length <= maxChars) return value;
-  return { truncated: true, preview: text.slice(0, maxChars) };
+  return { truncated: true, preview: clip(text, maxChars) };
 }
