@@ -1,0 +1,148 @@
+{
+ "data": {
+  "metadata": {
+   "offset": 0
+  },
+  "tracks": {
+   "total": 141,
+   "items": [
+    {
+     "id": "7N3H0T7EgeflYdKd68lvIV",
+     "uri": "spotify:track:7N3H0T7EgeflYdKd68lvIV",
+     "name": "MONTAGEM URANIUM - Slowed",
+     "metadata": {
+      "explicit": false,
+      "durationMs": 99741,
+      "discNumber": 1,
+      "trackNumber": 2,
+      "attributes": [],
+      "addedAt": "2026-07-27T00:53:29.000Z",
+      "position": 1
+     },
+     "statistics": {
+      "playCount": 22612116
+     },
+     "addedBy": {
+      "id": "curator",
+      "uri": "spotify:user:curator",
+      "name": "A Curator"
+     },
+     "artists": [
+      {
+       "id": "41rOXkwf7ccICwE9yRnEKi",
+       "uri": "spotify:artist:41rOXkwf7ccICwE9yRnEKi",
+       "name": "ZAYLO"
+      }
+     ],
+     "album": {
+      "id": "02v4wwlrIwnowie9SrjSuY",
+      "uri": "spotify:album:02v4wwlrIwnowie9SrjSuY",
+      "name": "MONTAGEM URANIUM",
+      "artists": [
+       {
+        "id": "41rOXkwf7ccICwE9yRnEKi",
+        "uri": "spotify:artist:41rOXkwf7ccICwE9yRnEKi",
+        "name": "ZAYLO"
+       }
+      ]
+     }
+    },
+    {
+     "id": "7l6GqlQeKhLoERK0rDzvvm",
+     "uri": "spotify:track:7l6GqlQeKhLoERK0rDzvvm",
+     "name": "tesla - slowed electro mix",
+     "metadata": {
+      "explicit": false,
+      "durationMs": 154217,
+      "discNumber": 1,
+      "trackNumber": 1,
+      "attributes": [],
+      "addedAt": "2026-07-12T01:04:40.000Z",
+      "position": 2
+     },
+     "statistics": {
+      "playCount": 37899275
+     },
+     "addedBy": {
+      "id": "curator",
+      "uri": "spotify:user:curator",
+      "name": "A Curator"
+     },
+     "artists": [
+      {
+       "id": "6wZXpugmBbTg3lqKupAEEX",
+       "uri": "spotify:artist:6wZXpugmBbTg3lqKupAEEX",
+       "name": "Fixupboy"
+      }
+     ],
+     "album": {
+      "id": "1gTkWCaSwTE1HJI723Z3E2",
+      "uri": "spotify:album:1gTkWCaSwTE1HJI723Z3E2",
+      "name": "tesla (slowed electro mix)",
+      "artists": [
+       {
+        "id": "6wZXpugmBbTg3lqKupAEEX",
+        "uri": "spotify:artist:6wZXpugmBbTg3lqKupAEEX",
+        "name": "Fixupboy"
+       }
+      ]
+     }
+    },
+    {
+     "id": "1EQgJu6w2KMrTlPQGX0Vc2",
+     "uri": "spotify:track:1EQgJu6w2KMrTlPQGX0Vc2",
+     "name": "SUA TOMA - SLOWED",
+     "metadata": {
+      "explicit": false,
+      "durationMs": 93786,
+      "discNumber": 1,
+      "trackNumber": 2,
+      "attributes": [],
+      "addedAt": "2026-07-27T01:08:53.000Z",
+      "position": 3
+     },
+     "statistics": {
+      "playCount": 1629369
+     },
+     "addedBy": {
+      "id": "curator",
+      "uri": "spotify:user:curator",
+      "name": "A Curator"
+     },
+     "artists": [
+      {
+       "id": "0lnpwVVBpHkUYhSTGtyveX",
+       "uri": "spotify:artist:0lnpwVVBpHkUYhSTGtyveX",
+       "name": "CHIEF DORO"
+      },
+      {
+       "id": "74RIeowYRitJETePuOJmau",
+       "uri": "spotify:artist:74RIeowYRitJETePuOJmau",
+       "name": "CASAP"
+      }
+     ],
+     "album": {
+      "id": "1Q9wAQrAb0E4RAIIiM2h01",
+      "uri": "spotify:album:1Q9wAQrAb0E4RAIIiM2h01",
+      "name": "SUA TOMA",
+      "artists": [
+       {
+        "id": "0lnpwVVBpHkUYhSTGtyveX",
+        "uri": "spotify:artist:0lnpwVVBpHkUYhSTGtyveX",
+        "name": "CHIEF DORO"
+       },
+       {
+        "id": "74RIeowYRitJETePuOJmau",
+        "uri": "spotify:artist:74RIeowYRitJETePuOJmau",
+        "name": "CASAP"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "type": "playlist_tracks",
+ "success": true,
+ "status": 200
+}

@@ -14,6 +14,7 @@ declare module '@labelconsole/core/queue' {
     'streams.poll-org': { force?: boolean };
     'streams.import-statement': { documentId: string };
     'streams.maintain-partitions': Record<string, never>;
-    'streams.audience': Record<string, never>;
+    /** Without artistIds: every artist with a Spotify ID (the daily run); with them, just those (a new or changed ID). */
+    'streams.audience': { artistIds?: string[] };
   }
 }

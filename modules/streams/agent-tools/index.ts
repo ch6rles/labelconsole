@@ -3,6 +3,7 @@ import { spotifyIdFrom, spotScraperFor } from '@labelconsole/core/spotscraper';
 import { compact, defineTool } from '@labelconsole/core/tools';
 import { recordUsage } from '@labelconsole/core/usage';
 import * as svc from '../service';
+import { tools as spotifyTools } from './spotify';
 
 /**
  * Agents get stream data only through these tools: derived numbers from the
@@ -68,4 +69,5 @@ export const tools = [
       return { name: a.name, verified: a.verified, monthlyListeners: a.monthlyListeners, followers: a.followers, worldRank: a.worldRank, topCities: a.topCities.slice(0, 5) };
     },
   }),
+  ...spotifyTools,
 ];

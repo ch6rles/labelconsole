@@ -15,6 +15,7 @@ declare module '@labelconsole/core/queue' {
   interface JobMap {
     'catalogue.resolve': { lookupId: string };
     'catalogue.bulk-import': { importId: string };
+    'catalogue.spotify-sync': { importId: string };
     'catalogue.recompute-blockers': { releaseId: string };
     'catalogue.import-credits': { trackIds: string[] | null };
   }

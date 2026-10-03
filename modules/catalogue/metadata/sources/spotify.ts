@@ -63,7 +63,7 @@ export async function spotifyLookup(secret: SpotifySecret, q: Query & { spotifyT
     labelName: album?.label ?? null,
     pLine: copyright('P'),
     cLine: copyright('C'),
-    tracks: album?.tracks?.items.map((t) => ({ title: t.name, isrc: null, durationMs: t.duration_ms, position: t.track_number, explicit: t.explicit, artists: t.artists.map((a) => a.name) })),
+    tracks: album?.tracks?.items.map((t) => ({ title: t.name, isrc: null, durationMs: t.duration_ms, position: t.track_number, explicit: t.explicit, artists: t.artists.map((a) => a.name), spotifyId: t.id })),
     platformIds: [
       ...(track ? [{ platform: 'spotify', entity: 'track' as const, externalId: track.id, url: track.external_urls?.spotify ?? `https://open.spotify.com/track/${track.id}`, source: 'spotify' }] : []),
       ...(album ? [{ platform: 'spotify', entity: 'release' as const, externalId: album.id, url: album.external_urls?.spotify ?? `https://open.spotify.com/album/${album.id}`, source: 'spotify' }] : []),

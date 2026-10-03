@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { enrich } from '@labelconsole/core/modules';
 import { listArtists } from '@labelconsole/people/service';
 import type { PageProps } from '@labelconsole/core/web';
 import { downloadUrl, getFilesByIds } from '@labelconsole/drive/service';
@@ -7,14 +8,16 @@ import { ActionButton, FormModal, UploadZone } from '@labelconsole/ui/client';
 import * as svc from '../service';
 import { STATUS_LABEL, TYPE_LABEL, releaseFields, trackFields } from './fields';
 import { ChecklistToggle } from './client';
+import { SpotifyPlays, type PlaysExtra } from './plays';
 
-export default async function ReleaseDetailPage({ run, params, session, panels, searchParams }: PageProps) {
+export default async function ReleaseDetailPage({ run, params, session, panels, searchParams, enabled }: PageProps) {
   const data = await run(async (ctx) => {
     const d = await svc.getRelease(ctx, params.id);
     const [art] = d.release.artworkFileId ? await getFilesByIds(ctx, [d.release.artworkFileId]) : [];
     const cover = art && art.status === 'ready' ? await downloadUrl(ctx, art.id, { inline: true }).catch(() => null) : null;
     const artistOptions = ctx.can('people:read') ? (await listArtists(ctx)).map((a) => ({ value: a.id, label: a.name })) : [];
-    return { ...d, cover, artistOptions };
+    const plays = (await enrich(ctx, enabled, 'track', d.tracks.map((t) => t.id))) as Record<string, PlaysExtra>;
+    return { ...d, cover, artistOptions, plays };
   });
   const { release: r, readiness } = data;
   const canWrite = session.permissions.has('catalogue:write');
@@ -66,6 +69,7 @@ export default async function ReleaseDetailPage({ run, params, session, panels, 
           { key: 'title', header: 'Title', width: 'minmax(220px,1fr)', render: (t) => <span className="lc-cell-stack"><span className="lc-cell-strong">{t.title}{t.version ? ` (${t.version})` : ''}</span>{t.explicit && <span className="lc-cell-sub">Explicit</span>}</span> },
           { key: 'isrc', header: 'ISRC', width: '150px', render: (t) => <span className="lc-mono" style={{ fontSize: 12 }}>{svc.formatIsrc(t.isrc) ?? '—'}</span> },
           { key: 'dur', header: 'Length', width: '70px', align: 'right', render: (t) => <span className="lc-cell-num">{fmt.duration(t.durationMs)}</span> },
+          { key: 'plays', header: 'Spotify plays', width: '120px', align: 'right', render: (t) => <SpotifyPlays e={data.plays[t.id]} /> },
           { key: 'status', header: 'Status', width: 'minmax(200px,1fr)', render: (t) => (t.blockers.length ? <span className="lc-row" style={{ gap: 4 }}>{t.blockers.map((b) => <Chip key={b} tone="red">{b}</Chip>)}</span> : <Chip tone="blue">Ready</Chip>) },
         ]}
       />

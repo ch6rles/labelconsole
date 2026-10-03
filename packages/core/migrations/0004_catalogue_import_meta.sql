@@ -1,0 +1,1 @@
+ALTER TABLE "catalogue_imports" ADD COLUMN "meta" jsonb DEFAULT '{}'::jsonb NOT NULL;

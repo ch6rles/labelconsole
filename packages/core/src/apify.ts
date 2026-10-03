@@ -1,7 +1,9 @@
 import type { ServiceContext } from './context';
 import { env } from './env';
-import { ProviderError } from './errors';
+import { isTransient, ProviderError } from './errors';
 import { fetchJson } from './http';
+import type { ToolContext } from './tools';
+import { recordUsage } from './usage';
 import { getCredentialHandle, readSecret } from './vault';
 
 /**
@@ -88,3 +90,24 @@ export async function apifyFor(ctx: ServiceContext): Promise<ApifyClient | null>
   const token = env().APIFY_API_TOKEN;
   return token ? new ApifyClient(token) : null;
 }
+
+export const NO_APIFY_TOKEN = 'No Apify token is configured for this label. Add one under Settings → Integrations → Apify, or set APIFY_API_TOKEN for the platform.';
+
+/**
+ * One Actor run for an agent tool: the label's token, results counted in its
+ * usage, and a slow or failed run reported to the agent instead of retried,
+ * since every retry would pay for the scrape again.
+ */
+export async function runActorForTool(t: ToolContext, actorId: string, input: Record<string, unknown>, opts: { maxItems: number; what: string }): Promise<unknown[]> {
+  const client = await t.withOrg((ctx) => apifyFor(ctx));
+  if (!client) throw new ProviderError('apify', NO_APIFY_TOKEN, { transient: false });
+  try {
+    return await client.run(actorId, input, { maxItems: opts.maxItems, timeoutSecs: 240, signal: t.signal });
+  } catch (err) {
+    if (isTransient(err)) throw new ProviderError('apify', `The ${opts.what} did not finish (${(err as Error).message}). Try again with a smaller limit, or later.`, { transient: false });
+    throw err;
+  } finally {
+    if (client.results) await t.withOrg((ctx) => recordUsage(ctx, 'apify_results', client.results));
+  }
+}
+

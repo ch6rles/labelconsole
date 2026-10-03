@@ -160,4 +160,19 @@ export const tools = [
       return { id: d.id, score: Number(d.score) };
     }),
   }),
+  defineTool({
+    name: 'catalogue_sync_spotify_artist',
+    module: 'catalogue',
+    description:
+      "Bring a roster artist's releases on Spotify into the catalogue (releases, tracks, UPC, ISRCs, label, release date), skipping ones already there. Runs in the background; play counts then appear in Streams. The artist needs a Spotify artist link on their profile. onlyLabel keeps only releases that name the label in their label or ℗ line. No audio files are downloaded.",
+    input: z.object({ artistId: z.uuid().describe('Roster artist id (people_list_roster)'), onlyLabel: z.boolean().default(false) }),
+    permission: 'catalogue:write',
+    risk: 'write',
+    preview: (i) => `Sync a roster artist's releases from Spotify into the catalogue${i.onlyLabel ? ' (label releases only)' : ''}`,
+    execute: (t, i) =>
+      t.withOrg(async (ctx) => {
+        const row = await svc.requestSpotifySync(ctx, i.artistId, { onlyLabel: i.onlyLabel });
+        return { importId: row.id, status: 'started', note: 'Releases are imported in the background; check the artist page or catalogue_search later.' };
+      }),
+  }),
 ];

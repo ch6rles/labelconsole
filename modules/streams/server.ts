@@ -46,6 +46,9 @@ export default defineModule({
     // Track registry: every track that enters the catalogue is tracked.
     defineListener({ id: 'streams.register-created-track', event: 'catalogue.track.created', handle: async (ctx, e) => void (await svc.registerTrack(ctx, e.payload.trackId)) }),
     defineListener({ id: 'streams.register-imported-track', event: 'catalogue.track.imported', handle: async (ctx, e) => void (await svc.registerTrack(ctx, e.payload.trackId)) }),
+    // A Spotify artist ID added or changed: read that artist's audience now rather than at the next daily run.
+    defineListener({ id: 'streams.audience-new-artist', event: 'people.artist.created', handle: async (ctx, e) => svc.requestArtistAudience(ctx, e.payload.artistId) }),
+    defineListener({ id: 'streams.audience-changed-artist', event: 'people.artist.updated', handle: async (ctx, e) => (e.payload.changed.includes('spotifyArtistId') ? svc.requestArtistAudience(ctx, e.payload.artistId) : undefined) }),
     // Statement-import adapter: exact counts from parsed distributor statements.
     defineListener({
       id: 'streams.statement-parsed',
@@ -76,8 +79,12 @@ export default defineModule({
   },
   enrich: {
     artist: async (ctx, ids) => {
-      const rows = await svc.plays28dByArtist(ctx, ids);
-      return Object.fromEntries(rows.map((r) => [r.artistId, { streams28d: r.plays }]));
+      const [plays, listeners] = await Promise.all([svc.plays28dByArtist(ctx, ids), svc.latestListenersByArtist(ctx, ids)]);
+      const out: Record<string, { streams28d?: number; monthlyListeners?: number | null }> = {};
+      for (const r of plays) out[r.artistId] = { streams28d: r.plays };
+      for (const r of listeners) out[r.artistId] = { ...out[r.artistId], monthlyListeners: r.monthlyListeners };
+      return out;
     },
+    track: async (ctx, ids) => Object.fromEntries((await svc.spotifyPlaysByTrack(ctx, ids)).map((r) => [r.trackId, { spotifyPlays: r.total, spotifyPlays7d: r.plays7d }])),
   },
 });

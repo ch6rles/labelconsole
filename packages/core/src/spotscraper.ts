@@ -52,6 +52,9 @@ export type SpotifyArtistStats = {
   topCities: Array<{ city: string; country: string | null; listeners: number }>;
 };
 export type SpotifyPlaylist = { id: string; name: string; description: string | null; ownerId: string | null; ownerName: string | null; followers: number | null; trackCount: number | null; personalized: boolean | null };
+/** One release in an artist's discography (no tracklist; read the album for that). */
+export type SpotifyRelease = { id: string; name: string; type: 'album' | 'single' | 'ep' | 'compilation'; releaseDate: string | null; trackCount: number | null; imageUrl: string | null };
+export type SpotifyPlaylistTrack = { id: string; name: string; position: number | null; addedAt: string | null; playCount: number | null; durationMs: number | null; artists: SpotifyArtistRef[]; album: { id: string; name: string } | null };
 
 /* ------------------------------------------------------------- parsing -- */
 
@@ -94,14 +97,13 @@ export function parseAlbum(v: unknown): SpotifyAlbum | null {
   if (!a || !str(a.id) || !str(a.name)) return null;
   const meta = obj(a.metadata) ?? {};
   const tracks = obj(a.tracks) ?? {};
-  const released = str(meta.releasedOn);
   return {
     id: str(a.id)!,
     name: str(a.name)!,
     upc: str(a.upc) ?? str(a.ean),
     label: str(meta.label),
     copyright: str(meta.copyright),
-    releaseDate: released && !Number.isNaN(Date.parse(released)) ? new Date(released).toISOString().slice(0, 10) : null,
+    releaseDate: isoDay(meta.releasedOn),
     artists: artistRefs(a.artists),
     totalTracks: num(tracks.total),
     tracks: arr(tracks.items)
@@ -146,6 +148,65 @@ export function parsePlaylist(v: unknown): SpotifyPlaylist | null {
     trackCount: num(stats.trackCount) ?? num(obj(p.tracks)?.total),
     personalized: bool(meta.personalized),
   };
+}
+
+const isoDay = (v: unknown) => {
+  const s = str(v);
+  return s && !Number.isNaN(Date.parse(s)) ? new Date(s).toISOString().slice(0, 10) : null;
+};
+
+/** The artist's own releases, grouped by Spotify as albums, singles, EPs (and compilations when present). */
+export function parseDiscography(v: unknown): SpotifyRelease[] {
+  const d = obj(v) ?? {};
+  const groups: Array<[string, SpotifyRelease['type']]> = [
+    ['albums', 'album'],
+    ['singles', 'single'],
+    ['eps', 'ep'],
+    ['compilations', 'compilation'],
+  ];
+  const seen = new Set<string>();
+  const out: SpotifyRelease[] = [];
+  for (const [key, fallback] of groups) {
+    for (const item of arr(obj(d[key])?.items)) {
+      const a = obj(item);
+      const id = a ? idOf(a, 'album') : null;
+      if (!a || !id || !str(a.name) || seen.has(id)) continue;
+      seen.add(id);
+      const type = str(a.type)?.toLowerCase();
+      const images = arr(obj(a.images)?.sources).map(obj).filter((i): i is Obj => Boolean(i && str(i.url)));
+      const largest = images.sort((x, y) => (num(y.width) ?? 0) - (num(x.width) ?? 0))[0];
+      out.push({
+        id,
+        name: str(a.name)!,
+        type: type === 'album' || type === 'single' || type === 'ep' || type === 'compilation' ? type : fallback,
+        releaseDate: isoDay(obj(a.metadata)?.releasedOn),
+        trackCount: num(obj(a.tracks)?.totalCount) ?? num(obj(a.tracks)?.total),
+        imageUrl: largest ? str(largest.url) : null,
+      });
+    }
+  }
+  return out.sort((x, y) => (y.releaseDate ?? '').localeCompare(x.releaseDate ?? ''));
+}
+
+export function parsePlaylistTracks(v: unknown): SpotifyPlaylistTrack[] {
+  return arr(obj(obj(v)?.tracks)?.items)
+    .map(obj)
+    .filter((t): t is Obj => Boolean(t && idOf(t, 'track') && str(t.name)))
+    .map((t) => {
+      const meta = obj(t.metadata) ?? {};
+      const album = obj(t.album);
+      const albumId = album ? idOf(album, 'album') : null;
+      return {
+        id: idOf(t, 'track')!,
+        name: str(t.name)!,
+        position: num(meta.position),
+        addedAt: str(meta.addedAt),
+        playCount: num(obj(t.statistics)?.playCount),
+        durationMs: num(meta.durationMs),
+        artists: artistRefs(t.artists),
+        album: album && albumId ? { id: albumId, name: str(album.name) ?? '' } : null,
+      };
+    });
 }
 
 const SPOTIFY_ID = /^[A-Za-z0-9]{22}$/;
@@ -260,6 +321,19 @@ export class SpotScraperClient {
   async playlist(id: string, signal?: AbortSignal): Promise<SpotifyPlaylist | null> {
     if (!SPOTIFY_ID.test(id)) return null;
     return parsePlaylist(await this.get(`/playlists/${id}`, signal));
+  }
+
+  /** The tracks on a playlist in playlist order, with when each was added and its play count. */
+  async playlistTracks(id: string, signal?: AbortSignal): Promise<SpotifyPlaylistTrack[]> {
+    if (!SPOTIFY_ID.test(id)) return [];
+    return parsePlaylistTracks(await this.get(`/playlists/${id}/tracks`, signal));
+  }
+
+  /** The artist's albums, singles and EPs, newest first; null when Spotify has no such artist. */
+  async discography(artistId: string, signal?: AbortSignal): Promise<SpotifyRelease[] | null> {
+    if (!SPOTIFY_ID.test(artistId)) return null;
+    const data = await this.get(`/artists/${artistId}/discography`, signal);
+    return data ? parseDiscography(data) : null;
   }
 }
 

@@ -265,6 +265,41 @@ The owner asked for an agent that researches editors and creators on TikTok, Ins
   - **Full Social Scout run:** a scripted model with the TikTok-only limit and images saved to Drive.
   - **Custom agent creation.**
 
+## Spotify sync and Spotify tools for agents
+
+The owner asked to show monthly listeners and live stream counts, to bring an artist's songs into the catalogue without adding them by hand, to download their audio automatically, and to give agents Spotify tools. SpotScraper already supplied play counts and audiences, so it does the lookups. Apify adds keyword search, which SpotScraper lacks.
+
+- **Sync from Spotify:** a button in the Releases panel on an artist page, or the `catalogue_sync_spotify_artist` agent tool.
+  - **How it runs:** in the background, the worker reads the artist's discography (SpotScraper), skips releases already linked to Spotify, and imports the rest through the bulk-import pipeline. UPC, label, date, ℗ line and tracklist come from Spotify; ISRCs come from Deezer by UPC; records are created automatically.
+  - **Disagreements between sources:** small ones (a label spelling, a date a day apart) don't stop it. A clash over the UPC or ISRC sends the release to review.
+  - **Label releases only:** the option keeps releases that name the label in their label field or ℗/© line, and leaves out earlier releases on other labels.
+  - **Artist matching:** the artist's Spotify name is added as an alias, so credits land on the roster artist instead of creating a duplicate.
+  - **Play counts:** every imported track gets its Spotify track ID as the one Streams polls, unless it already has one. Plays start updating without an ISRC search, even for tracks without an ISRC.
+  - **Progress:** the artist page shows the last sync's result, and the Import page lists syncs next to CSV imports.
+  - **Schema:** migration `0004` adds `catalogue_imports.meta` to record which artist a sync belongs to.
+- **Audio is not downloaded.** Spotify streams are DRM-protected, and ripping them breaks Spotify's terms. The result would also be a lossy copy dressed up as a WAV, not a master fit for distribution. Masters still come from the label: upload each one on its track page.
+- **Numbers in lists:**
+  - **Monthly listeners:** shown on the roster list and the artist page. They are read as soon as an artist's Spotify link is added or changed, instead of at the next daily run.
+  - **Spotify plays:** the track list and release tracklists show all-time plays and the last 7 days' gain.
+- **Agent tools:**
+  - `spotify_search`: playlists, artists, tracks or albums by keyword, via the Apify Actor `automation-lab/spotify-scraper`, filled in with followers, monthly listeners, play counts or label from SpotScraper.
+  - `spotify_track_lookup`: by link or ISRC.
+  - `spotify_album_lookup`
+  - `spotify_playlist_lookup`: curator, followers and tracks with when each was added. `labelTracks` lists the label's songs already on the playlist.
+  - `spotify_artist_discography`
+  - `catalogue_sync_spotify_artist`
+  - **Catalogue matches:** results say which items are already in the catalogue.
+  - **Given to:** Playlist & Editor Outreach, A&R Scout, Trend Monitor, Social Scout, Creator Outreach and the Custom Agent.
+- **Verified live:**
+  - A real artist synced in 5 seconds: 4 releases and 11 tracks, with Deezer ISRCs and Spotify IDs.
+  - The first poll read their real play counts, and their monthly listeners were read straight away.
+  - `spotify_search` returned real playlists with follower counts, and `spotify_playlist_lookup` read a 141-track playlist.
+- **Tests:** 189 passing.
+  - **Client parsing:** discography and playlist tracks, against recorded live responses.
+  - **Sync:** new releases imported with ISRCs and primary Spotify IDs, known releases skipped, other labels' releases left out, alias added, no second sync while one runs, the error paths.
+  - **Lists:** monthly listeners and 7-day plays.
+  - **Agent tools:** every one, with fake clients.
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.

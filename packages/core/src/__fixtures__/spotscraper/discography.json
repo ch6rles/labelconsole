@@ -1,0 +1,163 @@
+{
+ "data": {
+  "albums": {
+   "items": [
+    {
+     "id": "2WlZ6L68eq4Wy7QUSI2ffK",
+     "uri": "spotify:album:2WlZ6L68eq4Wy7QUSI2ffK",
+     "name": "50 (10th Anniversary Deluxe Edition)",
+     "images": {
+      "sources": [
+       {
+        "height": 640,
+        "url": "https://i.scdn.co/image/ab67616d0000b27302f0b93ecab5bad9a8224b40",
+        "width": 640
+       }
+      ]
+     },
+     "metadata": {
+      "releasedOn": "2026-06-15T00:00:00.000Z",
+      "discCount": 1
+     },
+     "artists": [],
+     "tracks": {
+      "totalCount": 15,
+      "items": []
+     },
+     "type": "ALBUM"
+    },
+    {
+     "id": "2bMMC4fA3rqBgiuMxduxmq",
+     "uri": "spotify:album:2bMMC4fA3rqBgiuMxduxmq",
+     "name": "Free (Deluxe Edition - 2024 Remaster)",
+     "images": {
+      "sources": [
+       {
+        "height": 640,
+        "url": "https://i.scdn.co/image/ab67616d0000b2739b6b16d986a7eebb6e877957",
+        "width": 640
+       }
+      ]
+     },
+     "metadata": {
+      "releasedOn": "2024-08-30T00:00:00.000Z",
+      "discCount": 1
+     },
+     "artists": [],
+     "tracks": {
+      "totalCount": 29,
+      "items": []
+     },
+     "type": "ALBUM"
+    }
+   ]
+  },
+  "singles": {
+   "items": [
+    {
+     "id": "0xOvvd9BQwlhJTnKfgB2zz",
+     "uri": "spotify:album:0xOvvd9BQwlhJTnKfgB2zz",
+     "name": "Raindrops",
+     "images": {
+      "sources": [
+       {
+        "height": 640,
+        "url": "https://i.scdn.co/image/ab67616d0000b273fe8a8d62b127592ff546d9c8",
+        "width": 640
+       }
+      ]
+     },
+     "metadata": {
+      "releasedOn": "2026-04-10T00:00:00.000Z",
+      "discCount": 1
+     },
+     "artists": [],
+     "tracks": {
+      "totalCount": 2,
+      "items": []
+     },
+     "type": "SINGLE"
+    },
+    {
+     "id": "5U0RVHlHR4ywoPiOxosTgv",
+     "uri": "spotify:album:5U0RVHlHR4ywoPiOxosTgv",
+     "name": "Waiting On You",
+     "images": {
+      "sources": [
+       {
+        "height": 640,
+        "url": "https://i.scdn.co/image/ab67616d0000b2738f59c9c01c3ce2aef9c29f56",
+        "width": 640
+       }
+      ]
+     },
+     "metadata": {
+      "releasedOn": "2026-02-06T00:00:00.000Z",
+      "discCount": 1
+     },
+     "artists": [],
+     "tracks": {
+      "totalCount": 1,
+      "items": []
+     },
+     "type": "SINGLE"
+    }
+   ]
+  },
+  "eps": {
+   "items": [
+    {
+     "id": "0SLhHKNpL2ZjDgfVRtV6xw",
+     "uri": "spotify:album:0SLhHKNpL2ZjDgfVRtV6xw",
+     "name": "Covers",
+     "images": {
+      "sources": [
+       {
+        "height": 640,
+        "url": "https://i.scdn.co/image/ab67616d0000b2732714b6117dd415b230d97b61",
+        "width": 640
+       }
+      ]
+     },
+     "metadata": {
+      "releasedOn": "2025-10-24T00:00:00.000Z",
+      "discCount": 1
+     },
+     "artists": [],
+     "tracks": {
+      "totalCount": 6,
+      "items": []
+     },
+     "type": "EP"
+    },
+    {
+     "id": "2BLWIU0uwkoH48QxVkgnlz",
+     "uri": "spotify:album:2BLWIU0uwkoH48QxVkgnlz",
+     "name": "Ballads",
+     "images": {
+      "sources": [
+       {
+        "height": 640,
+        "url": "https://i.scdn.co/image/ab67616d0000b2737051d8bfadd7bf404bd8c715",
+        "width": 640
+       }
+      ]
+     },
+     "metadata": {
+      "releasedOn": "2025-09-19T00:00:00.000Z",
+      "discCount": 1
+     },
+     "artists": [],
+     "tracks": {
+      "totalCount": 6,
+      "items": []
+     },
+     "type": "EP"
+    }
+   ]
+  }
+ },
+ "type": "artist_discography",
+ "success": true,
+ "status": 200
+}

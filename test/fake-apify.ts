@@ -11,6 +11,8 @@ export const apifyFixture = (name: string) => JSON.parse(readFileSync(join(FIXTU
  */
 export class FakeApify extends ApifyClient {
   runs: Array<{ actor: string; input: Record<string, unknown>; maxItems: number }> = [];
+  /** Items to return for an Actor, overriding the recorded social fixtures. */
+  answers = new Map<string, unknown[]>();
   failWith: Error | null = null;
   constructor() {
     super('test-token');
@@ -23,6 +25,7 @@ export class FakeApify extends ApifyClient {
     return items as T[];
   }
   private answer(actor: string, input: Record<string, unknown>): unknown[] {
+    if (this.answers.has(actor)) return this.answers.get(actor)!;
     if (actor === 'clockworks/tiktok-scraper') {
       if (input.profiles) return apifyFixture('tiktok-profile');
       return apifyFixture(input.searchSection === '/user' ? 'tiktok-user-search' : 'tiktok-video-search');

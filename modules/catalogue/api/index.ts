@@ -133,4 +133,5 @@ export const routes = defineRoutes('catalogue', [
     },
   }),
   route({ method: 'GET', path: '/metadata/imports/:id', permission: 'catalogue:read', handler: (ctx, req) => svc.getImport(ctx, req.params.id) }),
+  route({ method: 'POST', path: '/catalogue/artists/:id/spotify-sync', permission: 'catalogue:write', body: svc.SpotifySyncInput, status: 202, handler: (ctx, req) => svc.requestSpotifySync(ctx, req.params.id, req.body) }),
 ]);

@@ -1,4 +1,5 @@
-export type SourceTrack = { title: string; isrc: string | null; durationMs: number | null; position: number; explicit: boolean | null; artists: string[] };
+/** spotifyId: the track on Spotify, when the source lists it (lets Streams poll it without an ISRC search). */
+export type SourceTrack = { title: string; isrc: string | null; durationMs: number | null; position: number; explicit: boolean | null; artists: string[]; spotifyId?: string | null };
 export type PlatformRef = { platform: string; entity: 'track' | 'release'; externalId: string; url: string | null; source: string };
 
 /** One source's normalised answer. Every field optional: sources know different things. */

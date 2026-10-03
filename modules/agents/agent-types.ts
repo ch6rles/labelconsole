@@ -35,6 +35,7 @@ const MEMORY = ['agents_remember', 'agents_recall'];
 const SOCIAL_SEARCH = ['social_tiktok_search', 'social_instagram_search', 'social_youtube_search'];
 const SOCIAL_PROFILES = ['social_tiktok_profile', 'social_instagram_profile', 'social_youtube_profile'];
 const SOCIAL = [...SOCIAL_SEARCH, ...SOCIAL_PROFILES];
+const SPOTIFY = ['spotify_search', 'spotify_track_lookup', 'spotify_album_lookup', 'spotify_playlist_lookup', 'spotify_artist_discography', 'streams_spotify_artist_lookup'];
 
 export const AGENT_TYPES: AgentType[] = [
   {
@@ -61,8 +62,8 @@ export const AGENT_TYPES: AgentType[] = [
     icon: 'queue_music',
     defaultGoal: 'For each new release or campaign, find the right playlist editors and curators and prepare personalised pitches.',
     instructions:
-      'Find curators and editors whose playlists genuinely fit the track (genre, mood, audience size). Check the network first; the artist\'s Spotify "discovered on" playlists (streams_artist_audience) show where their listeners already are. Add new contacts only when you found them through research, and never pitch anyone marked gone or do-not-contact. Draft one short, specific pitch per contact that mentions why the track fits their playlist. Drafts are free; sending needs a person to approve each message.',
-    tools: ['catalogue_get_release', 'catalogue_get_track', 'catalogue_search', 'marketing_list_campaigns', 'network_find_contacts', 'network_add_contact', 'network_log_interaction', 'marketing_draft_outreach', 'marketing_send_outreach', 'streams_get_history', 'streams_artist_audience', ...MEMORY],
+      'Find curators and editors whose playlists genuinely fit the track (genre, mood, audience size). Check the network first; the artist\'s Spotify "discovered on" playlists (streams_artist_audience) show where their listeners already are, spotify_search finds playlists by keyword, and spotify_playlist_lookup shows a playlist\'s followers, recent adds and whether the label already has songs on it. Add new contacts only when you found them through research, and never pitch anyone marked gone or do-not-contact. Draft one short, specific pitch per contact that mentions why the track fits their playlist. Drafts are free; sending needs a person to approve each message.',
+    tools: ['catalogue_get_release', 'catalogue_get_track', 'catalogue_search', 'marketing_list_campaigns', 'network_find_contacts', 'network_add_contact', 'network_log_interaction', 'marketing_draft_outreach', 'marketing_send_outreach', 'streams_get_history', 'streams_artist_audience', 'spotify_search', 'spotify_playlist_lookup', 'spotify_track_lookup', ...MEMORY],
     role: 'marketing',
     approvalPolicy: policy({ external: 'approve' }),
     budget: { perRunUsd: 3, perDayUsd: 10 },
@@ -82,7 +83,7 @@ export const AGENT_TYPES: AgentType[] = [
     defaultGoal: 'When a campaign starts, find creators whose audience fits the song and line them up on the campaign board.',
     instructions:
       'Find creators (TikTok, Instagram, YouTube) whose content and audience fit the song. Prefer verified accounts already in the network; add new ones you research. Before proposing anyone, check their profile with the social profile tools: recent posting, typical views against followers, and whether their reach is rising or cooling. Put each on the campaign\'s creator board as a prospect with a note on why they fit and a proposed fee based on their usual rate. You cannot set offers or payments: a person decides money. Messages need approval before they go out.',
-    tools: ['marketing_list_campaigns', 'catalogue_get_release', 'network_find_contacts', 'network_add_contact', 'marketing_add_pipeline_card', 'marketing_draft_outreach', 'marketing_send_outreach', 'streams_get_history', ...SOCIAL, ...MEMORY],
+    tools: ['marketing_list_campaigns', 'catalogue_get_release', 'network_find_contacts', 'network_add_contact', 'marketing_add_pipeline_card', 'marketing_draft_outreach', 'marketing_send_outreach', 'streams_get_history', 'spotify_track_lookup', ...SOCIAL, ...MEMORY],
     role: 'marketing',
     approvalPolicy: policy({ external: 'approve', spend: 'approve' }),
     budget: { perRunUsd: 3, perDayUsd: 10 },
@@ -99,7 +100,7 @@ export const AGENT_TYPES: AgentType[] = [
     defaultGoal: 'Every few hours, check what is moving for the roster and in the label\'s genres, and flag anything worth acting on.',
     instructions:
       'Look for signals that matter to the label: tracks gaining fast, sounds or hashtags taking off in the roster\'s genres, editors or creators picking up a song. Use the stream tools for the label\'s own numbers, the social search tools (recent videos, sorted by latest or most liked) for what is moving on TikTok, Instagram and YouTube, and web research for the wider picture. Scrapes are billed per result, so keep limits small. Only notify people about things they can act on, with the evidence. You never post anything.',
-    tools: ['streams_top_movers', 'streams_get_history', 'streams_artist_audience', 'people_list_roster', 'catalogue_search', 'inbox_notify_user', ...SOCIAL, ...MEMORY],
+    tools: ['streams_top_movers', 'streams_get_history', 'streams_artist_audience', 'people_list_roster', 'catalogue_search', 'inbox_notify_user', 'spotify_search', 'spotify_playlist_lookup', 'spotify_track_lookup', ...SOCIAL, ...MEMORY],
     role: 'viewer',
     approvalPolicy: policy({ write: 'auto' }, { inbox_notify_user: 'auto' }),
     budget: { perRunUsd: 1, perDayUsd: 5 },
@@ -115,8 +116,8 @@ export const AGENT_TYPES: AgentType[] = [
     icon: 'hearing',
     defaultGoal: 'Score every new demo against what the label signs, and surface the few worth a listen.',
     instructions:
-      'Score demos on fit with the label\'s roster and taste (use memories of past decisions), production readiness and audience signals (when a demo links a Spotify artist profile, check it with streams_spotify_artist_lookup; when it links TikTok, Instagram or YouTube, check that profile\'s reach and momentum with the social profile tools). Be honest and specific. Record what you learn about the label\'s taste as memories. Recommend at most a few demos for a person to hear. You never contact artists.',
-    tools: ['catalogue_list_demos', 'catalogue_score_demo', 'people_list_roster', 'streams_spotify_artist_lookup', 'inbox_notify_user', ...SOCIAL, ...MEMORY],
+      'Score demos on fit with the label\'s roster and taste (use memories of past decisions), production readiness and audience signals (when a demo links a Spotify artist profile, check it with streams_spotify_artist_lookup and spotify_artist_discography; when it links TikTok, Instagram or YouTube, check that profile\'s reach and momentum with the social profile tools). Be honest and specific. Record what you learn about the label\'s taste as memories. Recommend at most a few demos for a person to hear. You never contact artists.',
+    tools: ['catalogue_list_demos', 'catalogue_score_demo', 'people_list_roster', 'inbox_notify_user', ...SPOTIFY, ...SOCIAL, ...MEMORY],
     role: 'ar',
     approvalPolicy: policy(),
     budget: { perRunUsd: 2, perDayUsd: 6 },
@@ -198,7 +199,7 @@ export const AGENT_TYPES: AgentType[] = [
       '6. When asked to collect images (profile pictures, thumbnails), call the tools with includeImages and save the links with drive_save_images in the folder asked for, or "Research/<topic>" if none was given.',
       'Every scraped result costs money: profile only accounts you would seriously consider. You never message anyone or agree a price; a person decides money.',
     ].join('\n'),
-    tools: [...SOCIAL, 'network_find_contacts', 'network_add_contact', 'drive_save_images', 'drive_save_file', 'drive_list_files', 'inbox_notify_user', ...MEMORY],
+    tools: [...SOCIAL, 'spotify_search', 'spotify_playlist_lookup', 'streams_spotify_artist_lookup', 'network_find_contacts', 'network_add_contact', 'drive_save_images', 'drive_save_file', 'drive_list_files', 'inbox_notify_user', ...MEMORY],
     role: 'marketing',
     approvalPolicy: policy(),
     budget: { perRunUsd: 3, perDayUsd: 10 },
@@ -215,7 +216,7 @@ export const AGENT_TYPES: AgentType[] = [
     defaultGoal: 'Do the task each run is given, using only the tools ticked in its configuration.',
     instructions:
       'You are a general-purpose agent for the label. The task of each run and the label\'s instructions define the job: follow them closely and do not widen it. Use only the tools you have; if the job needs something you cannot do, say so plainly instead of improvising.',
-    tools: [...SOCIAL, 'network_find_contacts', 'network_add_contact', 'drive_list_files', 'drive_read_file', 'drive_save_file', 'drive_save_images', 'catalogue_search', 'inbox_notify_user', ...MEMORY],
+    tools: [...SOCIAL, ...SPOTIFY, 'network_find_contacts', 'network_add_contact', 'drive_list_files', 'drive_read_file', 'drive_save_file', 'drive_save_images', 'catalogue_search', 'catalogue_sync_spotify_artist', 'people_list_roster', 'streams_artist_audience', 'inbox_notify_user', ...MEMORY],
     role: 'manager',
     approvalPolicy: policy(),
     budget: { perRunUsd: 3, perDayUsd: 10 },

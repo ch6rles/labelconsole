@@ -67,7 +67,7 @@ Set in the environment (see `.env.example`). The app refuses to start if a requi
 | `VOYAGE_API_KEY` | for semantic memory | Voyage AI embeddings for agent memory; labels can add their own. Without it, recall uses full-text search only |
 | `VOYAGE_MODEL` | | Embedding model (default `voyage-4`; must produce 1024 dimensions). Changing it re-embeds every memory in the background |
 | `SPOTSCRAPER_API_KEY` | for Spotify data | Spotify play counts, credits, ISRC search, artist audiences and playlist followers. Labels can add their own. Billed per request; usage is counted per label as `spotscraper_requests` |
-| `APIFY_API_TOKEN` | for social research | Apify token for the TikTok, Instagram and YouTube scrapers that the social agent tools use. Labels can add their own. Apify bills per result (the free plan includes $5 of usage a month and runs 5 scrapes at a time); usage is counted per label as `apify_results` |
+| `APIFY_API_TOKEN` | for social research | Apify token for the TikTok, Instagram and YouTube scrapers that the social agent tools use. Labels can add their own. Apify bills per result (the free plan includes $5 of usage a month and runs 5 scrapes at a time); usage is counted per label as `apify_results`. Agents' Spotify keyword search uses it too (`automation-lab/spotify-scraper`) |
 | `YOUTUBE_API_KEY` | for stream tracking | Platform default; labels can add their own. 10,000 units/day per Google project by default; request more before many labels onboard |
 | `METRICS_TOKEN` | | Enables `/api/metrics` with this bearer token |
 | `CLAMAV_HOST`, `CLAMAV_PORT` | | Upload virus scanning via clamd; without it files are marked "not scanned" |

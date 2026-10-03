@@ -1,4 +1,4 @@
-import { SpotScraperClient, type SpotifyAlbum, type SpotifyArtistStats, type SpotifyCredit, type SpotifyPlaylist, type SpotifyTrack } from '@labelconsole/core/spotscraper';
+import { SpotScraperClient, type SpotifyAlbum, type SpotifyArtistStats, type SpotifyCredit, type SpotifyPlaylist, type SpotifyPlaylistTrack, type SpotifyRelease, type SpotifyTrack } from '@labelconsole/core/spotscraper';
 
 /**
  * A SpotScraper client that answers from an in-memory catalogue instead of
@@ -10,6 +10,8 @@ export class FakeSpotScraper extends SpotScraperClient {
   credit = new Map<string, SpotifyCredit[]>();
   artists = new Map<string, SpotifyArtistStats>();
   playlists = new Map<string, SpotifyPlaylist>();
+  playlistItems = new Map<string, SpotifyPlaylistTrack[]>();
+  discographies = new Map<string, SpotifyRelease[]>();
   searches: string[] = [];
   constructor() {
     super('test-key');
@@ -45,6 +47,14 @@ export class FakeSpotScraper extends SpotScraperClient {
   override async playlist(id: string) {
     this.requests++;
     return this.playlists.get(id) ?? null;
+  }
+  override async playlistTracks(id: string) {
+    this.requests++;
+    return this.playlistItems.get(id) ?? [];
+  }
+  override async discography(artistId: string) {
+    this.requests++;
+    return this.discographies.get(artistId) ?? null;
   }
 }
 

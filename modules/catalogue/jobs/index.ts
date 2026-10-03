@@ -2,7 +2,8 @@ import '../types';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { defineJob, type JobContext } from '@labelconsole/core/queue';
 import { publish } from '@labelconsole/core/realtime';
-import { pickIsrcMatch, spotScraperFor, type SpotScraperClient } from '@labelconsole/core/spotscraper';
+import { organizations } from '@labelconsole/core/db/schema';
+import { pickIsrcMatch, spotScraperFor, type SpotifyRelease, type SpotScraperClient } from '@labelconsole/core/spotscraper';
 import { recordUsage } from '@labelconsole/core/usage';
 import { readSecret } from '@labelconsole/core/vault';
 import { readFileHead } from '@labelconsole/drive/service';
@@ -14,6 +15,7 @@ import type { SpotifySecret } from '../metadata/sources/spotify';
 import { readTags, type AudioTags } from '../metadata/tags';
 import { imports, metadataLookups, platformIdentities, trackArtists, tracks } from '../schema';
 import { artists } from '@labelconsole/people/schema';
+import { findArtistByName, getArtist, updateArtist } from '@labelconsole/people/service';
 import { addImportedCredits, confirmLookup, createLookup, distributorReference, tracksWithoutCredits, upsertIdentity } from '../service';
 
 async function credentials(job: JobContext): Promise<ResolveCredentials> {
@@ -97,6 +99,71 @@ async function spotifyIdsFor(job: JobContext, client: SpotScraperClient, trackId
   return known.byTrack;
 }
 
+const norm = (s: string | null | undefined) =>
+  (s ?? '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/** Whether a release names the label in its label field or ℗/© lines. */
+export function releasedByLabel(r: { labelName: string | null; pLine: string | null; cLine: string | null }, labelName: string) {
+  const want = norm(labelName);
+  return Boolean(want) && [r.labelName, r.pLine, r.cLine].some((v) => norm(v).includes(want));
+}
+
+/**
+ * Work through an import's queued items: resolve each, then create records
+ * when sources agree (bulk CSV with auto-confirm) or stop for review. A
+ * Spotify sync trusts Spotify's details over small disagreements (a label
+ * spelling, a release date a day apart) and stops only when the codes clash.
+ */
+async function processImport(job: JobContext, importId: string) {
+  const row = await job.withOrg(async (ctx) => (await ctx.tx.select().from(imports).where(eq(imports.id, importId)))[0]);
+  if (!row) return;
+  await job.withOrg((ctx) => ctx.tx.update(imports).set({ status: 'running' }).where(eq(imports.id, row.id)));
+  const creds = await credentials(job);
+  const spotify = row.kind === 'spotify';
+  const labelName = spotify && row.meta.onlyLabel ? await job.withOrg(async (ctx) => (await ctx.tx.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, ctx.orgId)))[0]?.name ?? null) : null;
+  const items = [...row.items];
+  let succeeded = row.succeeded;
+  let failed = row.failed;
+  let skipped = row.meta.skipped ?? 0;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].status !== 'queued') continue;
+    try {
+      const lookup = await job.withOrg((ctx) => createLookup(ctx, { input: items[i].value }, { importId: row.id, enqueue: false }));
+      const result = await resolveLookup(job, lookup.id, creds);
+      const found = Boolean(result && (result.isrc || result.upc));
+      const clean = found && (spotify ? !result!.conflicts.some((c) => c.field === 'upc' || c.field === 'isrc') : result!.conflicts.length === 0);
+      if (found && labelName && !releasedByLabel(result!, labelName)) {
+        // Not the label's release (e.g. before signing): leave it out, and its lookup with it.
+        await job.withOrg((ctx) => ctx.tx.delete(metadataLookups).where(eq(metadataLookups.id, lookup.id)));
+        items[i] = { value: items[i].value, status: 'skipped', error: `Released by ${result!.labelName ?? 'another label'}` };
+        skipped++;
+      } else if (row.autoConfirm && clean) {
+        const done = await job.withOrg((ctx) => confirmLookup(ctx, lookup.id));
+        items[i] = { value: items[i].value, status: 'imported', releaseId: done.releaseId };
+        succeeded++;
+      } else if (found) {
+        items[i] = { value: items[i].value, status: 'review' };
+        succeeded++;
+      } else {
+        items[i] = { value: items[i].value, status: 'not_found' };
+        failed++;
+      }
+    } catch (err) {
+      items[i] = { value: items[i].value, status: 'error', error: (err as Error).message.slice(0, 200) };
+      failed++;
+    }
+    await job.withOrg((ctx) => ctx.tx.update(imports).set({ items, processed: i + 1, succeeded, failed, meta: { ...row.meta, skipped } }).where(eq(imports.id, row.id)));
+    await job.progress(Math.round(((i + 1) / items.length) * 100));
+    if ((i + 1) % 5 === 0 || i === items.length - 1) await publish(job.orgId!, { type: 'catalogue.import.progress', data: { importId: row.id, processed: i + 1, total: items.length }, permission: 'catalogue:read' });
+  }
+  await job.withOrg((ctx) => ctx.tx.update(imports).set({ status: 'done' }).where(eq(imports.id, row.id)));
+}
+
 export const jobs = [
   /** Credits from Spotify for the given tracks, or for every track without credits. */
   defineJob('catalogue.import-credits', async (job, data) => {
@@ -125,39 +192,52 @@ export const jobs = [
   }),
 
   defineJob('catalogue.bulk-import', async (job, data) => {
+    await processImport(job, data.importId);
+  }),
+
+  /** An artist's Spotify releases: read the discography, then import each new release. */
+  defineJob('catalogue.spotify-sync', async (job, data) => {
     const row = await job.withOrg(async (ctx) => (await ctx.tx.select().from(imports).where(eq(imports.id, data.importId)))[0]);
-    if (!row) return;
-    await job.withOrg((ctx) => ctx.tx.update(imports).set({ status: 'running' }).where(eq(imports.id, row.id)));
-    const creds = await credentials(job);
-    const items = [...row.items];
-    let succeeded = row.succeeded;
-    let failed = row.failed;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].status !== 'queued') continue;
-      try {
-        const lookup = await job.withOrg((ctx) => createLookup(ctx, { input: items[i].value }, { importId: row.id, enqueue: false }));
-        const result = await resolveLookup(job, lookup.id, creds);
-        const clean = result && (result.isrc || result.upc) && result.conflicts.length === 0;
-        if (row.autoConfirm && clean) {
-          const done = await job.withOrg((ctx) => confirmLookup(ctx, lookup.id));
-          items[i] = { value: items[i].value, status: 'imported', releaseId: done.releaseId };
-          succeeded++;
-        } else if (result && (result.isrc || result.upc)) {
-          items[i] = { value: items[i].value, status: 'review' };
-          succeeded++;
-        } else {
-          items[i] = { value: items[i].value, status: 'not_found' };
-          failed++;
-        }
-      } catch (err) {
-        items[i] = { value: items[i].value, status: 'error', error: (err as Error).message.slice(0, 200) };
-        failed++;
-      }
-      await job.withOrg((ctx) => ctx.tx.update(imports).set({ items, processed: i + 1, succeeded, failed }).where(eq(imports.id, row.id)));
-      await job.progress(Math.round(((i + 1) / items.length) * 100));
-      if ((i + 1) % 5 === 0 || i === items.length - 1) await publish(job.orgId!, { type: 'catalogue.import.progress', data: { importId: row.id, processed: i + 1, total: items.length }, permission: 'catalogue:read' });
+    if (!row || row.status !== 'queued' || !row.meta.artistId || !row.meta.spotifyArtistId) return;
+    const fail = (error: string) => job.withOrg((ctx) => ctx.tx.update(imports).set({ status: 'failed', meta: { ...row.meta, error } }).where(eq(imports.id, row.id)));
+    const client = await job.withOrg((ctx) => spotScraperFor(ctx));
+    if (!client) return fail('No SpotScraper key is configured');
+    let releases: SpotifyRelease[] | null;
+    let spotifyName: string | null = null;
+    try {
+      [releases, spotifyName] = await Promise.all([client.discography(row.meta.spotifyArtistId), client.artist(row.meta.spotifyArtistId).then((a) => a?.name ?? null)]);
+    } catch (err) {
+      await countRequests(job, client);
+      await fail((err as Error).message.slice(0, 200));
+      throw err;
     }
-    await job.withOrg((ctx) => ctx.tx.update(imports).set({ status: 'done' }).where(eq(imports.id, row.id)));
+    await countRequests(job, client);
+    if (!releases) return fail('Spotify has no artist with that ID');
+    const known = await job.withOrg(async (ctx) => {
+      // Credits under the artist's Spotify name should land on this roster artist, so imports don't create a duplicate.
+      if (spotifyName) {
+        const holder = await findArtistByName(ctx, spotifyName);
+        if (!holder) {
+          const artist = await getArtist(ctx, row.meta.artistId!);
+          await updateArtist(ctx, artist.id, { aliases: [...artist.aliases, spotifyName] });
+        }
+      }
+      const ids = releases!.map((r) => r.id);
+      if (ids.length === 0) return new Set<string>();
+      const rows = await ctx.tx
+        .select({ externalId: platformIdentities.externalId })
+        .from(platformIdentities)
+        .where(and(eq(platformIdentities.entityType, 'release'), eq(platformIdentities.platform, 'spotify'), inArray(platformIdentities.externalId, ids)));
+      return new Set(rows.map((r) => r.externalId));
+    });
+    const fresh = releases.filter((r) => !known.has(r.id));
+    await job.withOrg((ctx) =>
+      ctx.tx
+        .update(imports)
+        .set({ total: fresh.length, items: fresh.map((r) => ({ value: `https://open.spotify.com/album/${r.id}`, status: 'queued' })), meta: { ...row.meta, alreadyInCatalogue: known.size, found: releases!.length } })
+        .where(eq(imports.id, row.id)),
+    );
+    await processImport(job, row.id);
   }),
 ];
 

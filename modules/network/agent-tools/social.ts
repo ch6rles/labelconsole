@@ -1,8 +1,6 @@
 import { z } from 'zod';
-import { apifyFor } from '@labelconsole/core/apify';
-import { isTransient, ProviderError } from '@labelconsole/core/errors';
+import { runActorForTool } from '@labelconsole/core/apify';
 import { clip, defineTool, type ToolContext } from '@labelconsole/core/tools';
-import { recordUsage } from '@labelconsole/core/usage';
 import * as svc from '../service';
 import { analyzeCreator, type CreatorAnalysis } from '../social/analysis';
 import { instagramCreator, instagramPostAuthors, tiktokCreators, youtubeCreators, type SocialCreator, type SocialPlatform, type SocialPost } from '../social/parse';
@@ -14,22 +12,9 @@ import { instagramCreator, instagramPostAuthors, tiktokCreators, youtubeCreators
  * never do. Every result is billed by Apify, so limits stay small.
  */
 const ACTORS = { tiktok: 'clockworks/tiktok-scraper', instagram: 'apify/instagram-scraper', youtube: 'streamers/youtube-scraper' } as const;
-const NO_KEY = 'No Apify token is configured for this label. Add one under Settings → Integrations → Apify, or set APIFY_API_TOKEN for the platform.';
 const SCRAPE_TIMEOUT_MS = 300_000;
 
-async function scrape(t: ToolContext, platform: SocialPlatform, input: Record<string, unknown>, maxItems: number): Promise<unknown[]> {
-  const client = await t.withOrg((ctx) => apifyFor(ctx));
-  if (!client) throw new ProviderError('apify', NO_KEY, { transient: false });
-  try {
-    return await client.run(ACTORS[platform], input, { maxItems, timeoutSecs: 240, signal: t.signal });
-  } catch (err) {
-    // A scrape is paid per result: report a slow or failed run instead of letting the runtime repeat it.
-    if (isTransient(err)) throw new ProviderError('apify', `The ${platform} scrape did not finish (${(err as Error).message}). Try again with a smaller limit, or later.`, { transient: false });
-    throw err;
-  } finally {
-    if (client.results) await t.withOrg((ctx) => recordUsage(ctx, 'apify_results', client.results));
-  }
-}
+const scrape = (t: ToolContext, platform: SocialPlatform, input: Record<string, unknown>, maxItems: number) => runActorForTool(t, ACTORS[platform], input, { maxItems, what: `${platform} scrape` });
 
 /** "@name", "name" or a profile link → the bare handle, or null when it is not one. */
 export function handleFrom(platform: SocialPlatform, raw: string): string | null {

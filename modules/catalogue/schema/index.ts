@@ -229,6 +229,8 @@ export const platformIdentities = pgTable(
 
 export type DistributorEvidence = { source: string; signal: string; value: string; weight: number; distributor: string };
 
+export type ImportMeta = { artistId?: string; artistName?: string; spotifyArtistId?: string; onlyLabel?: boolean; skipped?: number; found?: number; alreadyInCatalogue?: number; error?: string };
+
 export type ResolvedMetadata = {
   input: Record<string, string>;
   isrc: string | null;
@@ -243,7 +245,7 @@ export type ResolvedMetadata = {
   cLine: string | null;
   durationMs: number | null;
   explicit: boolean | null;
-  tracks: Array<{ title: string; isrc: string | null; durationMs: number | null; position: number; explicit: boolean | null; artists: string[] }>;
+  tracks: Array<{ title: string; isrc: string | null; durationMs: number | null; position: number; explicit: boolean | null; artists: string[]; spotifyId?: string | null }>;
   platformIds: Array<{ platform: string; entity: 'track' | 'release'; externalId: string; url: string | null; source: string }>;
   distributor: { name: string | null; confidence: number; evidence: DistributorEvidence[] };
   conflicts: Array<{ field: string; values: Array<{ source: string; value: string }> }>;
@@ -279,6 +281,8 @@ export const imports = pgTable(
     items: jsonb('items').$type<Array<{ value: string; status: string; releaseId?: string; error?: string }>>().notNull().default([]),
     /** Create records automatically (true) or stop at review (false). */
     autoConfirm: boolean('auto_confirm').notNull().default(false),
+    /** For a Spotify sync (kind "spotify"): the roster artist and whether only the label's own releases are wanted. */
+    meta: jsonb('meta').$type<ImportMeta>().notNull().default({}),
   },
   (t) => [index('catalogue_imports_org_idx').on(t.orgId, t.createdAt)],
 );

@@ -578,6 +578,42 @@ export async function plays28dByArtist(ctx: ServiceContext, artistIds: string[])
   return rows.map((r) => ({ artistId: r.artistId, plays: Number(r.plays) }));
 }
 
+/** Which of these Spotify track or release IDs are in the catalogue (confirmed matches), keyed by Spotify ID. */
+export async function catalogueBySpotifyIds(ctx: ServiceContext, entity: 'track' | 'release', spotifyIds: string[]) {
+  const out = new Map<string, { id: string; title: string }>();
+  if (spotifyIds.length === 0) return out;
+  const target = entity === 'track' ? tracks : releases;
+  const rows = await ctx.tx
+    .select({ externalId: platformIdentities.externalId, id: target.id, title: target.title })
+    .from(platformIdentities)
+    .innerJoin(target, eq(target.id, platformIdentities.entityId))
+    .where(and(eq(platformIdentities.entityType, entity), eq(platformIdentities.platform, 'spotify'), eq(platformIdentities.status, 'confirmed'), inArray(platformIdentities.externalId, spotifyIds)));
+  for (const r of rows) out.set(r.externalId, { id: r.id, title: r.title });
+  return out;
+}
+
+/** Catalogue lists: each track's latest Spotify play count and the plays it gained over the last 7 days. */
+export async function spotifyPlaysByTrack(ctx: ServiceContext, trackIds: string[]) {
+  if (trackIds.length === 0 || !ctx.can('streams:read')) return [];
+  const [latest, week] = await Promise.all([
+    ctx.tx
+      .selectDistinctOn([streamDaily.trackId], { trackId: streamDaily.trackId, total: streamDaily.total, day: streamDaily.day })
+      .from(streamDaily)
+      .where(and(inArray(streamDaily.trackId, trackIds), eq(streamDaily.source, 'spotscraper')))
+      .orderBy(streamDaily.trackId, desc(streamDaily.day)),
+    ctx.tx
+      .select({ trackId: streamDaily.trackId, plays: sql<number>`sum(${streamDaily.delta})::bigint`, days: sql<number>`count(*)::int` })
+      .from(streamDaily)
+      .where(and(inArray(streamDaily.trackId, trackIds), eq(streamDaily.source, 'spotscraper'), gte(streamDaily.day, daysAgo(6))))
+      .groupBy(streamDaily.trackId),
+  ]);
+  return latest.map((l) => {
+    const w = week.find((x) => x.trackId === l.trackId);
+    // The first day of tracking has no delta yet, so a week with a single reading is not a gain of zero.
+    return { trackId: l.trackId, total: l.total, plays7d: w && w.days > 1 ? Number(w.plays) : null, asOf: l.day };
+  });
+}
+
 /* ------------------------------------------------------------ alerts --- */
 
 export async function ensureDefaultRules(ctx: ServiceContext) {
@@ -717,6 +753,23 @@ export async function sourceStatus(ctx: ServiceContext) {
 /* -------------------------------------------------- spotify audience --- */
 
 export type ArtistStatsInput = { artistId: string; spotifyArtistId: string; day: string; monthlyListeners: number | null; followers: number | null; worldRank: number | null; topCities: TopCity[]; discoveredOn: DiscoveredOn[] };
+
+/** Queue a reading of one artist's Spotify audience, when they have a Spotify artist ID and a key is set. */
+export async function requestArtistAudience(ctx: ServiceContext, artistId: string) {
+  const [a] = await ctx.tx.select({ spotifyArtistId: artists.spotifyArtistId }).from(artists).where(eq(artists.id, artistId));
+  if (!a?.spotifyArtistId || !(await spotScraperConfigured(ctx))) return;
+  enqueueAfterCommit(ctx, 'streams.audience', { artistIds: [artistId] }, { jobId: `audience-${artistId}-${Date.now().toString(36)}`, attempts: 3, backoff: { type: 'exponential', delay: 60_000 } });
+}
+
+/** Each artist's latest monthly listeners, for lists. */
+export async function latestListenersByArtist(ctx: ServiceContext, artistIds: string[]) {
+  if (artistIds.length === 0 || !ctx.can('streams:read')) return [];
+  return ctx.tx
+    .selectDistinctOn([artistSpotifyStats.artistId], { artistId: artistSpotifyStats.artistId, monthlyListeners: artistSpotifyStats.monthlyListeners, day: artistSpotifyStats.day })
+    .from(artistSpotifyStats)
+    .where(inArray(artistSpotifyStats.artistId, artistIds))
+    .orderBy(artistSpotifyStats.artistId, desc(artistSpotifyStats.day));
+}
 
 /** One row per artist per day; a second reading the same day replaces the first. */
 export async function recordArtistStats(ctx: ServiceContext, rows: ArtistStatsInput[]) {

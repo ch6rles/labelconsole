@@ -342,7 +342,7 @@ export const jobs = [
    * rank, top cities) and the playlists listeners discovered them on. Two
    * SpotScraper requests per artist with a Spotify artist ID.
    */
-  defineJob('streams.audience', async (job) => {
+  defineJob('streams.audience', async (job, data) => {
     const day = new Date().toISOString().slice(0, 10);
     if (!job.orgId) {
       const rows = (await systemDb().execute(sql`
@@ -360,7 +360,8 @@ export const jobs = [
     }
     const client = await job.withOrg((ctx) => spotScraperFor(ctx));
     if (!client) return { skipped: 'no SpotScraper key' };
-    const roster = await job.withOrg((ctx) => ctx.tx.select({ id: artists.id, spotifyArtistId: artists.spotifyArtistId }).from(artists).where(isNotNull(artists.spotifyArtistId)));
+    const only = data?.artistIds?.length ? data.artistIds : null;
+    const roster = await job.withOrg((ctx) => ctx.tx.select({ id: artists.id, spotifyArtistId: artists.spotifyArtistId }).from(artists).where(only ? and(isNotNull(artists.spotifyArtistId), inArray(artists.id, only)) : isNotNull(artists.spotifyArtistId)));
     const rows: ArtistStatsInput[] = [];
     try {
       for (const a of roster) {

@@ -9,6 +9,8 @@ export type ArtistExtras = {
   releases?: number;
   liveReleases?: number;
   streams28d?: number | null;
+  /** Latest Spotify monthly listeners (Streams). */
+  monthlyListeners?: number | null;
   contract?: string;
   contractDocumentId?: string | null;
   deal?: string | null;

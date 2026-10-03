@@ -69,6 +69,7 @@ export default async function ArtistsPage({ run, session, searchParams, enabled 
           { key: 'status', header: 'Status', width: '120px', render: (a) => <Chip tone={statusTone(a.status)}>{label(a.status)}</Chip> },
           { key: 'contract', header: 'Contract', width: '160px', render: (a) => <Chip tone={contractTone(extras[a.id]?.contract ?? '—')}>{extras[a.id]?.contract ?? '—'}</Chip> },
           { key: 'releases', header: 'Releases', width: '80px', align: 'right', render: (a) => <span className="lc-cell-num">{extras[a.id]?.releases ?? 0}</span> },
+          { key: 'listeners', header: 'Monthly listeners', width: '130px', align: 'right', render: (a) => <span className="lc-cell-num">{fmt.compact(extras[a.id]?.monthlyListeners ?? null)}</span> },
           { key: 'streams', header: 'Streams 28d', width: '100px', align: 'right', render: (a) => <span className="lc-cell-num">{fmt.compact(extras[a.id]?.streams28d ?? null)}</span> },
           { key: 'earned', header: 'Earned 12m', width: '120px', align: 'right', render: (a) => <span className="lc-cell-num">{extras[a.id]?.earned12mCents ? fmt.moneyCents(extras[a.id]!.earned12mCents!, currency) : '—'}</span> },
           { key: 'payout', header: 'Payout', width: '100px', render: (a) => <span style={{ fontSize: 13, color: a.payoutMethod === 'none' ? 'var(--lc-danger-fg)' : 'var(--lc-text-2)' }}>{a.payoutMethod === 'none' ? 'Missing' : label(a.payoutMethod)}</span> },

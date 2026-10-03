@@ -32,5 +32,5 @@ export const manifest: ModuleManifest = {
     emits: ['catalogue.release.created', 'catalogue.release.updated', 'catalogue.track.created', 'catalogue.track.imported', 'catalogue.demo.submitted', 'catalogue.demo.scored'],
     listens: [],
   },
-  tools: ['catalogue_search', 'catalogue_get_track', 'catalogue_get_release', 'catalogue_create_release_draft', 'catalogue_update_release', 'catalogue_list_demos', 'catalogue_score_demo', 'catalogue_release_checklist'],
+  tools: ['catalogue_search', 'catalogue_get_track', 'catalogue_get_release', 'catalogue_create_release_draft', 'catalogue_update_release', 'catalogue_list_demos', 'catalogue_score_demo', 'catalogue_release_checklist', 'catalogue_sync_spotify_artist'],
 };

@@ -1,13 +1,14 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import Papa from 'papaparse';
 import { z } from 'zod';
 import type { ServiceContext } from '@labelconsole/core/context';
-import { NotFoundError, ValidationError } from '@labelconsole/core/errors';
+import { ConflictError, NotFoundError, ValidationError } from '@labelconsole/core/errors';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
-import { ensureArtist } from '@labelconsole/people/service';
+import { spotifyIdFrom, spotScraperConfigured } from '@labelconsole/core/spotscraper';
+import { ensureArtist, getArtist } from '@labelconsole/people/service';
 import { hintsToLearn } from '../metadata/distributor';
 import { normalizeIsrc, normalizeUpc, parseInput } from '../metadata/input';
-import { distributorAliases, distributorHints, imports, metadataLookups, RELEASE_TYPES, tracks, type ResolvedMetadata } from '../schema';
+import { distributorAliases, distributorHints, imports, metadataLookups, platformIdentities, RELEASE_TYPES, tracks, type ResolvedMetadata } from '../schema';
 import { createRelease, findReleaseByUpc, linkTrack, updateRelease } from './releases';
 import { createTrack, findTrackByIsrc, recomputeBlockers } from './tracks';
 import { upsertIdentity } from './identities';
@@ -104,6 +105,16 @@ export async function confirmLookup(ctx: ServiceContext, lookupId: string, overr
     }
     await linkTrack(ctx, release.id, track.id, spec.position);
     imported.push({ trackId: track.id, isrc: track.isrc });
+    // The track's own Spotify ID from the release tracklist. It becomes the one Streams polls
+    // (variant "primary") unless the track already has one, so a second release never double counts.
+    if (spec.spotifyId && !bySearch) {
+      const [primary] = await ctx.tx
+        .select({ id: platformIdentities.id })
+        .from(platformIdentities)
+        .where(and(eq(platformIdentities.entityType, 'track'), eq(platformIdentities.entityId, track.id), eq(platformIdentities.platform, 'spotify'), eq(platformIdentities.variant, 'primary')))
+        .limit(1);
+      await upsertIdentity(ctx, { entityType: 'track', entityId: track.id, platform: 'spotify', externalId: spec.spotifyId, url: `https://open.spotify.com/track/${spec.spotifyId}`, source: 'release-tracklist', confidence: 1, status: 'confirmed', variant: primary ? undefined : 'primary' });
+    }
   }
 
   // Platform identities: release-level and the track matching the looked-up ISRC.
@@ -178,3 +189,49 @@ export async function recentImports(ctx: ServiceContext) {
   ctx.assert('catalogue:read');
   return ctx.tx.select().from(imports).orderBy(desc(imports.createdAt)).limit(10);
 }
+
+/* ------------------------------------------------------ Spotify sync -- */
+
+export const SpotifySyncInput = z.object({ onlyLabel: z.boolean().default(false) });
+
+/**
+ * Bring a roster artist's releases on Spotify into the catalogue. The worker
+ * reads the discography, skips releases already linked, and imports each new
+ * one like a bulk import: UPC, label and tracklist from Spotify, ISRCs from
+ * Deezer, records created automatically. Imported tracks carry their Spotify
+ * IDs, so Streams starts polling their play counts straight away.
+ */
+export async function requestSpotifySync(ctx: ServiceContext, artistId: string, input: z.input<typeof SpotifySyncInput> = {}) {
+  ctx.assert('catalogue:write');
+  const { onlyLabel } = SpotifySyncInput.parse(input);
+  const artist = await getArtist(ctx, artistId);
+  const spotifyArtistId = spotifyIdFrom(artist.spotifyArtistId, 'artist');
+  if (!spotifyArtistId) throw new ValidationError(`Add ${artist.name}'s Spotify artist link to their profile first`, { fieldErrors: { spotifyArtistId: ['Needed to find their releases'] } });
+  if (!(await spotScraperConfigured(ctx))) throw new ValidationError('Syncing from Spotify needs a SpotScraper key. Add one under Settings → Integrations.');
+  const [running] = await ctx.tx
+    .select()
+    .from(imports)
+    .where(and(eq(imports.kind, 'spotify'), sql`${imports.status} in ('queued', 'running')`, sql`${imports.meta} ->> 'artistId' = ${artistId}`))
+    .limit(1);
+  if (running) throw new ConflictError(`A Spotify sync for ${artist.name} is already running`, { importId: running.id });
+  const [row] = await ctx.tx
+    .insert(imports)
+    .values({ kind: 'spotify', total: 0, autoConfirm: true, items: [], meta: { artistId, artistName: artist.name, spotifyArtistId, onlyLabel } })
+    .returning();
+  await ctx.audit({ action: 'import.started', module: 'catalogue', targetType: 'artist', targetId: artistId, targetLabel: artist.name, after: { source: 'spotify', onlyLabel } });
+  enqueueAfterCommit(ctx, 'catalogue.spotify-sync', { importId: row.id }, { jobId: `spotify-sync-${row.id}`, attempts: 1 });
+  return row;
+}
+
+/** The latest Spotify sync for an artist, for their page. */
+export async function latestSpotifySync(ctx: ServiceContext, artistId: string) {
+  ctx.assert('catalogue:read');
+  const [row] = await ctx.tx
+    .select()
+    .from(imports)
+    .where(and(eq(imports.kind, 'spotify'), sql`${imports.meta} ->> 'artistId' = ${artistId}`))
+    .orderBy(desc(imports.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+

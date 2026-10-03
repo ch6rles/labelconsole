@@ -56,17 +56,19 @@ export function mergeResults(input: Record<string, string>, results: SourceResul
   const explicit = pick('explicit').some((v) => v.value === true) ? true : pick('explicit').length ? false : null;
   const artists = ordered.find((r) => r.artists?.length)?.artists ?? [];
 
-  // Tracklist: take the longest list and fill ISRCs from any source by position or title.
+  // Tracklist: take the longest list and fill ISRCs and Spotify IDs from any source by position or title.
   const lists = ordered.filter((r) => r.tracks?.length).sort((a, b) => b.tracks!.length - a.tracks!.length);
   const base = lists[0]?.tracks ?? [];
   const tracks = base.map((t, i) => {
     let found = t.isrc;
+    let spotifyId = t.spotifyId ?? null;
     for (const l of lists) {
-      if (found) break;
+      if (found && spotifyId) break;
       const match = l.tracks!.find((x) => x.position === t.position && canon('title', x.title) === canon('title', t.title)) ?? l.tracks!.find((x) => canon('title', x.title) === canon('title', t.title));
-      found = match?.isrc ?? null;
+      found ??= match?.isrc ?? null;
+      spotifyId ??= match?.spotifyId ?? null;
     }
-    return { ...t, position: t.position || i + 1, isrc: found ? normalizeIsrc(found) : null };
+    return { ...t, position: t.position || i + 1, isrc: found ? normalizeIsrc(found) : null, spotifyId };
   });
 
   const platformIds = new Map<string, ResolvedMetadata['platformIds'][number]>();

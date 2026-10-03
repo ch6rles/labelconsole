@@ -24,15 +24,18 @@ export default async function ImportPage({ run }: PageProps) {
       {running && <PollUntilDone endpoint={`/metadata/imports/${running.id}`} done={['done', 'failed']} intervalMs={2500} />}
       {imports.length > 0 && (
         <DataTable
-          title="Bulk imports"
+          title="Bulk imports and Spotify syncs"
           rows={imports}
           rowKey={(i) => i.id}
-          minWidth={720}
+          rowHref={(i) => (i.kind === 'spotify' && i.meta.artistId ? `/people/artists/${i.meta.artistId}` : undefined)}
+          minWidth={820}
           columns={[
-            { key: 'when', header: 'Started', width: '150px', render: (i) => <span>{fmt.relative(i.createdAt)}</span> },
+            { key: 'when', header: 'Started', width: '120px', render: (i) => <span>{fmt.relative(i.createdAt)}</span> },
+            { key: 'src', header: 'Source', width: 'minmax(160px,1fr)', render: (i) => <span className="lc-ellipsis">{i.kind === 'spotify' ? `Spotify · ${i.meta.artistName ?? 'artist'}${i.meta.onlyLabel ? ' (label only)' : ''}` : 'CSV of codes'}</span> },
             { key: 'progress', header: 'Progress', width: 'minmax(200px,1fr)', render: (i) => <span className="lc-row" style={{ gap: 10 }}><Progress value={(i.processed / Math.max(1, i.total)) * 100} width={120} /><span className="lc-mono" style={{ fontSize: 12 }}>{i.processed}/{i.total}</span></span> },
             { key: 'ok', header: 'Found', width: '80px', align: 'right', render: (i) => <span className="lc-cell-num">{i.succeeded}</span> },
             { key: 'bad', header: 'Not found', width: '90px', align: 'right', render: (i) => <span className="lc-cell-num">{i.failed}</span> },
+            { key: 'skip', header: 'Left out', width: '80px', align: 'right', render: (i) => <span className="lc-cell-num lc-muted">{i.items.filter((x) => x.status === 'skipped').length || '—'}</span> },
             { key: 'status', header: 'Status', width: '110px', render: (i) => <Chip tone={i.status === 'done' ? 'blue' : 'neutral'}>{fmt.titleCase(i.status)}</Chip> },
           ]}
         />
@@ -52,7 +55,7 @@ export default async function ImportPage({ run }: PageProps) {
         ]}
       />
       <p className="lc-note">
-        Spotify stream counts are never scraped or read from the Spotify API; stream data comes from the <Link href="/streams">Streams</Link> module. ISRC and UPC lookups use public catalogue APIs and the integrations you connect.
+        ISRC and UPC lookups use public catalogue APIs and the integrations you connect. To bring in everything an artist has on Spotify, use <strong>Sync from Spotify</strong> on their page under <Link href="/people/artists">Artists</Link>. Play counts for imported tracks come from the <Link href="/streams">Streams</Link> module.
       </p>
     </Page>
   );

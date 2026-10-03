@@ -83,6 +83,24 @@ describe('SpotScraperClient', () => {
     expect(client.requests).toBe(3);
   });
 
+  it('reads an artist discography, newest first, and a playlist tracklist', async () => {
+    serve({
+      '/artists/0gxyHStUsqpMadRV0Di1Qt/discography': () => ok(fixture('discography.json')),
+      '/playlists/4yjrxdwEZc6S8fnExS2sXC/tracks': () => ok(fixture('playlist-tracks.json')),
+    });
+    const client = new SpotScraperClient('k');
+    const releases = await client.discography('0gxyHStUsqpMadRV0Di1Qt');
+    expect(releases).toHaveLength(6);
+    expect(releases?.map((r) => r.type).sort()).toEqual(['album', 'album', 'ep', 'ep', 'single', 'single']);
+    expect(releases?.[0]).toMatchObject({ id: '2WlZ6L68eq4Wy7QUSI2ffK', name: '50 (10th Anniversary Deluxe Edition)', type: 'album', releaseDate: '2026-06-15', trackCount: 15, imageUrl: expect.stringMatching(/^https:\/\/i\.scdn\.co\//) });
+    expect(releases?.map((r) => r.releaseDate)).toEqual([...releases!.map((r) => r.releaseDate)].sort().reverse());
+    const tracks = await client.playlistTracks('4yjrxdwEZc6S8fnExS2sXC');
+    expect(tracks).toHaveLength(3);
+    expect(tracks[0]).toMatchObject({ id: '7N3H0T7EgeflYdKd68lvIV', name: 'MONTAGEM URANIUM - Slowed', position: 1, playCount: 22612116, artists: [{ id: '41rOXkwf7ccICwE9yRnEKi', name: 'ZAYLO' }], album: { id: '02v4wwlrIwnowie9SrjSuY', name: 'MONTAGEM URANIUM' } });
+    expect(await client.discography('not-an-id')).toBeNull();
+    expect(client.requests).toBe(2);
+  });
+
   it('returns null for unknown IDs, refuses malformed ones, and reports key and rate-limit trouble plainly', async () => {
     serve({});
     const client = new SpotScraperClient('k');
