@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { PanelProps } from '@labelconsole/core/web';
 import { Card, DataTable, EmptyState, KV, ShareBars, StatCard, fmt } from '@labelconsole/ui';
+import { ActionButton, FormModal } from '@labelconsole/ui/client';
 import { TimeSeriesChart } from '@labelconsole/ui/timeseries';
 import * as svc from '../service';
 import { historyLines, PLAY_RANGES, platformColor } from './shared';
@@ -54,9 +55,42 @@ export async function artistStreamsPanel({ entityId, run }: PanelProps) {
 }
 
 /** On an artist page: their Spotify audience, read daily through SpotScraper. */
-export async function artistAudiencePanel({ entityId, run }: PanelProps) {
-  const a = await run((ctx) => svc.artistAudience(ctx, entityId));
-  if (!a) return <EmptyState icon="graphic_eq" title="No Spotify audience data yet">Add the artist&apos;s Spotify artist ID (or profile link) to their profile. With a SpotScraper key, monthly listeners, followers and top cities are read once a day.</EmptyState>;
+export async function artistAudiencePanel({ entityId, run, session }: PanelProps) {
+  const [a, link] = await run((ctx) => Promise.all([svc.artistAudience(ctx, entityId), svc.spotifyLinkState(ctx, entityId)]));
+  if (!a) {
+    const canWrite = session.permissions.has('people:write');
+    return (
+      <EmptyState
+        icon="graphic_eq"
+        title={link.linked ? 'Reading their Spotify audience' : 'Not linked to Spotify yet'}
+        action={
+          !link.linked && canWrite && link.spotScraper ? (
+            <span className="lc-row" style={{ gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+              {link.spotifyTracks > 0 && <ActionButton endpoint="/streams/link-artists" body={{ artistIds: [entityId] }} label="Find on Spotify" icon="travel_explore" variant="primary" success="Looking for their Spotify profile" />}
+              <FormModal
+                title="Link to Spotify"
+                description="Paste the link to their Spotify artist page. Monthly listeners are read straight away, then daily."
+                trigger={{ label: 'Paste profile link', icon: 'link' }}
+                endpoint={`/people/artists/${entityId}`}
+                method="PATCH"
+                fields={[{ name: 'spotifyArtistId', label: 'Spotify profile link', required: true, full: true, placeholder: 'https://open.spotify.com/artist/…' }]}
+                columns={1}
+                success="Spotify profile linked"
+              />
+            </span>
+          ) : undefined
+        }
+      >
+        {!link.spotScraper
+          ? 'Monthly listeners need a SpotScraper key under Settings → Integrations.'
+          : link.linked
+            ? 'Monthly listeners, followers and top cities arrive within a few minutes, then refresh daily.'
+            : link.spotifyTracks > 0
+              ? 'Find on Spotify reads one of their Spotify tracks and links the profile whose name matches. Profiles are also linked automatically as their tracks are polled.'
+              : 'None of their tracks is matched on Spotify yet, so paste the link to their Spotify artist page.'}
+      </EmptyState>
+    );
+  }
   const signed = (n: number | null) => (n == null ? undefined : `${fmt.compact(n, { signed: true })} in 28 d`);
   const maxCity = Math.max(1, ...a.topCities.map((c) => c.listeners));
   return (

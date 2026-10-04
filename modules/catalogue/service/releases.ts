@@ -103,6 +103,13 @@ async function setReleaseArtists(ctx: ServiceContext, releaseId: string, artistI
   if (artistIds.length) await ctx.tx.insert(releaseArtists).values(artistIds.map((artistId, i) => ({ releaseId, artistId, role: i === 0 ? 'primary' : 'featured', position: i })));
 }
 
+/** Add artists a release is missing, keeping the ones it has (a later import can name a collaborator). */
+export async function addReleaseArtists(ctx: ServiceContext, releaseId: string, artistIds: string[]) {
+  const have = await ctx.tx.select({ artistId: releaseArtists.artistId }).from(releaseArtists).where(eq(releaseArtists.releaseId, releaseId));
+  const add = [...new Set(artistIds)].filter((id) => !have.some((h) => h.artistId === id));
+  if (add.length) await ctx.tx.insert(releaseArtists).values(add.map((artistId, i) => ({ releaseId, artistId, role: have.length + i === 0 ? 'primary' : 'featured', position: have.length + i }))).onConflictDoNothing();
+}
+
 export async function createRelease(ctx: ServiceContext, input: z.input<typeof ReleaseInput> & { intake?: boolean; distributorConfidence?: number | null; distributorEvidence?: Release['distributorEvidence'] }) {
   ctx.assert('catalogue:write');
   const { artistIds, ...data } = ReleaseInput.parse(input);

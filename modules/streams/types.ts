@@ -16,5 +16,7 @@ declare module '@labelconsole/core/queue' {
     'streams.maintain-partitions': Record<string, never>;
     /** Without artistIds: every artist with a Spotify ID (the daily run); with them, just those (a new or changed ID). */
     'streams.audience': { artistIds?: string[] };
+    /** Find Spotify profiles for artists without one (just these, or every such artist), from the Spotify tracks they are on. */
+    'streams.link-artists': { artistIds?: string[] };
   }
 }

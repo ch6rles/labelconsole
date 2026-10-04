@@ -9,8 +9,8 @@ import { ensureArtist, getArtist } from '@labelconsole/people/service';
 import { hintsToLearn } from '../metadata/distributor';
 import { normalizeIsrc, normalizeUpc, parseInput } from '../metadata/input';
 import { distributorAliases, distributorHints, imports, metadataLookups, platformIdentities, RELEASE_TYPES, tracks, type ResolvedMetadata } from '../schema';
-import { createRelease, findReleaseByUpc, linkTrack, updateRelease } from './releases';
-import { createTrack, findTrackByIsrc, recomputeBlockers } from './tracks';
+import { addReleaseArtists, createRelease, findReleaseByUpc, linkTrack, updateRelease } from './releases';
+import { addTrackArtists, createTrack, findTrackByIsrc, recomputeBlockers } from './tracks';
 import { upsertIdentity } from './identities';
 
 export const LookupInput = z.object({ input: z.string().trim().min(1).max(500).optional(), fileId: z.uuid().optional() }).refine((v) => v.input || v.fileId, 'Paste a link, ISRC, UPC or title');
@@ -90,6 +90,8 @@ export async function confirmLookup(ctx: ServiceContext, lookupId: string, overr
   const release = existing
     ? await updateRelease(ctx, existing.id, { labelName: existing.labelName ?? releaseFields.labelName, distributor: existing.distributor ?? distributor, pLine: existing.pLine ?? r.pLine, cLine: existing.cLine ?? r.cLine })
     : await createRelease(ctx, { ...releaseFields, upc: r.upc, artistIds, distributorConfidence: overrides.distributor !== undefined ? 1 : r.distributor.confidence, distributorEvidence: r.distributor.evidence });
+  // A release already in the catalogue keeps its artists and gains any this source names that it lacks.
+  if (existing && (overrides.artistNames?.length || r.artists.length)) await addReleaseArtists(ctx, existing.id, artistIds);
 
   // Tracks: the full tracklist when we have one, otherwise the single track.
   const trackSpecs = r.tracks.length ? r.tracks : [{ title: r.title ?? releaseFields.title, isrc: r.isrc, durationMs: r.durationMs, position: 1, explicit: r.explicit, artists: r.artists }];
@@ -97,6 +99,12 @@ export async function confirmLookup(ctx: ServiceContext, lookupId: string, overr
   for (const spec of trackSpecs) {
     const isrc = spec.isrc ? normalizeIsrc(spec.isrc) : null;
     let track = isrc ? await findTrackByIsrc(ctx, isrc) : null;
+    if (track && spec.artists.length) {
+      // Already in the catalogue (another release, or an earlier import): add any collaborator it was missing.
+      const ids: string[] = [];
+      for (const name of spec.artists) ids.push((await ensureArtist(ctx, name)).id);
+      await addTrackArtists(ctx, track.id, ids);
+    }
     if (!track) {
       const trackArtistIds: string[] = [];
       for (const name of spec.artists.length ? spec.artists : artistNames) trackArtistIds.push((await ensureArtist(ctx, name)).id);

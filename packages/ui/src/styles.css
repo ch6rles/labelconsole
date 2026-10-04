@@ -597,7 +597,7 @@ button {
 }
 .lc-grid-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   gap: 12px;
 }
 .lc-grid-2 {
@@ -1511,6 +1511,15 @@ button.lc-table-row {
 }
 .lc-drawer-stat:last-child {
   border-right: none;
+}
+.lc-drawer-stats.lc-drawer-stats--quad {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.lc-drawer-stats--quad .lc-drawer-stat:nth-child(2n) {
+  border-right: none;
+}
+.lc-drawer-stats--quad .lc-drawer-stat:nth-child(-n + 2) {
+  border-bottom: 1px solid var(--lc-divider);
 }
 .lc-drawer-stat-k {
   font-family: var(--lc-font-mono);

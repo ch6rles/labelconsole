@@ -44,7 +44,7 @@ export const tools = [
     idempotent: true,
     execute: (t, i) =>
       t.withOrg(async (ctx) => {
-        const ids = i.artistId ? [i.artistId] : await svc.primaryArtistIds(ctx, i.trackId!);
+        const ids = i.artistId ? [i.artistId] : await svc.trackArtistIds(ctx, i.trackId!);
         return compact({ artists: await Promise.all(ids.map(async (artistId) => ({ artistId, audience: await svc.audienceForAgent(ctx, artistId) }))) });
       }),
   }),

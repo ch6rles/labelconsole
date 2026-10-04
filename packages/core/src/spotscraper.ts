@@ -374,7 +374,8 @@ export function copyrightLines(text: string | null | undefined): { pLine: string
   return { pLine: null, cLine: null };
 }
 
-const normName = (s: string) =>
+/** A name for comparing artists across sources: lower case, no accents or punctuation. */
+export const normName = (s: string) =>
   s
     .toLowerCase()
     .normalize('NFKD')

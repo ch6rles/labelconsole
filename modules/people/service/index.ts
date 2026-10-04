@@ -6,6 +6,7 @@ import type { ServiceContext } from '@labelconsole/core/context';
 import { memberships, users } from '@labelconsole/core/db/schema';
 import { NotFoundError } from '@labelconsole/core/errors';
 import { ROLE_LABELS, type BuiltInRole } from '@labelconsole/core/permissions';
+import { spotifyIdFrom } from '@labelconsole/core/spotscraper';
 import { ARTIST_STATUSES, ONBOARDING_STEPS, artists, staffMembers, type Artist, type Onboarding } from '../schema';
 
 /* ------------------------------------------------------------ schemas -- */
@@ -22,7 +23,19 @@ export const ArtistInput = z.object({
   manager: z.string().trim().max(200).nullable().optional(),
   bio: z.string().max(5000).nullable().optional(),
   socials: Socials.default({}),
-  spotifyArtistId: z.string().trim().max(64).nullable().optional(),
+  // A pasted profile link (open.spotify.com/artist/…?si=…), a spotify: URI or a bare ID; stored as the ID.
+  spotifyArtistId: z
+    .string()
+    .trim()
+    .max(500)
+    .nullable()
+    .optional()
+    .transform((v, c) => {
+      if (!v) return v === undefined ? undefined : null;
+      const id = spotifyIdFrom(v, 'artist');
+      if (!id) c.addIssue({ code: 'custom', message: 'Paste the artist’s Spotify profile link (open.spotify.com/artist/…)' });
+      return id ?? z.NEVER;
+    }),
   youtubeChannelId: z.string().trim().max(64).nullable().optional(),
   payoutMethod: z.enum(['bank', 'paypal', 'none']).default('none'),
   rosterSince: z.iso.date().nullable().optional(),

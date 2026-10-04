@@ -6,7 +6,7 @@ import { NotFoundError, ValidationError } from '@labelconsole/core/errors';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
 import { spotScraperConfigured } from '@labelconsole/core/spotscraper';
 import { artists } from '@labelconsole/people/schema';
-import { credits, platformIdentities, releaseTracks, releases, splitParties, splitSheets, trackArtists, tracks, type Track } from '../schema';
+import { credits, platformIdentities, releaseArtists, releaseTracks, releases, splitParties, splitSheets, trackArtists, tracks, type Track } from '../schema';
 import { isrcField } from './shared';
 import { linkTrack } from './releases';
 
@@ -101,6 +101,61 @@ export async function getTrack(ctx: ServiceContext, id: string) {
   ]);
   const parties = sheets.length ? await ctx.tx.select().from(splitParties).where(inArray(splitParties.sheetId, sheets.map((s) => s.id))).orderBy(desc(splitParties.sharePct)) : [];
   return { track, releases: rel, artists: art, credits: creditRows, splitSheets: sheets.map((s) => ({ ...s, parties: parties.filter((p) => p.sheetId === s.id) })), identities };
+}
+
+/**
+ * The tracks each artist is on: credited on the track itself (lead or
+ * featured), or on a release that carries it, since a collaboration is often
+ * credited to both artists only on the release. Plays and audience figures
+ * use this, so a shared song counts for every artist on it.
+ */
+export async function creditedTracks(ctx: ServiceContext, artistIds: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (artistIds.length === 0) return out;
+  const [onTrack, onRelease] = await Promise.all([
+    ctx.tx.select({ artistId: trackArtists.artistId, trackId: trackArtists.trackId }).from(trackArtists).where(inArray(trackArtists.artistId, artistIds)),
+    ctx.tx.select({ artistId: releaseArtists.artistId, trackId: releaseTracks.trackId }).from(releaseTracks).innerJoin(releaseArtists, eq(releaseArtists.releaseId, releaseTracks.releaseId)).where(inArray(releaseArtists.artistId, artistIds)),
+  ]);
+  for (const r of [...onTrack, ...onRelease]) {
+    const list = out.get(r.artistId) ?? [];
+    if (!list.includes(r.trackId)) list.push(r.trackId);
+    out.set(r.artistId, list);
+  }
+  return out;
+}
+
+/** Every artist on a track (as above, in reverse), lead artists first. */
+export async function artistsOnTrack(ctx: ServiceContext, trackIds: string[]): Promise<Map<string, Array<{ id: string; name: string; aliases: string[] }>>> {
+  const out = new Map<string, Array<{ id: string; name: string; aliases: string[] }>>();
+  if (trackIds.length === 0) return out;
+  const [onTrack, onRelease] = await Promise.all([
+    ctx.tx
+      .select({ trackId: trackArtists.trackId, id: artists.id, name: artists.name, aliases: artists.aliases })
+      .from(trackArtists)
+      .innerJoin(artists, eq(artists.id, trackArtists.artistId))
+      .where(inArray(trackArtists.trackId, trackIds))
+      .orderBy(sql`${trackArtists.role} <> 'primary'`, asc(trackArtists.id)),
+    ctx.tx
+      .select({ trackId: releaseTracks.trackId, id: artists.id, name: artists.name, aliases: artists.aliases })
+      .from(releaseTracks)
+      .innerJoin(releaseArtists, eq(releaseArtists.releaseId, releaseTracks.releaseId))
+      .innerJoin(artists, eq(artists.id, releaseArtists.artistId))
+      .where(inArray(releaseTracks.trackId, trackIds))
+      .orderBy(asc(releaseArtists.position)),
+  ]);
+  for (const r of [...onTrack, ...onRelease]) {
+    const list = out.get(r.trackId) ?? [];
+    if (!list.some((a) => a.id === r.id)) list.push({ id: r.id, name: r.name, aliases: r.aliases });
+    out.set(r.trackId, list);
+  }
+  return out;
+}
+
+/** Add artists a track is missing, keeping the ones it has (a later import can name a collaborator). */
+export async function addTrackArtists(ctx: ServiceContext, trackId: string, artistIds: string[]) {
+  const have = await ctx.tx.select({ artistId: trackArtists.artistId }).from(trackArtists).where(eq(trackArtists.trackId, trackId));
+  const add = [...new Set(artistIds)].filter((id) => !have.some((h) => h.artistId === id));
+  if (add.length) await ctx.tx.insert(trackArtists).values(add.map((artistId, i) => ({ trackId, artistId, role: have.length + i === 0 ? 'primary' : 'featured' }))).onConflictDoNothing();
 }
 
 async function setTrackArtists(ctx: ServiceContext, trackId: string, artistIds: string[]) {

@@ -11,7 +11,7 @@ export const artistFields: FieldSpec[] = [
   { name: 'payoutMethod', label: 'Payout method', type: 'select', required: true, options: [{ value: 'bank', label: 'Bank' }, { value: 'paypal', label: 'PayPal' }, { value: 'none', label: 'Missing' }] },
   { name: 'rosterSince', label: 'On roster since', type: 'date' },
   { name: 'aliases', label: 'Aliases', type: 'tags', hint: 'Comma separated' },
-  { name: 'spotifyArtistId', label: 'Spotify artist ID' },
+  { name: 'spotifyArtistId', label: 'Spotify profile link', placeholder: 'https://open.spotify.com/artist/…', hint: 'On their Spotify page: ⋯ → Share → Copy link to artist. Monthly listeners are read as soon as it is saved.' },
   { name: 'youtubeChannelId', label: 'YouTube channel ID' },
   { name: 'notes', label: 'Notes', type: 'textarea' },
 ];

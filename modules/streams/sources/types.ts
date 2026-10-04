@@ -12,8 +12,11 @@ export type Snapshot = { trackId: string; platform: string; source: StreamSource
  */
 export interface StreamSourceAdapter<Secret = unknown> {
   readonly id: StreamSource;
-  fetch(secret: Secret, refs: TrackRef[], opts?: { signal?: AbortSignal; orgId?: string }): Promise<{ snapshots: Snapshot[]; missing: TrackRef[] }>;
+  fetch(secret: Secret, refs: TrackRef[], opts?: { signal?: AbortSignal; orgId?: string }): Promise<{ snapshots: Snapshot[]; missing: TrackRef[]; artists?: TrackArtistRefs[] }>;
 }
+
+/** The artists a platform lists on a track, with their IDs there (Spotify returns them with every track read). */
+export type TrackArtistRefs = { trackId: string; artists: Array<{ id: string; name: string }> };
 
 /** Platform slugs used across snapshots, rollups and charts. */
 export function platformSlug(source: string): string {

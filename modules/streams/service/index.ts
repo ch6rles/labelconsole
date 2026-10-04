@@ -1,23 +1,24 @@
 import '../types';
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { patchOf } from '@labelconsole/core/zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { credentials, organizations } from '@labelconsole/core/db/schema';
 import { env } from '@labelconsole/core/env';
 import { apifyConfigured } from '@labelconsole/core/apify';
-import { spotifyIdFrom, spotScraperConfigured } from '@labelconsole/core/spotscraper';
+import { normName, spotifyIdFrom, spotScraperConfigured } from '@labelconsole/core/spotscraper';
 import { NotFoundError, ValidationError } from '@labelconsole/core/errors';
 import { enabledModuleIds, enrich } from '@labelconsole/core/modules';
 import { assertWithinPlan, lockPlanLimit, planOf } from '@labelconsole/core/plans';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
-import { platformIdentities, releaseTracks, releases, trackArtists, tracks } from '@labelconsole/catalogue/schema';
-import { setIdentityStatus, upsertIdentity } from '@labelconsole/catalogue/service';
+import { platformIdentities, releaseTracks, releases, tracks } from '@labelconsole/catalogue/schema';
+import { artistsOnTrack, creditedTracks, setIdentityStatus, upsertIdentity } from '@labelconsole/catalogue/service';
 import { artists } from '@labelconsole/people/schema';
+import { updateArtist } from '@labelconsole/people/service';
 import { alertRules, alerts, ALERT_KINDS, artistSpotifyStats, streamDaily, streamTracks, type AlertKind, type DiscoveredOn, type StreamSource, type TopCity } from '../schema';
 import { streamSnapshots } from '../schema/snapshots';
 import { parseVideoId } from '../sources/youtube';
-import type { Snapshot } from '../sources/types';
+import type { Snapshot, TrackArtistRefs } from '../sources/types';
 import { DEFAULT_RULES, evaluateRules, nextPollAt, type DayPoint } from './alerts';
 
 export { DEFAULT_RULES, evaluateRules, nextPollAt } from './alerts';
@@ -123,7 +124,7 @@ export async function listTracked(ctx: ServiceContext, q: z.infer<typeof TrackLi
   const ids = rows.map((r) => r.st.trackId);
   if (ids.length === 0) return [];
   const [names, videos, spotify, daily] = await Promise.all([
-    primaryArtistNames(ctx, ids),
+    artistNames(ctx, ids),
     confirmedVideos(ctx, ids),
     spotifyPrimaries(ctx, ids),
     ctx.tx
@@ -149,13 +150,10 @@ export async function listTracked(ctx: ServiceContext, q: z.infer<typeof TrackLi
   });
 }
 
-async function primaryArtistNames(ctx: ServiceContext, trackIds: string[]) {
-  const rows = trackIds.length
-    ? await ctx.tx.select({ trackId: trackArtists.trackId, name: artists.name }).from(trackArtists).innerJoin(artists, eq(artists.id, trackArtists.artistId)).where(and(inArray(trackArtists.trackId, trackIds), eq(trackArtists.role, 'primary')))
-    : [];
-  const out = new Map<string, string[]>();
-  for (const r of rows) out.set(r.trackId, [...(out.get(r.trackId) ?? []), r.name]);
-  return out;
+/** Every artist on each track, lead artists first, for lists and alerts. */
+async function artistNames(ctx: ServiceContext, trackIds: string[]) {
+  const on = await artistsOnTrack(ctx, trackIds);
+  return new Map([...on].map(([trackId, list]) => [trackId, list.map((a) => a.name)]));
 }
 
 export async function getTracked(ctx: ServiceContext, trackId: string) {
@@ -163,7 +161,7 @@ export async function getTracked(ctx: ServiceContext, trackId: string) {
   const [row] = await ctx.tx.select({ st: streamTracks, track: tracks }).from(tracks).leftJoin(streamTracks, eq(streamTracks.trackId, tracks.id)).where(eq(tracks.id, trackId));
   if (!row) throw new NotFoundError('Track');
   const [names, identities, openAlerts, spotScraper] = await Promise.all([
-    primaryArtistNames(ctx, [trackId]),
+    artistNames(ctx, [trackId]),
     ctx.tx.select().from(platformIdentities).where(and(eq(platformIdentities.entityType, 'track'), eq(platformIdentities.entityId, trackId), inArray(platformIdentities.platform, ['youtube', 'spotify']))).orderBy(desc(platformIdentities.confidence)),
     ctx.tx.select().from(alerts).where(eq(alerts.trackId, trackId)).orderBy(desc(alerts.createdAt)).limit(20),
     spotScraperConfigured(ctx),
@@ -231,7 +229,7 @@ export async function matchingQueue(ctx: ServiceContext) {
     .where(eq(streamTracks.status, 'pending_match'))
     .orderBy(asc(tracks.title))
     .limit(300);
-  const names = await primaryArtistNames(ctx, [...new Set([...pending.map((p) => p.identity.entityId), ...unmatched.map((u) => u.st.trackId)])]);
+  const names = await artistNames(ctx, [...new Set([...pending.map((p) => p.identity.entityId), ...unmatched.map((u) => u.st.trackId)])]);
   return {
     pending: pending.map((p) => ({ ...p, artists: names.get(p.identity.entityId) ?? [] })),
     unmatched: unmatched.filter((u) => !pending.some((p) => p.identity.entityId === u.st.trackId)).map((u) => ({ ...u, artists: names.get(u.st.trackId) ?? [] })),
@@ -442,7 +440,8 @@ function groupSeries(rows: SeriesRow[]) {
  * plays figure (growth counts from the second reading), so charts and agents
  * show it as "no figure" rather than 0.
  */
-async function seriesStarts(ctx: ServiceContext, trackIds: string[] | ReturnType<typeof primaryTrackIds>) {
+async function seriesStarts(ctx: ServiceContext, trackIds: string[]) {
+  if (trackIds.length === 0) return () => null;
   const rows = await ctx.tx
     .select({ platform: streamDaily.platform, source: streamDaily.source, first: sql<string>`min(${streamDaily.day})::text` })
     .from(streamDaily)
@@ -451,7 +450,8 @@ async function seriesStarts(ctx: ServiceContext, trackIds: string[] | ReturnType
   return (platform: string, source: string) => rows.find((r) => r.platform === platform && r.source === source)?.first ?? null;
 }
 
-const primaryTrackIds = (ctx: ServiceContext, artistId: string) => ctx.tx.select({ id: trackArtists.trackId }).from(trackArtists).where(and(eq(trackArtists.artistId, artistId), eq(trackArtists.role, 'primary')));
+/** The tracks an artist is on, as lead or featured artist or on the release. */
+const artistTrackIds = async (ctx: ServiceContext, artistId: string) => (await creditedTracks(ctx, [artistId])).get(artistId) ?? [];
 
 /** GET /v1/streams/tracks/:id — one series per platform and source; sources are never merged. */
 export async function trackHistory(ctx: ServiceContext, trackId: string, q: Partial<z.infer<typeof HistoryQuery>> = {}) {
@@ -475,7 +475,8 @@ export async function artistHistory(ctx: ServiceContext, artistId: string, q: Pa
   ctx.assert('streams:read');
   const granularity = q.granularity ?? 'day';
   const b = bucket(granularity);
-  const trackIds = ctx.tx.select({ id: trackArtists.trackId }).from(trackArtists).where(and(eq(trackArtists.artistId, artistId), eq(trackArtists.role, 'primary')));
+  const trackIds = await artistTrackIds(ctx, artistId);
+  if (trackIds.length === 0) return { artistId, granularity, series: [], topTracks: [] };
   const where = and(inArray(streamDaily.trackId, trackIds), gte(streamDaily.day, q.from ?? daysAgo(90)), lte(streamDaily.day, q.to ?? today()), q.platform ? eq(streamDaily.platform, q.platform) : undefined);
   const [rows, top, start] = await Promise.all([
     ctx.tx
@@ -492,7 +493,7 @@ export async function artistHistory(ctx: ServiceContext, artistId: string, q: Pa
       .groupBy(streamDaily.trackId, tracks.title)
       .orderBy(sql`3 desc`)
       .limit(10),
-    seriesStarts(ctx, primaryTrackIds(ctx, artistId)),
+    seriesStarts(ctx, trackIds),
   ]);
   return { artistId, granularity, series: groupSeries(rows).map((s) => ({ ...s, since: start(s.platform, s.source) })), topTracks: top.map((t) => ({ ...t, plays: Number(t.plays) })) };
 }
@@ -515,7 +516,7 @@ export async function movers(ctx: ServiceContext, q: Partial<z.infer<typeof Move
     .innerJoin(tracks, eq(tracks.id, streamDaily.trackId))
     .where(and(gte(streamDaily.day, daysAgo(days * 2 - 1)), sql`${streamDaily.source} in ${polled}`))
     .groupBy(streamDaily.trackId, tracks.title);
-  const names = await primaryArtistNames(ctx, rows.map((r) => r.trackId));
+  const names = await artistNames(ctx, rows.map((r) => r.trackId));
   const all = rows.map((r) => {
     const current = Number(r.current);
     const previous = Number(r.previous);
@@ -568,16 +569,25 @@ export async function overview(ctx: ServiceContext) {
   };
 }
 
-/** People's "Streams 28d" column: polled plays across each artist's primary tracks. */
+/**
+ * People's "Streams 28d" column: polled plays across every track each artist
+ * is on. A collaboration counts in full for each of its artists.
+ */
 export async function plays28dByArtist(ctx: ServiceContext, artistIds: string[]) {
   if (artistIds.length === 0 || !ctx.can('streams:read')) return [];
+  const credited = await creditedTracks(ctx, artistIds);
+  const trackIds = [...new Set([...credited.values()].flat())];
+  if (trackIds.length === 0) return [];
   const rows = await ctx.tx
-    .select({ artistId: trackArtists.artistId, plays: sql<number>`sum(${streamDaily.delta})::bigint` })
+    .select({ trackId: streamDaily.trackId, plays: sql<number>`sum(${streamDaily.delta})::bigint` })
     .from(streamDaily)
-    .innerJoin(trackArtists, and(eq(trackArtists.trackId, streamDaily.trackId), eq(trackArtists.role, 'primary')))
-    .where(and(inArray(trackArtists.artistId, artistIds), gte(streamDaily.day, daysAgo(27)), sql`${streamDaily.source} in ${polled}`))
-    .groupBy(trackArtists.artistId);
-  return rows.map((r) => ({ artistId: r.artistId, plays: Number(r.plays) }));
+    .where(and(inArray(streamDaily.trackId, trackIds), gte(streamDaily.day, daysAgo(27)), sql`${streamDaily.source} in ${polled}`))
+    .groupBy(streamDaily.trackId);
+  const byTrack = new Map(rows.map((r) => [r.trackId, Number(r.plays)]));
+  return [...credited]
+    .map(([artistId, ids]) => ({ artistId, plays: ids.reduce((a, id) => a + (byTrack.get(id) ?? 0), 0), tracked: ids.some((id) => byTrack.has(id)) }))
+    .filter((r) => r.tracked)
+    .map(({ artistId, plays }) => ({ artistId, plays }));
 }
 
 /** Tracks whose YouTube views were already read through Apify today (it bills per video, so once a day is the rule). */
@@ -715,7 +725,7 @@ export async function listAlerts(ctx: ServiceContext, q: z.infer<typeof AlertQue
     .where(and(q.open === '1' ? isNull(alerts.acknowledgedAt) : undefined, q.trackId ? eq(alerts.trackId, q.trackId) : undefined))
     .orderBy(desc(alerts.createdAt))
     .limit(300);
-  const names = await primaryArtistNames(ctx, [...new Set(rows.map((r) => r.alert.trackId))]);
+  const names = await artistNames(ctx, [...new Set(rows.map((r) => r.alert.trackId))]);
   return rows.map((r) => ({ ...r.alert, trackTitle: r.title, artists: names.get(r.alert.trackId) ?? [] }));
 }
 
@@ -731,7 +741,7 @@ export async function historyForAgent(ctx: ServiceContext, input: { trackId?: st
   const from = daysAgo(input.days);
   const h = input.trackId ? await trackHistory(ctx, input.trackId, { from }) : await artistHistory(ctx, input.artistId!, { from });
   // The day tracking began has a running total but no plays figure yet; reporting it as 0 reads as a dead day.
-  const firstDay = await seriesStarts(ctx, input.trackId ? [input.trackId] : primaryTrackIds(ctx, input.artistId!));
+  const firstDay = await seriesStarts(ctx, input.trackId ? [input.trackId] : await artistTrackIds(ctx, input.artistId!));
   return h.series.map((s) => {
     const first = firstDay(s.platform, s.source);
     const plays = s.points.reduce((a, p) => a + p.delta, 0);
@@ -775,6 +785,98 @@ export async function requestArtistAudience(ctx: ServiceContext, artistId: strin
   const [a] = await ctx.tx.select({ spotifyArtistId: artists.spotifyArtistId }).from(artists).where(eq(artists.id, artistId));
   if (!a?.spotifyArtistId || !(await spotScraperConfigured(ctx))) return;
   enqueueAfterCommit(ctx, 'streams.audience', { artistIds: [artistId] }, { jobId: `audience-${artistId}-${Date.now().toString(36)}`, attempts: 3, backoff: { type: 'exponential', delay: 60_000 } });
+}
+
+/**
+ * Link roster artists to their Spotify profiles from the artists Spotify
+ * lists on their tracks. An artist without a Spotify ID gets one when they are
+ * on the track and their name (or an alias) matches exactly one of its Spotify
+ * artists. A profile another roster artist already holds is never given out
+ * twice. Linking reads the artist's audience straight away (the
+ * people.artist.updated listener). Returns the artists linked.
+ */
+export async function linkSpotifyArtists(ctx: ServiceContext, found: TrackArtistRefs[]): Promise<Array<{ artistId: string; spotifyArtistId: string }>> {
+  const reads = found.filter((f) => f.artists.length);
+  if (reads.length === 0) return [];
+  const on = await artistsOnTrack(ctx, [...new Set(reads.map((f) => f.trackId))]);
+  const ids = [...new Set([...on.values()].flat().map((a) => a.id))];
+  if (ids.length === 0) return [];
+  const [roster, holders] = await Promise.all([
+    ctx.tx.select({ id: artists.id, name: artists.name, aliases: artists.aliases, spotifyArtistId: artists.spotifyArtistId }).from(artists).where(inArray(artists.id, ids)),
+    ctx.tx.select({ spotifyArtistId: artists.spotifyArtistId }).from(artists).where(isNotNull(artists.spotifyArtistId)),
+  ]);
+  const taken = new Set(holders.map((h) => spotifyIdFrom(h.spotifyArtistId, 'artist')).filter(Boolean));
+  const linked: Array<{ artistId: string; spotifyArtistId: string }> = [];
+  for (const a of roster) {
+    if (spotifyIdFrom(a.spotifyArtistId, 'artist')) continue;
+    const keys = new Set([a.name, ...a.aliases].map(normName).filter(Boolean));
+    const matches = new Set<string>();
+    for (const f of reads) {
+      if (!(on.get(f.trackId) ?? []).some((x) => x.id === a.id)) continue;
+      for (const s of f.artists) if (keys.has(normName(s.name)) && spotifyIdFrom(s.id, 'artist')) matches.add(s.id);
+    }
+    // No match, or two Spotify profiles with the same name: that one is for staff to pick.
+    if (matches.size !== 1) continue;
+    const [spotifyArtistId] = matches;
+    if (taken.has(spotifyArtistId)) continue;
+    await updateArtist(ctx, a.id, { spotifyArtistId });
+    taken.add(spotifyArtistId);
+    linked.push({ artistId: a.id, spotifyArtistId });
+  }
+  return linked;
+}
+
+/**
+ * For artists without a Spotify profile: up to three of their tracks to read
+ * on Spotify, confirmed Spotify IDs first (one request each), then ISRCs to
+ * search. Artists on no Spotify track are left out.
+ */
+export async function spotifyLinkPlan(ctx: ServiceContext, artistIds?: string[]) {
+  const roster = await ctx.tx
+    .select({ id: artists.id, name: artists.name, aliases: artists.aliases, spotifyArtistId: artists.spotifyArtistId })
+    .from(artists)
+    .where(artistIds?.length ? inArray(artists.id, artistIds) : undefined);
+  const unlinked = roster.filter((a) => !spotifyIdFrom(a.spotifyArtistId, 'artist'));
+  if (unlinked.length === 0) return [];
+  const credited = await creditedTracks(ctx, unlinked.map((a) => a.id));
+  const trackIds = [...new Set([...credited.values()].flat())];
+  if (trackIds.length === 0) return [];
+  const [identities, codes] = await Promise.all([
+    ctx.tx
+      .select({ trackId: platformIdentities.entityId, externalId: platformIdentities.externalId, variant: platformIdentities.variant })
+      .from(platformIdentities)
+      .where(and(eq(platformIdentities.entityType, 'track'), inArray(platformIdentities.entityId, trackIds), eq(platformIdentities.platform, 'spotify'), eq(platformIdentities.status, 'confirmed'))),
+    ctx.tx.select({ id: tracks.id, isrc: tracks.isrc }).from(tracks).where(and(inArray(tracks.id, trackIds), isNotNull(tracks.isrc))),
+  ]);
+  const spotifyOf = new Map<string, string>();
+  for (const i of [...identities].sort((a, b) => Number(b.variant === 'primary') - Number(a.variant === 'primary'))) if (!spotifyOf.has(i.trackId)) spotifyOf.set(i.trackId, i.externalId);
+  const isrcOf = new Map(codes.map((c) => [c.id, c.isrc!]));
+  return unlinked
+    .map((a) => {
+      const mine = credited.get(a.id) ?? [];
+      const reads = [
+        ...mine.filter((t) => spotifyOf.has(t)).map((t) => ({ trackId: t, spotifyId: spotifyOf.get(t)!, isrc: null })),
+        ...mine.filter((t) => !spotifyOf.has(t) && isrcOf.has(t)).map((t) => ({ trackId: t, spotifyId: null, isrc: isrcOf.get(t)! })),
+      ].slice(0, 3);
+      return { artistId: a.id, names: [a.name, ...a.aliases], reads };
+    })
+    .filter((p) => p.reads.length > 0);
+}
+
+/** For an artist's audience panel: linked or not, whether a key is set, and how many of their tracks Spotify can be read through. */
+export async function spotifyLinkState(ctx: ServiceContext, artistId: string) {
+  const [a] = await ctx.tx.select({ spotifyArtistId: artists.spotifyArtistId }).from(artists).where(eq(artists.id, artistId));
+  const linked = Boolean(spotifyIdFrom(a?.spotifyArtistId, 'artist'));
+  const [spotScraper, plan] = await Promise.all([spotScraperConfigured(ctx), linked ? Promise.resolve([]) : spotifyLinkPlan(ctx, [artistId])]);
+  return { linked, spotScraper, spotifyTracks: plan[0]?.reads.length ?? 0 };
+}
+
+/** Queue a search for Spotify profiles (one artist, or every artist without one). */
+export async function requestSpotifyArtistLink(ctx: ServiceContext, artistIds?: string[]) {
+  ctx.assert('people:write');
+  if (!(await spotScraperConfigured(ctx))) throw new ValidationError('Finding Spotify profiles needs a SpotScraper key. Add one under Settings → Integrations.');
+  enqueueAfterCommit(ctx, 'streams.link-artists', { artistIds }, { jobId: `link-artists-${Date.now().toString(36)}`, attempts: 1 });
+  return { queued: true };
 }
 
 /** Each artist's latest monthly listeners, for lists. */
@@ -827,9 +929,9 @@ export async function artistAudience(ctx: ServiceContext, artistId: string) {
   };
 }
 
-/** The primary artists of a track, for tools that start from a track. */
-export async function primaryArtistIds(ctx: ServiceContext, trackId: string) {
-  return (await ctx.tx.select({ id: trackArtists.artistId }).from(trackArtists).where(and(eq(trackArtists.trackId, trackId), eq(trackArtists.role, 'primary')))).map((r) => r.id);
+/** Every artist on a track, lead artists first, for tools that start from a track. */
+export async function trackArtistIds(ctx: ServiceContext, trackId: string) {
+  return ((await artistsOnTrack(ctx, [trackId])).get(trackId) ?? []).map((a) => a.id);
 }
 
 /** For agents: the audience numbers only (no playlist owners' account names). */

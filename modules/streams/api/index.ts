@@ -21,6 +21,7 @@ export const routes = defineRoutes('streams', [
 
   // Matching review.
   route({ method: 'GET', path: '/streams/matching', permission: 'streams:manage', handler: (ctx) => svc.matchingQueue(ctx) }),
+  route({ method: 'POST', path: '/streams/link-artists', permission: 'people:write', body: z.object({ artistIds: z.array(z.uuid()).max(500).optional() }), handler: (ctx, req) => svc.requestSpotifyArtistLink(ctx, req.body.artistIds) }),
   route({ method: 'POST', path: '/streams/matching/:id', permission: 'streams:manage', body: z.object({ status: z.enum(['confirmed', 'rejected']) }), handler: (ctx, req) => svc.reviewMatch(ctx, req.params.id, req.body.status) }),
 
   // Alerts and rules.

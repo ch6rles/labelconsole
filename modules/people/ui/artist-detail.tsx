@@ -4,7 +4,7 @@ import { Card, Chip, KV, Page, PageHeader, StatCard, StepBoxes, fmt } from '@lab
 import { ActionButton, FormModal } from '@labelconsole/ui/client';
 import * as svc from '../service';
 import { artistFields } from './fields';
-import { contractTone, label, statusTone, type ArtistExtras } from './shared';
+import { contractTone, label, spotifyProfileUrl, statusTone, type ArtistExtras } from './shared';
 
 export default async function ArtistDetailPage({ run, params, session, panels, enabled }: PageProps) {
   const { artist, extras } = await run(async (ctx) => {
@@ -16,6 +16,8 @@ export default async function ArtistDetailPage({ run, params, session, panels, e
   const progress = svc.onboardingProgress(artist.onboarding);
   const currency = (session.org.settings as { currency?: string }).currency ?? 'USD';
   const socials = Object.entries(artist.socials).filter(([, v]) => v);
+  const spotifyUrl = spotifyProfileUrl(artist.spotifyArtistId);
+  const streams = enabled.has('streams');
   const rendered = await Promise.all(panels('artist').map(async (p) => ({ id: p.id, title: p.title, node: await p.component({ entityId: artist.id, run, session }) })));
 
   return (
@@ -38,7 +40,15 @@ export default async function ArtistDetailPage({ run, params, session, panels, e
       />
       <div className="lc-grid-stats">
         <StatCard label="Releases" icon="album" value={String(extras.releases ?? 0)} note={`${extras.liveReleases ?? 0} live`} />
-        <StatCard label="Streams · 28d" icon="visibility" value={fmt.compact(extras.streams28d ?? null)} note={extras.monthlyListeners != null ? `${fmt.compact(extras.monthlyListeners)} monthly listeners on Spotify` : 'plays from Spotify and YouTube'} />
+        {streams && (
+          <StatCard
+            label="Monthly listeners"
+            icon="headphones"
+            value={spotifyUrl ? fmt.compact(extras.monthlyListeners ?? null) : '—'}
+            note={!spotifyUrl ? 'link their Spotify profile below' : extras.monthlyListeners != null ? 'on Spotify, read daily' : 'first reading on its way'}
+          />
+        )}
+        <StatCard label="Streams · 28d" icon="visibility" value={fmt.compact(extras.streams28d ?? null)} note="plays across every track they are on" />
         <StatCard label="Earned · 12m" icon="payments" value={extras.earned12mCents ? fmt.moneyCents(extras.earned12mCents, currency) : '—'} note="net, from imported statements" />
         <StatCard label="Contract" icon="draft" value={<Chip tone={contractTone(extras.contract ?? '—')}>{extras.contract ?? '—'}</Chip>} note={extras.deal ?? undefined} />
       </div>
@@ -51,7 +61,19 @@ export default async function ArtistDetailPage({ run, params, session, panels, e
           <KV k="Aliases" v={artist.aliases.join(', ') || '—'} />
           <KV k="Payout" v={artist.payoutMethod === 'none' ? 'No payout details' : label(artist.payoutMethod)} tone={artist.payoutMethod === 'none' ? 'red' : undefined} />
           <KV k="On roster since" v={artist.rosterSince ? fmt.date(artist.rosterSince) : '—'} />
-          <KV k="Spotify artist ID" v={artist.spotifyArtistId ?? '—'} />
+          <KV
+            k="Spotify profile"
+            v={
+              spotifyUrl ? (
+                <a href={spotifyUrl} target="_blank" rel="noreferrer">
+                  Open on Spotify
+                </a>
+              ) : (
+                'Not linked'
+              )
+            }
+            tone={spotifyUrl || !streams ? undefined : 'red'}
+          />
           <KV k="YouTube channel" v={artist.youtubeChannelId ?? '—'} />
           {socials.map(([k, v]) => (
             <KV key={k} k={label(k)} v={String(v)} />

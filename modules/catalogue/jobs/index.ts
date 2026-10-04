@@ -13,10 +13,9 @@ import type { AppleSecret } from '../metadata/sources/apple';
 import type { LicensedSecret } from '../metadata/sources/licensed';
 import type { SpotifySecret } from '../metadata/sources/spotify';
 import { readTags, type AudioTags } from '../metadata/tags';
-import { imports, metadataLookups, platformIdentities, trackArtists, tracks } from '../schema';
-import { artists } from '@labelconsole/people/schema';
+import { imports, metadataLookups, platformIdentities, tracks } from '../schema';
 import { findArtistByName, getArtist, updateArtist } from '@labelconsole/people/service';
-import { addImportedCredits, confirmLookup, createLookup, distributorReference, tracksWithoutCredits, upsertIdentity } from '../service';
+import { addImportedCredits, artistsOnTrack, confirmLookup, createLookup, distributorReference, tracksWithoutCredits, upsertIdentity } from '../service';
 
 async function credentials(job: JobContext): Promise<ResolveCredentials> {
   return job.withOrg(async (ctx) => {
@@ -82,8 +81,8 @@ async function spotifyIdsFor(job: JobContext, client: SpotScraperClient, trackId
     for (const r of [...rows].sort((a, b) => Number(b.variant === 'primary') - Number(a.variant === 'primary'))) if (!byTrack.has(r.trackId)) byTrack.set(r.trackId, r.externalId);
     const rest = trackIds.filter((t) => !byTrack.has(t));
     const info = rest.length ? await ctx.tx.select({ id: tracks.id, isrc: tracks.isrc }).from(tracks).where(inArray(tracks.id, rest)) : [];
-    const names = rest.length ? await ctx.tx.select({ trackId: trackArtists.trackId, name: artists.name }).from(trackArtists).innerJoin(artists, eq(artists.id, trackArtists.artistId)).where(and(inArray(trackArtists.trackId, rest), eq(trackArtists.role, 'primary'))) : [];
-    return { byTrack, search: info.filter((t) => t.isrc).map((t) => ({ trackId: t.id, isrc: t.isrc!, artists: names.filter((n) => n.trackId === t.id).map((n) => n.name) })) };
+    const names = await artistsOnTrack(ctx, rest);
+    return { byTrack, search: info.filter((t) => t.isrc).map((t) => ({ trackId: t.id, isrc: t.isrc!, artists: (names.get(t.id) ?? []).map((n) => n.name) })) };
   });
   const found: Array<{ trackId: string; spotifyId: string }> = [];
   for (const s of known.search) {

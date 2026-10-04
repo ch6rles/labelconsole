@@ -349,6 +349,33 @@ The owner asked whether YouTube Music streams can be tracked without a YouTube D
   - A newly tracked song opens on its running total.
 - **Colours:** one fixed colour per platform (Spotify blue, YouTube orange, Apple Music aqua), from a palette checked for colour-blind separation.
 
+## Shared tracks and Spotify profiles
+
+- **Collaborations count for every artist:**
+  - A track's plays now count for every artist on it: lead, featured, or credited on the release that carries it.
+  - Before, only the lead artist was counted, and imports save the second artist on a Spotify track as featured. So a song by two roster artists showed plays for one of them only.
+  - This covers the Streams 28d column, the artist page, the artist's plays chart and top tracks, and the agents' artist tools.
+  - Earnings still follow the lead artist, since money belongs to the split sheet rather than to every credit.
+- **Imports add a missing collaborator:** when an import finds a track or release already in the catalogue, it adds any artist the existing record was missing. Nobody already on it is removed.
+- **Automatic Spotify linking:**
+  - Every Spotify play-count read already names the track's Spotify artists with their IDs.
+  - After each poll, an artist without a Spotify profile is linked when they are on the track and their name (or an alias) matches exactly one of its Spotify artists.
+  - It is never linked when two Spotify profiles share the name, or when another roster artist already holds that profile.
+  - This costs no extra requests, and their monthly listeners are read straight away.
+- **Find on Spotify:**
+  - Available on the artist list (for every artist without a profile), in the artist drawer, and on the artist page.
+  - Reads up to three of the artist's tracks on Spotify: known Spotify IDs first, then an ISRC search. It is usually one request per artist.
+  - Code: the `streams.link-artists` job, at `POST /v1/streams/link-artists`.
+- **Paste a link:** the profile field takes the link copied from Spotify (Share → Copy link, including the `?si=` part) and stores the ID. Before, links over 64 characters were rejected. A link to a track or album is refused with a clear message.
+- **Where monthly listeners show:**
+  - The artist list shows "Not linked" until an artist is linked.
+  - The drawer has a Monthly listeners figure and a Spotify section.
+  - The artist page has a Monthly listeners card, and the Spotify audience panel offers both ways to link.
+- **Verified:**
+  - 199 tests pass, including a collaboration counted for both artists, linking from a poll (with the ambiguous and already-taken cases), and Find on Spotify through an ISRC search.
+  - A real SpotScraper track read returned the artists' real Spotify IDs.
+  - Pasting a share link through the form stored the ID.
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.

@@ -143,7 +143,7 @@ describe('Spotify via SpotScraper', () => {
     expect(audience?.series).toHaveLength(2);
 
     const forAgent = await a.as((ctx) => svc.audienceForAgent(ctx, artist.id));
-    expect(await a.as(async (ctx) => svc.primaryArtistIds(ctx, (await ctx.tx.select().from(streamTracks))[0].trackId))).toEqual([artist.id]);
+    expect(await a.as(async (ctx) => svc.trackArtistIds(ctx, (await ctx.tx.select().from(streamTracks))[0].trackId))).toEqual([artist.id]);
     expect(forAgent?.discoveredOnPlaylists).toEqual([
       { name: 'Late Night Indie', curator: 'Spotify', spotifyUrl: 'https://open.spotify.com/playlist/37i9dQZF1DX4UtSsGT1Sbe' },
       // Listener accounts show up as random IDs: not a curator name.

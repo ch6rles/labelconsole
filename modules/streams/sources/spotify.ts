@@ -1,5 +1,5 @@
 import type { SpotScraperClient } from '@labelconsole/core/spotscraper';
-import type { Snapshot, StreamSourceAdapter, TrackRef } from './types';
+import type { Snapshot, StreamSourceAdapter, TrackArtistRefs, TrackRef } from './types';
 
 /**
  * Spotify play counts through SpotScraper: one request per track, the
@@ -18,18 +18,21 @@ export const spotifyAdapter: StreamSourceAdapter<SpotScraperClient> = {
     const sp = refs.filter((r) => r.platform === 'spotify');
     const snapshots: Snapshot[] = [];
     const missing: TrackRef[] = [];
+    // Each read also names the track's Spotify artists, which links roster artists to their profiles at no extra cost.
+    const artists: TrackArtistRefs[] = [];
     const capturedAt = new Date();
     let next = 0;
     const worker = async () => {
       while (next < sp.length) {
         const r = sp[next++];
         const t = await client.track(r.externalId, opts?.signal);
+        if (t?.artists.length) artists.push({ trackId: r.trackId, artists: t.artists });
         // A track that disappeared or hides its count is reported, never recorded as zero.
         if (t?.playCount == null) missing.push(r);
         else snapshots.push({ trackId: r.trackId, platform: 'spotify', source: 'spotscraper', externalId: r.externalId, capturedAt, count: t.playCount });
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, sp.length) }, worker));
-    return { snapshots, missing };
+    return { snapshots, missing, artists };
   },
 };

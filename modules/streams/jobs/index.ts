@@ -10,11 +10,11 @@ import { isTransient, RateLimitedError } from '@labelconsole/core/errors';
 import { enabledModuleIds } from '@labelconsole/core/modules';
 import { isPublicHttps } from '@labelconsole/core/net';
 import { defineJob, enqueue, type JobContext } from '@labelconsole/core/queue';
-import { pickIsrcMatch, spotifyIdFrom, spotScraperFor, type SpotScraperClient } from '@labelconsole/core/spotscraper';
+import { normName, pickIsrcMatch, spotifyIdFrom, spotScraperFor, type SpotScraperClient } from '@labelconsole/core/spotscraper';
 import { recordUsage } from '@labelconsole/core/usage';
 import { readSecret } from '@labelconsole/core/vault';
-import { platformIdentities, trackArtists, tracks } from '@labelconsole/catalogue/schema';
-import { upsertIdentity } from '@labelconsole/catalogue/service';
+import { platformIdentities, tracks } from '@labelconsole/catalogue/schema';
+import { artistsOnTrack, upsertIdentity } from '@labelconsole/catalogue/service';
 import { documents, statementLines } from '@labelconsole/documents/schema';
 import { artists } from '@labelconsole/people/schema';
 import { streamTracks } from '../schema';
@@ -30,6 +30,7 @@ import {
   confirmedVideos,
   ensureDefaultRules,
   evaluateTrackAlerts,
+  linkSpotifyArtists,
   nextPollAt,
   pollableTrackIds,
   promoteSpotifyPrimaries,
@@ -38,9 +39,11 @@ import {
   youtubeScrapedToday,
   registerTrack,
   rollupStatementCounts,
+  spotifyLinkPlan,
   spotifyPrimaries,
   type ArtistStatsInput,
 } from '../service';
+import type { TrackArtistRefs } from '../sources/types';
 
 export const NO_YOUTUBE_KEY = 'Add a YouTube Data API key (free) or an Apify token under Settings → Integrations to track YouTube views';
 export const NO_SPOTSCRAPER_KEY = 'Add a SpotScraper key under Settings → Integrations to track Spotify plays';
@@ -95,10 +98,10 @@ async function matchSpotify(job: JobContext, client: SpotScraperClient, trackIds
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.trackId);
     const [names, rejected] = await Promise.all([
-      ctx.tx.select({ trackId: trackArtists.trackId, name: artists.name }).from(trackArtists).innerJoin(artists, eq(artists.id, trackArtists.artistId)).where(and(inArray(trackArtists.trackId, ids), eq(trackArtists.role, 'primary'))),
+      artistsOnTrack(ctx, ids),
       ctx.tx.select({ trackId: platformIdentities.entityId, externalId: platformIdentities.externalId }).from(platformIdentities).where(and(eq(platformIdentities.entityType, 'track'), inArray(platformIdentities.entityId, ids), eq(platformIdentities.platform, 'spotify'), eq(platformIdentities.status, 'rejected'))),
     ]);
-    return rows.map((r) => ({ ...r, isrc: r.isrc!, artists: names.filter((n) => n.trackId === r.trackId).map((n) => n.name), rejected: new Set(rejected.filter((x) => x.trackId === r.trackId).map((x) => x.externalId)) }));
+    return rows.map((r) => ({ ...r, isrc: r.isrc!, artists: (names.get(r.trackId) ?? []).map((n) => n.name), rejected: new Set(rejected.filter((x) => x.trackId === r.trackId).map((x) => x.externalId)) }));
   });
   const found: Array<(typeof pending)[number] & { spotifyId: string | null }> = [];
   for (const p of pending) {
@@ -184,7 +187,7 @@ export const jobs = [
     const info = await job.withOrg(async (ctx) => {
       const [row] = await ctx.tx.select({ st: streamTracks, title: tracks.title, durationMs: tracks.durationMs }).from(streamTracks).innerJoin(tracks, eq(tracks.id, streamTracks.trackId)).where(eq(streamTracks.id, data.streamTrackId));
       if (!row) return null;
-      const names = await ctx.tx.select({ name: artists.name, aliases: artists.aliases }).from(trackArtists).innerJoin(artists, eq(artists.id, trackArtists.artistId)).where(and(eq(trackArtists.trackId, row.st.trackId), eq(trackArtists.role, 'primary')));
+      const names = (await artistsOnTrack(ctx, [row.st.trackId])).get(row.st.trackId) ?? [];
       // Aliases (such as the name on Spotify) count when matching channels, after the roster names.
       return { ...row, artists: [...new Set([...names.map((n) => n.name), ...names.flatMap((n) => n.aliases)])], videos: await confirmedVideos(ctx, [row.st.trackId]) };
     });
@@ -313,6 +316,10 @@ export const jobs = [
           const res = await spotifyAdapter.fetch(client, refs);
           snapshots.push(...res.snapshots);
           for (const m of res.missing) if (!errors.has(m.trackId)) errors.set(m.trackId, `Spotify track ${m.externalId} is unavailable or shows no play count`);
+          // The reads name each track's Spotify artists: link roster artists who have no profile yet.
+          if (res.artists?.length) {
+            await job.withOrg((ctx) => linkSpotifyArtists(ctx, res.artists!)).catch((err: Error) => job.log.warn({ err: err.message }, 'linking spotify artists failed'));
+          }
         }
       } catch (err) {
         const message = err instanceof RateLimitedError ? 'SpotScraper rate limit reached; Spotify plays resume at the next poll' : `Spotify: ${(err as Error).message.slice(0, 200)}`;
@@ -434,6 +441,45 @@ export const jobs = [
       await countRequests(job, client);
     }
     return { artists: rows.length };
+  }),
+
+  /**
+   * Find Spotify profiles for artists without one, from the Spotify tracks
+   * they are on: one request per track read, at most three per artist, and
+   * usually one. Each artist linked has their audience read straight away.
+   */
+  defineJob('streams.link-artists', async (job, data) => {
+    const client = await job.withOrg((ctx) => spotScraperFor(ctx));
+    if (!client) return { skipped: 'no SpotScraper key' };
+    const plan = await job.withOrg((ctx) => spotifyLinkPlan(ctx, data?.artistIds));
+    const found: TrackArtistRefs[] = [];
+    const read = new Map<string, Array<{ id: string; name: string }>>();
+    try {
+      for (const p of plan) {
+        const keys = new Set(p.names.map(normName).filter(Boolean));
+        for (const r of p.reads) {
+          const key = r.spotifyId ?? `isrc:${r.isrc}`;
+          if (!read.has(key)) {
+            try {
+              const t = r.spotifyId ? await client.track(r.spotifyId) : pickIsrcMatch(await client.searchIsrc(r.isrc!), r.isrc!, p.names);
+              read.set(key, t?.artists ?? []);
+            } catch (err) {
+              if (err instanceof RateLimitedError) throw err;
+              job.log.warn({ err: (err as Error).message, trackId: r.trackId }, 'spotify read for artist link failed');
+              read.set(key, []);
+            }
+          }
+          const artists = read.get(key)!;
+          if (artists.length) found.push({ trackId: r.trackId, artists });
+          if (artists.some((a) => keys.has(normName(a.name)))) break;
+        }
+      }
+    } finally {
+      await countRequests(job, client);
+    }
+    const linked = await job.withOrg((ctx) => linkSpotifyArtists(ctx, found));
+    job.log.info({ artists: plan.length, linked: linked.length }, 'spotify artist profiles linked');
+    return { looked: plan.length, linked: linked.length };
   }),
 
   /** Keep monthly partitions three months ahead so inserts never land in the default partition. */
