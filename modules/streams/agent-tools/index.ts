@@ -16,7 +16,7 @@ export const tools = [
     name: 'streams_get_history',
     module: 'streams',
     description:
-      'Stream history for one track or one artist: per platform and source, the running total, plays in the window, the last 7 days versus the 7 before, and daily points. The first day of tracking (trackedSince) has no plays figure (null): growth is counted from the second reading. Sources are reported separately: "spotscraper" (Spotify play counts), "youtube-data-api" (official YouTube views), "licensed-provider" (licensed DSP counts) and "statement-import" (exact units per distributor statement period, months in arrears).',
+      'Stream history for one track or one artist: per platform and source, the running total, plays in the window, the last 7 days versus the 7 before, and daily points. The first day of tracking (trackedSince) has no plays figure (null): growth is counted from the second reading. Sources are reported separately: "spotscraper" (Spotify play counts), "youtube-data-api" or "youtube-scraper" (public YouTube views, through the API or Apify; the art track is the YouTube Music upload), "licensed-provider" (licensed DSP counts) and "statement-import" (exact units per distributor statement period, months in arrears).',
     input: z.object({ trackId: z.uuid().optional(), artistId: z.uuid().optional(), days: z.number().int().min(7).max(365).default(90) }).refine((v) => v.trackId || v.artistId, 'Give a trackId or an artistId'),
     permission: 'streams:read',
     risk: 'read',

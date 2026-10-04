@@ -50,6 +50,15 @@ export class ApifyClient {
       } catch (err) {
         if (!(err instanceof ProviderError)) throw err;
         const status = err.upstreamStatus;
+        // Apify stops a run that reaches the result cap and reports it as "did not succeed", though
+        // the results are saved. Read them from the run's dataset rather than losing what was paid for.
+        const aborted = err.message.match(/run ID: ([A-Za-z0-9]+)\b.*status: ABORTED/);
+        if (aborted) {
+          const items = await fetchJson<T[]>(`${API}/actor-runs/${aborted[1]}/dataset/items?clean=true&limit=${opts.maxItems}`, { provider: 'apify', headers: { authorization: `Bearer ${this.token}` }, timeoutMs: 60_000, retries: 2, signal: opts.signal });
+          const list = Array.isArray(items) ? items.slice(0, opts.maxItems) : [];
+          this.results += list.length;
+          return list;
+        }
         if (status === 402 && /concurrent/i.test(err.message) && attempt < 5) {
           await sleep(5_000 * (attempt + 1));
           continue;

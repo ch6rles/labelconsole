@@ -13,6 +13,8 @@ export class FakeApify extends ApifyClient {
   runs: Array<{ actor: string; input: Record<string, unknown>; maxItems: number }> = [];
   /** Items to return for an Actor, overriding the recorded social fixtures. */
   answers = new Map<string, unknown[]>();
+  /** Answers that depend on the input; checked first. */
+  respond: ((actor: string, input: Record<string, unknown>) => unknown[] | undefined) | null = null;
   failWith: Error | null = null;
   constructor() {
     super('test-token');
@@ -25,6 +27,8 @@ export class FakeApify extends ApifyClient {
     return items as T[];
   }
   private answer(actor: string, input: Record<string, unknown>): unknown[] {
+    const custom = this.respond?.(actor, input);
+    if (custom) return custom;
     if (this.answers.has(actor)) return this.answers.get(actor)!;
     if (actor === 'clockworks/tiktok-scraper') {
       if (input.profiles) return apifyFixture('tiktok-profile');

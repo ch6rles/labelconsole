@@ -1,6 +1,7 @@
 import '../types';
 import { createHmac } from 'node:crypto';
 import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
+import { apifyFor, type ApifyClient } from '@labelconsole/core/apify';
 import { withSystemOrg } from '@labelconsole/core/context';
 import { systemDb } from '@labelconsole/core/db/client';
 import { organizations } from '@labelconsole/core/db/schema';
@@ -21,7 +22,8 @@ import { licensedAdapter, licensedStreamProvider, type LicensedStreamSecret } fr
 import { spotifyAdapter } from '../sources/spotify';
 import { statementPeriodTotals } from '../sources/statements';
 import type { Snapshot, TrackRef } from '../sources/types';
-import { AUTO_CONFIRM, REVIEW, scoreCandidates, searchVideos, youtubeAdapter } from '../sources/youtube';
+import { fetchViewsApify, searchVideosApify } from '../sources/youtube-apify';
+import { AUTO_CONFIRM, REVIEW, scoreCandidates, searchVideos, youtubeAdapter, type SearchCandidate } from '../sources/youtube';
 import {
   activeTrackIds,
   backfillRegistry,
@@ -33,13 +35,14 @@ import {
   promoteSpotifyPrimaries,
   recordArtistStats,
   recordSnapshots,
+  youtubeScrapedToday,
   registerTrack,
   rollupStatementCounts,
   spotifyPrimaries,
   type ArtistStatsInput,
 } from '../service';
 
-export const NO_YOUTUBE_KEY = 'Add a YouTube Data API key under Settings → Integrations to track YouTube views';
+export const NO_YOUTUBE_KEY = 'Add a YouTube Data API key (free) or an Apify token under Settings → Integrations to track YouTube views';
 export const NO_SPOTSCRAPER_KEY = 'Add a SpotScraper key under Settings → Integrations to track Spotify plays';
 const POLL_SLOT_MS = 15 * 60_000;
 /** An ISRC with no Spotify match is searched again after this long. */
@@ -48,6 +51,22 @@ const SPOTIFY_RECHECK_MS = 7 * 86400_000;
 async function youtubeKey(job: JobContext) {
   const s = await job.withOrg((ctx) => readSecret(ctx, 'youtube'));
   return s?.secret.apiKey || env().YOUTUBE_API_KEY || null;
+}
+
+/** How YouTube is read for this label: the free Data API when it has a key, else Apify when it has a token. */
+async function youtubeReader(job: JobContext): Promise<{ key: string } | { apify: ApifyClient } | null> {
+  const key = await youtubeKey(job);
+  if (key) return { key };
+  const apify = await job.withOrg((ctx) => apifyFor(ctx));
+  return apify ? { apify } : null;
+}
+
+/** Bill Apify results to the label's usage counters. */
+async function countApify(job: JobContext, client: ApifyClient) {
+  if (!client.results) return;
+  const n = client.results;
+  client.results = 0;
+  await job.withOrg((ctx) => recordUsage(ctx, 'apify_results', n));
 }
 
 /** Bill SpotScraper requests to the label's usage counters (SpotScraper charges per request). */
@@ -148,7 +167,7 @@ export const jobs = [
         from stream_tracks
         where status = 'pending_match'
           and (last_resolved_at is null and created_at < now() - interval '1 hour'
-               or last_resolved_at < now() - case when last_error = ${NO_YOUTUBE_KEY} then interval '1 day' else interval '7 days' end)
+               or last_resolved_at < now() - case when last_error like 'Add a YouTube Data API key%' or last_error like 'YouTube search (Apify)%' then interval '1 day' else interval '7 days' end)
       ) t where rn <= 5`)) as unknown as Array<{ id: string; org_id: string }>;
     for (const s of stale) {
       if (!(await streamsEnabled(s.org_id))) continue;
@@ -165,8 +184,9 @@ export const jobs = [
     const info = await job.withOrg(async (ctx) => {
       const [row] = await ctx.tx.select({ st: streamTracks, title: tracks.title, durationMs: tracks.durationMs }).from(streamTracks).innerJoin(tracks, eq(tracks.id, streamTracks.trackId)).where(eq(streamTracks.id, data.streamTrackId));
       if (!row) return null;
-      const names = await ctx.tx.select({ name: artists.name }).from(trackArtists).innerJoin(artists, eq(artists.id, trackArtists.artistId)).where(and(eq(trackArtists.trackId, row.st.trackId), eq(trackArtists.role, 'primary')));
-      return { ...row, artists: names.map((n) => n.name), videos: await confirmedVideos(ctx, [row.st.trackId]) };
+      const names = await ctx.tx.select({ name: artists.name, aliases: artists.aliases }).from(trackArtists).innerJoin(artists, eq(artists.id, trackArtists.artistId)).where(and(eq(trackArtists.trackId, row.st.trackId), eq(trackArtists.role, 'primary')));
+      // Aliases (such as the name on Spotify) count when matching channels, after the roster names.
+      return { ...row, artists: [...new Set([...names.map((n) => n.name), ...names.flatMap((n) => n.aliases)])], videos: await confirmedVideos(ctx, [row.st.trackId]) };
     });
     if (!info || info.st.status === 'paused') return;
     const trackId = info.st.trackId;
@@ -188,20 +208,34 @@ export const jobs = [
     let candidates = 0;
     let picks: Array<{ variant: string; confidence: number }> = [];
     if (info.videos.length === 0) {
-      const key = await youtubeKey(job);
-      if (!key) youtubeNote = NO_YOUTUBE_KEY;
+      const reader = await youtubeReader(job);
+      if (!reader) youtubeNote = NO_YOUTUBE_KEY;
       else {
-        const found = await searchVideos(key, `${info.artists[0] ?? ''} ${info.title}`.trim());
+        const q = `${info.artists[0] ?? ''} ${info.title}`.trim();
+        let found: SearchCandidate[] = [];
+        let searchError: string | null = null;
+        if ('key' in reader) found = await searchVideos(reader.key, q);
+        else {
+          try {
+            found = await searchVideosApify(reader.apify, q);
+          } catch (err) {
+            // A paid search is never retried by the queue; the scheduler tries again tomorrow.
+            job.log.warn({ err: (err as Error).message, trackId }, 'youtube search via apify failed');
+            searchError = `YouTube search (Apify): ${(err as Error).message.slice(0, 200)}`;
+          } finally {
+            await countApify(job, reader.apify);
+          }
+        }
         candidates = found.length;
         const verdicts = scoreCandidates({ title: info.title, artists: info.artists, durationMs: info.durationMs }, found);
         const chosen = [verdicts.find((v) => v.variant === 'topic'), verdicts.find((v) => v.variant === 'official')].filter((v): v is NonNullable<typeof v> => Boolean(v && v.confidence >= REVIEW));
         picks = chosen;
         await job.withOrg(async (ctx) => {
           for (const v of chosen) {
-            await upsertIdentity(ctx, { entityType: 'track', entityId: trackId, platform: 'youtube', externalId: v.videoId, url: `https://www.youtube.com/watch?v=${v.videoId}`, source: 'youtube-search', confidence: v.confidence, status: v.confidence >= AUTO_CONFIRM ? 'confirmed' : 'pending_review', variant: v.variant });
+            await upsertIdentity(ctx, { entityType: 'track', entityId: trackId, platform: 'youtube', externalId: v.videoId, url: `https://www.youtube.com/watch?v=${v.videoId}`, source: 'key' in reader ? 'youtube-search' : 'youtube-scraper-search', confidence: v.confidence, status: v.confidence >= AUTO_CONFIRM ? 'confirmed' : 'pending_review', variant: v.variant });
           }
         });
-        if (chosen.length === 0) youtubeNote = candidates ? 'No confident YouTube match; paste the video link on the Matching page' : 'No YouTube video found for this track';
+        if (chosen.length === 0) youtubeNote = searchError ?? (candidates ? 'No confident YouTube match; paste the video link on the Matching page' : 'No YouTube video found for this track');
       }
     }
 
@@ -236,19 +270,36 @@ export const jobs = [
     const errors = new Map<string, string>();
     const snapshots: Snapshot[] = [];
 
-    // YouTube: official view counts, videos.list only.
+    // YouTube: public view counts, through videos.list with a key, else through Apify once a day per track.
     const ytRefs: TrackRef[] = videos.map((v) => ({ trackId: v.trackId, platform: 'youtube', externalId: v.externalId }));
     if (ytRefs.length) {
-      const key = await youtubeKey(job);
-      if (!key) for (const r of ytRefs) errors.set(r.trackId, NO_YOUTUBE_KEY);
-      else {
+      const reader = await youtubeReader(job);
+      if (!reader) for (const r of ytRefs) errors.set(r.trackId, NO_YOUTUBE_KEY);
+      else if ('key' in reader) {
         try {
-          const res = await youtubeAdapter.fetch({ apiKey: key }, ytRefs);
+          const res = await youtubeAdapter.fetch({ apiKey: reader.key }, ytRefs);
           snapshots.push(...res.snapshots);
           for (const m of res.missing) errors.set(m.trackId, `YouTube video ${m.externalId} is unavailable or hides its view count`);
         } catch (err) {
           if (err instanceof RateLimitedError || isTransient(err)) throw err; // retried or delayed by the worker
           for (const r of ytRefs) errors.set(r.trackId, `YouTube: ${(err as Error).message.slice(0, 200)}`);
+        }
+      } else {
+        // Billed per video, so a track is read once per day: today's reading is enough for daily plays.
+        const readToday = await job.withOrg((ctx) => youtubeScrapedToday(ctx, [...new Set(ytRefs.map((r) => r.trackId))]));
+        const refs = ytRefs.filter((r) => !readToday.has(r.trackId));
+        try {
+          if (refs.length) {
+            const res = await fetchViewsApify(reader.apify, refs);
+            snapshots.push(...res.snapshots);
+            for (const m of res.missing) errors.set(m.trackId, `YouTube video ${m.externalId} is unavailable or hides its view count`);
+          }
+        } catch (err) {
+          // Never retried automatically: a retry would pay for the same videos again. The next daily read picks them up.
+          job.log.warn({ err: (err as Error).message }, 'youtube via apify failed');
+          for (const r of refs) errors.set(r.trackId, `YouTube (Apify): ${(err as Error).message.slice(0, 200)}`);
+        } finally {
+          await countApify(job, reader.apify);
         }
       }
     }

@@ -1,9 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { isPublicHttps } from '@labelconsole/core/net';
 import { evaluateRules, type RuleLike } from './service/alerts';
 import { statementPeriodTotals } from './sources/statements';
 import { platformSlug } from './sources/types';
 import { parseIsoDuration, parseVideoId, scoreCandidates, type SearchCandidate } from './sources/youtube';
+import { candidateFrom } from './sources/youtube-apify';
 
 const cand = (over: Partial<SearchCandidate>): SearchCandidate => ({ videoId: 'aaaaaaaaaaa', title: 'Tidewater', channelTitle: 'Mara Ellis - Topic', channelId: 'UC1', durationSec: 214, viewCount: 1000, publishedAt: null, description: 'Provided to YouTube by DistroKid', ...over });
 
@@ -51,6 +54,30 @@ describe('youtube matching', () => {
   it('penalises a topic upload whose length is far off', () => {
     const [v] = scoreCandidates(track, [cand({ durationSec: 400 })]);
     expect(v.confidence).toBeLessThan(0.85);
+  });
+});
+
+describe('youtube through Apify', () => {
+  /** A live search result from apidojo/youtube-scraper, descriptions trimmed. */
+  const search = JSON.parse(readFileSync(join(__dirname, 'sources/__fixtures__/youtube-apify-search.json'), 'utf8')) as unknown[];
+
+  it('reads scraped videos as search candidates', () => {
+    const c = search.map(candidateFrom).filter((x): x is SearchCandidate => Boolean(x));
+    expect(c).toHaveLength(5);
+    expect(c.find((x) => x.videoId === '3BFTio5296w')).toMatchObject({ title: 'Never Gonna Give You Up (2022 Remaster)', channelTitle: 'Rick Astley - Topic', durationSec: 214, viewCount: 12947987, description: expect.stringMatching(/^Provided to YouTube by BMG/) });
+    expect(candidateFrom({ id: 'bad id', views: 3 })).toBeNull();
+    expect(candidateFrom({ type: 'channel', id: 'UCuAXFkgsw1' })).toBeNull();
+  });
+
+  it('matches the art track (what YouTube Music plays) with confidence, and the official video for review', () => {
+    const c = search.map(candidateFrom).filter((x): x is SearchCandidate => Boolean(x));
+    const verdicts = scoreCandidates({ title: 'Never Gonna Give You Up', artists: ['Rick Astley'], durationMs: 213_573 }, c);
+    expect(verdicts[0]).toMatchObject({ videoId: '3BFTio5296w', variant: 'topic' });
+    expect(verdicts[0].confidence).toBeGreaterThanOrEqual(0.85);
+    const official = verdicts.find((v) => v.variant === 'official');
+    expect(official?.videoId).toBe('dQw4w9WgXcQ');
+    // Re-uploads by other channels stay below the review threshold, so they are never picked.
+    expect(verdicts.find((v) => v.videoId === 'miLcaqq2Zpk')!.confidence).toBeLessThan(0.5);
   });
 });
 

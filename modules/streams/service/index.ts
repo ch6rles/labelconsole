@@ -5,6 +5,7 @@ import { patchOf } from '@labelconsole/core/zod';
 import type { ServiceContext } from '@labelconsole/core/context';
 import { credentials, organizations } from '@labelconsole/core/db/schema';
 import { env } from '@labelconsole/core/env';
+import { apifyConfigured } from '@labelconsole/core/apify';
 import { spotifyIdFrom, spotScraperConfigured } from '@labelconsole/core/spotscraper';
 import { NotFoundError, ValidationError } from '@labelconsole/core/errors';
 import { enabledModuleIds, enrich } from '@labelconsole/core/modules';
@@ -22,8 +23,8 @@ import { DEFAULT_RULES, evaluateRules, nextPollAt, type DayPoint } from './alert
 export { DEFAULT_RULES, evaluateRules, nextPollAt } from './alerts';
 
 /** Sources that report running totals; their daily deltas are plays. Statements are period totals. */
-export const POLLED_SOURCES: StreamSource[] = ['youtube-data-api', 'spotscraper', 'licensed-provider'];
-const polled = sql.raw(`('youtube-data-api','spotscraper','licensed-provider')`);
+export const POLLED_SOURCES: StreamSource[] = ['youtube-data-api', 'youtube-scraper', 'spotscraper', 'licensed-provider'];
+const polled = sql.raw(`('youtube-data-api','youtube-scraper','spotscraper','licensed-provider')`);
 
 const today = () => new Date().toISOString().slice(0, 10);
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400_000).toISOString().slice(0, 10);
@@ -312,7 +313,8 @@ export async function recordSnapshots(ctx: ServiceContext, snaps: Snapshot[]) {
 async function rollupDay(ctx: ServiceContext, trackId: string, platform: string, source: StreamSource, day: string) {
   const start = `${day}T00:00:00Z`;
   const end = new Date(Date.parse(start) + 86400_000).toISOString();
-  if (source !== 'youtube-data-api') return rollupSingle(ctx, trackId, platform, source, day, start, end);
+  // YouTube sums every confirmed video of a track (art track and official video); other sources poll one ID.
+  if (source !== 'youtube-data-api' && source !== 'youtube-scraper') return rollupSingle(ctx, trackId, platform, source, day, start, end);
   const [row] = (await ctx.tx.execute(sql`
     with cur as (
       select distinct on (coalesce(external_id, '')) coalesce(external_id, '') as ext, count
@@ -578,6 +580,16 @@ export async function plays28dByArtist(ctx: ServiceContext, artistIds: string[])
   return rows.map((r) => ({ artistId: r.artistId, plays: Number(r.plays) }));
 }
 
+/** Tracks whose YouTube views were already read through Apify today (it bills per video, so once a day is the rule). */
+export async function youtubeScrapedToday(ctx: ServiceContext, trackIds: string[]) {
+  if (trackIds.length === 0) return new Set<string>();
+  const rows = await ctx.tx
+    .selectDistinct({ trackId: streamDaily.trackId })
+    .from(streamDaily)
+    .where(and(inArray(streamDaily.trackId, trackIds), eq(streamDaily.source, 'youtube-scraper'), eq(streamDaily.day, new Date().toISOString().slice(0, 10))));
+  return new Set(rows.map((r) => r.trackId));
+}
+
 /** Which of these Spotify track or release IDs are in the catalogue (confirmed matches), keyed by Spotify ID. */
 export async function catalogueBySpotifyIds(ctx: ServiceContext, entity: 'track' | 'release', spotifyIds: string[]) {
   const out = new Map<string, { id: string; title: string }>();
@@ -742,8 +754,12 @@ export async function historyForAgent(ctx: ServiceContext, input: { trackId?: st
 /** Which sources can run for this label, for the overview's setup notes. */
 export async function sourceStatus(ctx: ServiceContext) {
   const rows = await ctx.tx.select({ provider: credentials.provider, metadata: credentials.metadata }).from(credentials).where(and(inArray(credentials.provider, ['youtube', 'licensed_streams']), isNull(credentials.revokedAt)));
+  const youtubeKey = rows.some((r) => r.provider === 'youtube') || Boolean(env().YOUTUBE_API_KEY);
+  // Without a key, YouTube views come through Apify once a day when the label has a token.
+  const youtubeViaApify = !youtubeKey && (await apifyConfigured(ctx));
   return {
-    youtube: rows.some((r) => r.provider === 'youtube') || Boolean(env().YOUTUBE_API_KEY),
+    youtube: youtubeKey || youtubeViaApify,
+    youtubeViaApify,
     youtubePlatformKey: !rows.some((r) => r.provider === 'youtube') && Boolean(env().YOUTUBE_API_KEY),
     spotify: await spotScraperConfigured(ctx),
     licensed: rows.some((r) => r.provider === 'licensed_streams'),

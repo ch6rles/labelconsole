@@ -44,6 +44,7 @@ export const PLATFORM_LABEL: Record<string, string> = {
 
 export const SOURCE_LABEL: Record<StreamSource, string> = {
   'youtube-data-api': 'YouTube Data API',
+  'youtube-scraper': 'YouTube views (Apify)',
   spotscraper: 'SpotScraper',
   'licensed-provider': 'Licensed provider',
   'statement-import': 'Distributor statements',

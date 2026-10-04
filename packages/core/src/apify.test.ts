@@ -43,6 +43,18 @@ describe('ApifyClient', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('reads the results of a run Apify stopped at the result cap', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(json({ error: { type: 'run-failed', message: 'Actor run did not succeed (run ID: ASojjj7IabU1bRdsb, status: ABORTED).' } }, 400))
+      .mockResolvedValueOnce(json([{ id: 'a' }, { id: 'b' }]));
+    vi.stubGlobal('fetch', fetch);
+    const client = new ApifyClient('t');
+    expect(await client.run('apidojo/youtube-scraper', { keywords: ['x'] }, { maxItems: 2 })).toEqual([{ id: 'a' }, { id: 'b' }]);
+    expect(fetch.mock.calls[1][0]).toBe('https://api.apify.com/v2/actor-runs/ASojjj7IabU1bRdsb/dataset/items?clean=true&limit=2');
+    expect(client.results).toBe(2);
+  });
+
   it('explains token, credit and Actor problems, and never starts a paid run twice on a server error', async () => {
     const client = new ApifyClient('t');
     const failWith = async (status: number, body: unknown) => {

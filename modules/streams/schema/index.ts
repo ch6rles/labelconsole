@@ -26,7 +26,7 @@ export const streamTracks = pgTable(
   (t) => [uniqueIndex('stream_tracks_track_idx').on(t.orgId, t.trackId), index('stream_tracks_due_idx').on(t.nextPollAt)],
 );
 
-export const STREAM_SOURCES = ['youtube-data-api', 'spotscraper', 'licensed-provider', 'statement-import'] as const;
+export const STREAM_SOURCES = ['youtube-data-api', 'youtube-scraper', 'spotscraper', 'licensed-provider', 'statement-import'] as const;
 export type StreamSource = (typeof STREAM_SOURCES)[number];
 
 /** Daily rollup per track/platform/source for charts and deltas. */

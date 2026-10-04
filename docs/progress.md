@@ -300,6 +300,29 @@ The owner asked to show monthly listeners and live stream counts, to bring an ar
   - **Lists:** monthly listeners and 7-day plays.
   - **Agent tools:** every one, with fake clients.
 
+## YouTube views without a Data API key
+
+The owner asked whether YouTube Music streams can be tracked without a YouTube Data API key.
+
+- **What YouTube counts:**
+  - **YouTube Music plays:** a song's plays on YouTube Music are the views of its art track, the "Artist - Topic" upload marked "Provided to YouTube by <distributor>". YouTube Music shows that number as plays. Streams already matches the art track first, and the official video separately.
+  - **Exact streams:** exact, royalty-bearing YouTube counts only arrive in distributor statements, which Streams imports as their own source.
+- **New source, `youtube-scraper`:**
+  - **When it's used:** only when a label has an Apify token and no YouTube key. The free Data API stays first, and its daily quota covers thousands of tracks.
+  - **How it works:** it reads the same public view counts through the Apify Actor `apidojo/youtube-scraper`, about $0.0005 per video.
+  - **Cost cap:** each track is read at most once per UTC day.
+  - **Matching:** search for matching also falls back to it, at about ten results per track.
+  - **No retries:** a failed read or search is never retried by the queue, because a retry would pay again. The track shows the error, and the next daily read or re-match picks it up.
+  - **Kept separate:** readings are recorded as their own source and never blended with the API's.
+- **Apify client:** when Apify stops a finished run at the result cap and reports it as failed, the results are now read from the run's dataset instead of being lost.
+- **Matching improvements:**
+  - When two candidates score the same (for example a subtitled re-post on the artist's own channel), the one with more views wins.
+  - Artist aliases, such as the name on Spotify, count when matching channels.
+- **Verified live:**
+  - Real view counts read through the polling path, with a removed video reported as missing rather than zero.
+  - Real searches matched cautiously: a "Super Slowed" art track was rejected as a different recording, re-uploads by other channels stayed below the review threshold, and an artist's own upload went to review.
+- **Tests:** 194 passing, including parsing and matching against a recorded live search, and an end-to-end match and poll with the once-a-day rule.
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.

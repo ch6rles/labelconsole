@@ -160,8 +160,10 @@ export function scoreCandidates(track: { title: string; artists: string[]; durat
     }
     out.push({ videoId: c.videoId, variant: isTopic ? 'topic' : 'official', confidence: Math.max(0, Math.min(1, Number(score.toFixed(3)))), reasons });
   }
-  // Best topic match first, then best official video.
-  return out.sort((a, b) => (a.variant === b.variant ? b.confidence - a.confidence : a.variant === 'topic' ? -1 : 1));
+  // Best topic match first, then best official video. On a tie (e.g. a subtitled re-post on the artist's own
+  // channel), the video with more views is the canonical one.
+  const views = new Map(candidates.map((c) => [c.videoId, c.viewCount ?? 0]));
+  return out.sort((a, b) => (a.variant === b.variant ? b.confidence - a.confidence || views.get(b.videoId)! - views.get(a.videoId)! : a.variant === 'topic' ? -1 : 1));
 }
 
 /** Confidence at or above this is confirmed automatically; between REVIEW and AUTO goes to the review queue. */
