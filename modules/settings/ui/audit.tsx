@@ -69,7 +69,7 @@ export default async function AuditPage({ run, searchParams }: PageProps) {
           <span className="lc-section-label">{day}</span>
           <div className="lc-list">
             {list.map((e) => (
-              <div key={e.id} style={{ display: 'grid', gridTemplateColumns: '56px 28px minmax(140px,0.6fr) minmax(0,2fr) 110px', gap: 12, alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid var(--lc-divider)' }}>
+              <div key={e.id} className="lc-audit-row">
                 <span className="lc-mono lc-muted" style={{ fontSize: 12 }}>
                   {fmt.time(e.createdAt)}
                 </span>

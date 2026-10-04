@@ -59,7 +59,7 @@ export function SplitEditor({ trackId, kind, initial, disabled }: { trackId: str
   return (
     <div className="lc-stack">
       {parties.map((p, i) => (
-        <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(140px,1.4fr) minmax(140px,1fr) 90px 32px', gap: 8 }}>
+        <div key={i} className="lc-split-row">
           <input className="lc-input" placeholder="Party name" value={p.name} disabled={disabled} onChange={(e) => setParties((l) => l.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
           <input className="lc-input" placeholder="Email (optional)" value={p.email ?? ''} disabled={disabled} onChange={(e) => setParties((l) => l.map((x, j) => (j === i ? { ...x, email: e.target.value } : x)))} />
           <input className="lc-input" type="number" step="0.01" min={0} max={100} value={p.sharePct} disabled={disabled} onChange={(e) => setParties((l) => l.map((x, j) => (j === i ? { ...x, sharePct: Number(e.target.value) } : x)))} aria-label="Share percent" />

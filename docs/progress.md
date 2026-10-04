@@ -323,6 +323,32 @@ The owner asked whether YouTube Music streams can be tracked without a YouTube D
   - Real searches matched cautiously: a "Super Slowed" art track was rejected as a different recording, re-uploads by other channels stayed below the review threshold, and an artist's own upload went to review.
 - **Tests:** 194 passing, including parsing and matching against a recorded live search, and an end-to-end match and poll with the once-a-day rule.
 
+## Phone layout and stream charts
+
+- **Fits a phone:** no page scrolls sideways at iPhone width. All 50 console pages were checked at 390 px, both with and without the page-level `overflow-x: clip` safety net.
+- **What caused the sideways scroll:**
+  - Grid and flex children that couldn't shrink below their content.
+  - Long key-value rows.
+  - The split-sheet party row and audit log rows, which now stack on narrow screens.
+  - Hidden pipeline selects that escaped their scroll container.
+- **New chart (`TimeSeriesChart`, in `packages/ui/src/timeseries.tsx`):** a line chart drawn at its real width, so text no longer stretches on a phone. It is used on:
+  - the catalogue track page;
+  - the artist page (plays and monthly listeners);
+  - the Streams track page;
+  - the Streams overview.
+- **What the chart shows:**
+  - Plays per day (or week, or month) and the running total.
+  - Range chips: 7, 28 and 90 days.
+  - A summary of the range: plays, average, best day and all-time total.
+  - A legend once there are two or more lines.
+  - A crosshair and tooltip that read every line at a date, by mouse, touch or arrow keys.
+  - A table view of the same numbers.
+- **How it handles edge cases:**
+  - A gap in readings shows as a gap.
+  - A source's first reading has no plays figure, so it isn't drawn as a drop to zero.
+  - A newly tracked song opens on its running total.
+- **Colours:** one fixed colour per platform (Spotify blue, YouTube orange, Apple Music aqua), from a palette checked for colour-blind separation.
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.

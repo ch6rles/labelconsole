@@ -49,8 +49,12 @@ button {
   position: absolute;
   width: 1px;
   height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
   overflow: hidden;
   clip: rect(0 0 0 0);
+  clip-path: inset(50%);
   white-space: nowrap;
 }
 .lc-ellipsis {
@@ -345,6 +349,9 @@ button {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* Last line of defence on phones: nothing inside may make the page scroll sideways.
+     clip (not hidden) keeps the sticky header working. Wide tables and boards scroll in their own box. */
+  overflow-x: clip;
 }
 .lc-header {
   position: sticky;
@@ -590,7 +597,7 @@ button {
 }
 .lc-grid-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 12px;
 }
 .lc-grid-2 {
@@ -602,6 +609,29 @@ button {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 12px;
+}
+/* Grid and stack children may shrink to the column: wide content (tables, charts) scrolls inside them instead of stretching the page. */
+.lc-page > *,
+.lc-grid-stats > *,
+.lc-grid-2 > *,
+.lc-grid-cards > *,
+.lc-stack > * {
+  min-width: 0;
+}
+/* A split sheet party: name, email, share, remove. */
+.lc-split-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 90px 32px;
+  gap: 8px;
+}
+/* An audit log entry: time, icon, who, what, area. */
+.lc-audit-row {
+  display: grid;
+  grid-template-columns: 56px 28px minmax(140px, 0.6fr) minmax(0, 2fr) 110px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--lc-divider);
 }
 .lc-stack {
   display: flex;
@@ -925,9 +955,13 @@ a.lc-stat:hover {
 }
 .lc-kv-k {
   color: var(--lc-muted);
+  min-width: 0;
 }
 .lc-kv-v {
   text-align: right;
+  min-width: 0;
+  /* Long links and IDs wrap instead of pushing the page wider than the screen. */
+  overflow-wrap: anywhere;
 }
 .lc-kv--divided {
   padding: 7px 0;
@@ -1781,6 +1815,230 @@ button.lc-table-row {
   stroke-width: 1;
 }
 
+/* Time series (TimeSeriesChart): controls, range summary, legend, plot, tooltip, table. */
+.lc-ts {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.lc-ts-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.lc-ts-toggle {
+  display: inline-flex;
+}
+.lc-ts-controls .lc-tab {
+  padding: 5px 10px;
+  font-size: var(--lc-text-sm);
+  white-space: nowrap;
+}
+.lc-ts-toggle .lc-tab + .lc-tab {
+  margin-left: -1px;
+}
+.lc-ts-toggle .lc-tab.is-active {
+  position: relative;
+}
+.lc-ts-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  gap: 12px 16px;
+  margin: 0;
+}
+.lc-ts-summary > div {
+  min-width: 0;
+}
+.lc-ts-summary dt {
+  font-family: var(--lc-font-mono);
+  font-size: var(--lc-text-2xs);
+  letter-spacing: var(--lc-tracking-label);
+  text-transform: uppercase;
+  color: var(--lc-muted);
+}
+.lc-ts-summary dd {
+  margin: 4px 0 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  font-size: var(--lc-text-3xl);
+  font-weight: 600;
+  color: var(--lc-ink);
+  font-variant-numeric: tabular-nums;
+}
+.lc-ts-summary dd span {
+  font-size: var(--lc-text-sm);
+  font-weight: 400;
+  color: var(--lc-muted);
+}
+.lc-ts-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: var(--lc-text-sm);
+  color: var(--lc-text-2);
+}
+.lc-ts-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.lc-ts-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+.lc-ts-legend b {
+  font-family: var(--lc-font-mono);
+  font-weight: 500;
+  color: var(--lc-ink);
+}
+.lc-ts-plot {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  outline: none;
+}
+.lc-ts-plot:focus-visible {
+  box-shadow: 0 0 0 2px var(--lc-accent-soft-border);
+}
+.lc-ts-svg {
+  display: block;
+  overflow: visible;
+}
+.lc-ts-grid {
+  stroke: var(--lc-divider);
+  stroke-width: 1;
+}
+.lc-ts-axis {
+  font-family: var(--lc-font-mono);
+  font-size: 10px;
+  fill: var(--lc-muted);
+}
+.lc-ts-end {
+  font-family: var(--lc-font-mono);
+  font-size: 11px;
+  fill: var(--lc-text-2);
+}
+.lc-ts-cross {
+  stroke: var(--lc-line-strong);
+  stroke-width: 1;
+}
+.lc-ts-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  text-align: center;
+  font-size: var(--lc-text-base);
+  color: var(--lc-muted);
+  border: 1px dashed var(--lc-border);
+}
+.lc-ts-tip {
+  position: absolute;
+  top: 6px;
+  z-index: 5;
+  width: max-content;
+  padding: 8px 10px;
+  background: var(--lc-surface);
+  border: 1px solid var(--lc-border);
+  box-shadow: var(--lc-shadow-pop);
+  font-size: var(--lc-text-sm);
+  pointer-events: none;
+}
+.lc-ts-tip-date {
+  margin-bottom: 4px;
+  font-family: var(--lc-font-mono);
+  font-size: var(--lc-text-xs);
+  color: var(--lc-muted);
+}
+.lc-ts-tip-row {
+  display: grid;
+  grid-template-columns: 8px auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1.5;
+}
+.lc-ts-tip-row i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.lc-ts-tip-row b {
+  font-weight: 600;
+  color: var(--lc-ink);
+  font-variant-numeric: tabular-nums;
+}
+.lc-ts-tip-row span {
+  color: var(--lc-text-3);
+  overflow-wrap: break-word;
+}
+.lc-ts-tip-total {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--lc-divider);
+}
+.lc-ts-tip-total b {
+  grid-column: 2;
+}
+.lc-ts-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: -6px;
+}
+.lc-ts-note {
+  margin: 0;
+  font-size: var(--lc-text-sm);
+  color: var(--lc-muted);
+}
+.lc-ts-table {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--lc-border);
+}
+.lc-ts-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--lc-text-sm);
+}
+.lc-ts-table th,
+.lc-ts-table td {
+  padding: 6px 10px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--lc-divider);
+  font-variant-numeric: tabular-nums;
+}
+.lc-ts-table th:first-child,
+.lc-ts-table td:first-child {
+  text-align: left;
+}
+.lc-ts-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--lc-surface-subtle);
+  font-weight: 500;
+  color: var(--lc-muted);
+}
+.lc-ts-table th i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 6px;
+}
+
 /* -------------------------------------------------------------- kanban -- */
 .lc-kanban {
   display: grid;
@@ -1792,6 +2050,8 @@ button.lc-table-row {
   align-items: start;
 }
 .lc-kanban-col {
+  /* Contains the visually hidden move-to selects, so they scroll with the board instead of widening the page. */
+  position: relative;
   background: var(--lc-bg-sidebar);
   border: 1px solid var(--lc-border);
   display: flex;
@@ -2157,6 +2417,41 @@ button.lc-table-row {
   }
   .lc-search {
     width: 100%;
+  }
+}
+@media (max-width: 640px) {
+  /* Split sheet party: name on its own line, then email, share and remove. */
+  .lc-split-row {
+    grid-template-columns: minmax(0, 1fr) 76px 32px;
+  }
+  .lc-split-row > :first-child {
+    grid-column: 1 / -1;
+  }
+  /* Audit entry: time, who and area on the first line, what happened under it. */
+  .lc-audit-row {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 4px 10px;
+    padding: 12px 14px;
+  }
+  .lc-audit-row > :nth-child(2) {
+    display: none;
+  }
+  .lc-audit-row > :nth-child(1) {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .lc-audit-row > :nth-child(3) {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+  .lc-audit-row > :nth-child(5) {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .lc-audit-row > :nth-child(4) {
+    grid-column: 2 / -1;
+    grid-row: 2;
   }
 }
 

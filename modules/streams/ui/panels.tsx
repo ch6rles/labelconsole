@@ -1,12 +1,11 @@
 import Link from 'next/link';
 import type { PanelProps } from '@labelconsole/core/web';
-import { Card, DataTable, EmptyState, KV, LineChart, ShareBars, StatCard, fmt } from '@labelconsole/ui';
+import { Card, DataTable, EmptyState, KV, ShareBars, StatCard, fmt } from '@labelconsole/ui';
+import { TimeSeriesChart } from '@labelconsole/ui/timeseries';
 import * as svc from '../service';
-import { platformColor, seriesName } from './shared';
+import { historyLines, PLAY_RANGES, platformColor } from './shared';
 
 const from90 = () => new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10);
-/** Chart points without the first reading of a series, which has a total but no plays figure yet. */
-const plotted = (s: { since: string | null; points: Array<{ day: string; delta: number }> }) => s.points.filter((p) => p.day !== s.since).map((p) => ({ x: p.day, y: p.delta }));
 
 /** On a catalogue track page: 90 days of plays and where the numbers come from. */
 export async function trackStreamsPanel({ entityId, run }: PanelProps) {
@@ -21,10 +20,7 @@ export async function trackStreamsPanel({ entityId, run }: PanelProps) {
   return (
     <div className="lc-card">
       <div className="lc-card-body lc-stack">
-        <LineChart series={polled.map((s, i) => ({ name: seriesName(s.platform, s.source), color: platformColor(s.platform, i), points: plotted(s) }))} height={170} />
-        {polled.map((s) => (
-          <KV key={`${s.platform}-${s.source}`} k={seriesName(s.platform, s.source)} v={<span className="lc-mono">{fmt.compact(s.points.at(-1)?.total ?? 0)} total · {fmt.compact(s.points.reduce((a, p) => a + p.delta, 0))} in 90 d</span>} />
-        ))}
+        <TimeSeriesChart title="Plays" series={historyLines(polled)} ranges={PLAY_RANGES} defaultRange={90} height={220} />
         <Link className="lc-btn lc-btn--link" href={`/streams/tracks/${entityId}`}>Open in Streams</Link>
       </div>
     </div>
@@ -40,7 +36,7 @@ export async function artistStreamsPanel({ entityId, run }: PanelProps) {
     <div className="lc-stack">
       <div className="lc-card">
         <div className="lc-card-body">
-          <LineChart series={polled.map((s, i) => ({ name: seriesName(s.platform, s.source), color: platformColor(s.platform, i), points: plotted(s) }))} height={170} />
+          <TimeSeriesChart title="Plays across the artist's tracks" series={historyLines(polled)} ranges={PLAY_RANGES} defaultRange={90} height={220} />
         </div>
       </div>
       <DataTable
@@ -73,7 +69,14 @@ export async function artistAudiencePanel({ entityId, run }: PanelProps) {
       {a.series.length > 1 && (
         <div className="lc-card">
           <div className="lc-card-body">
-            <LineChart series={[{ name: 'Monthly listeners', color: platformColor('spotify'), points: a.series.map((p) => ({ x: p.day, y: p.monthlyListeners })) }]} height={160} />
+            <TimeSeriesChart
+              title="Monthly listeners"
+              series={[{ id: 'listeners', name: 'Monthly listeners', color: platformColor('spotify'), points: a.series.map((p) => ({ day: p.day, total: p.monthlyListeners, delta: null })) }]}
+              metrics={['total']}
+              totalLabel="Monthly listeners"
+              summary={false}
+              height={200}
+            />
           </div>
         </div>
       )}

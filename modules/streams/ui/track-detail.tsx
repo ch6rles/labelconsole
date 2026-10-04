@@ -1,10 +1,11 @@
 import Link from 'next/link';
 import type { PageProps } from '@labelconsole/core/web';
-import { BarChart, Card, DataTable, EmptyState, Icon, InlineNote, KV, Legend, LineChart, Page, PageHeader, ShareBars, StatCard, SubTabs, fmt } from '@labelconsole/ui';
+import { BarChart, Card, DataTable, EmptyState, Icon, InlineNote, KV, Page, PageHeader, ShareBars, StatCard, SubTabs, fmt } from '@labelconsole/ui';
 import { ActionButton, FormModal } from '@labelconsole/ui/client';
+import { TimeSeriesChart } from '@labelconsole/ui/timeseries';
 import * as svc from '../service';
 import { platformLabel } from '../sources/types';
-import { platformColor, seriesName, STATUS_CHIP } from './shared';
+import { historyLines, seriesName, STATUS_CHIP } from './shared';
 
 export default async function StreamTrackPage({ run, params, session, searchParams, path }: PageProps) {
   const granularity = searchParams.g === 'week' ? 'week' : searchParams.g === 'month' ? 'month' : 'day';
@@ -58,19 +59,16 @@ export default async function StreamTrackPage({ run, params, session, searchPara
 
       <Card
         title="Plays"
-        sub="Daily change in the running totals. Each platform and source is its own line."
+        sub="Plays are the change in each source's running total; each platform and source is its own line. Hover or tap the chart to read a date."
         actions={
-          <span className="lc-row" style={{ gap: 12 }}>
+          <span className="lc-row" style={{ gap: 12, flexWrap: 'wrap' }}>
             <SubTabs items={[{ label: '28 d', href: q({ range: '28' }), active: range === 28 }, { label: '90 d', href: q({ range: '90' }), active: range === 90 }, { label: '1 y', href: q({ range: '365' }), active: range === 365 }]} />
             <SubTabs items={[{ label: 'Daily', href: q({ g: 'day' }), active: granularity === 'day' }, { label: 'Weekly', href: q({ g: 'week' }), active: granularity === 'week' }, { label: 'Monthly', href: q({ g: 'month' }), active: granularity === 'month' }]} />
           </span>
         }
       >
         {polled.length ? (
-          <>
-            <Legend items={polled.map((s, i) => ({ label: seriesName(s.platform, s.source), color: platformColor(s.platform, i) }))} />
-            <LineChart series={polled.map((s, i) => ({ name: seriesName(s.platform, s.source), color: platformColor(s.platform, i), points: s.points.filter((p) => !isFirst(s, p.day)).map((p) => ({ x: p.day, y: p.delta })) }))} height={240} />
-          </>
+          <TimeSeriesChart title="Plays" series={historyLines(polled, granularity)} unit={granularity} rangeLabel={range === 365 ? '1 y' : `${range} d`} height={260} />
         ) : (
           <EmptyState icon="monitoring" title="No readings yet">{st?.status === 'tracking' ? 'The first poll records the running total; plays per day start from the second reading.' : 'Readings start once the track has a Spotify ID (found by ISRC with a SpotScraper key) or a confirmed YouTube video.'}</EmptyState>
         )}

@@ -1,10 +1,11 @@
 import Link from 'next/link';
 import type { PageProps } from '@labelconsole/core/web';
-import { Banner, Card, DataTable, Legend, LineChart, Page, PageHeader, StatCard, Summary, fmt, type Column } from '@labelconsole/ui';
+import { Banner, Card, DataTable, Page, PageHeader, StatCard, Summary, fmt, type Column } from '@labelconsole/ui';
 import { ActionButton } from '@labelconsole/ui/client';
+import { TimeSeriesChart } from '@labelconsole/ui/timeseries';
 import * as svc from '../service';
 import { platformLabel } from '../sources/types';
-import { platformColor, playsSeries } from './shared';
+import { PLAY_RANGES, platformLines } from './shared';
 
 type Mover = Awaited<ReturnType<typeof svc.movers>>['gainers'][number];
 
@@ -12,7 +13,6 @@ export default async function StreamsOverviewPage({ run, session, searchParams, 
   const window = searchParams.window === '28d' ? '28d' : '7d';
   const [o, m, sources] = await run((ctx) => Promise.all([svc.overview(ctx), svc.movers(ctx, { window, limit: 8 }), svc.sourceStatus(ctx)]));
   const canManage = session.permissions.has('streams:manage');
-  const series = playsSeries(o.daily, 90);
 
   const moverCols: Column<Mover>[] = [
     { key: 't', header: 'Track', width: 'minmax(200px,1.4fr)', render: (r) => <span className="lc-cell-stack"><span className="lc-cell-strong lc-ellipsis">{r.title}</span><span className="lc-cell-sub lc-ellipsis">{r.artists.join(', ') || '—'}</span></span> },
@@ -50,8 +50,8 @@ export default async function StreamsOverviewPage({ run, session, searchParams, 
         <StatCard label="LATEST STATEMENT" icon="receipt_long" value={o.statement ? fmt.compact(o.statement.units) : '—'} note={o.statement ? `units, period ending ${fmt.date(o.statement.periodEnd)}` : 'import one under Finance'} href="/finance/statements" />
         <StatCard label="OPEN ALERTS" icon="notifications_active" value={String(o.openAlerts)} note="spikes, drops, milestones" href="/streams/alerts" />
       </div>
-      <Card title="Plays per day · 90 days" actions={<Legend items={series.map((s, i) => ({ label: s.name, color: s.color ?? platformColor('', i) }))} />}>
-        <LineChart series={series} height={240} />
+      <Card title="Plays per day" sub="Polled sources, one line per platform. Hover or tap the chart to read a date.">
+        <TimeSeriesChart title="Plays per day" series={platformLines(o.daily)} ranges={PLAY_RANGES} defaultRange={90} height={260} />
       </Card>
       <div className="lc-row" style={{ justifyContent: 'space-between' }}>
         <h2 className="lc-h2" style={{ fontSize: 17 }}>Top movers</h2>
