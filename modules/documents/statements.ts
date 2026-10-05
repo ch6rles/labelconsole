@@ -1,10 +1,13 @@
 import Papa from 'papaparse';
+import { readXlsx, type Cell } from '@labelconsole/core/xlsx';
 import type { StatementSummary } from './schema';
 
 /**
- * Distributor statement parsing. Exports differ per distributor, so columns
- * are found by header name; amounts handle currency symbols and both decimal
- * conventions; periods accept the common month formats.
+ * Distributor statement parsing, from CSV or .xlsx exports. Exports differ
+ * per distributor, so the table is found by its header row (which need not be
+ * the first row) and columns by header name; amounts handle currency symbols
+ * and both decimal conventions; periods accept the common month formats and
+ * date ranges such as "2026-06-01 – 2026-07-31".
  */
 export type ParsedLine = {
   periodStart: string | null;
@@ -35,29 +38,38 @@ const HEADERS: Record<string, string[]> = {
 
 const normHeader = (h: string) => h.toLowerCase().replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
 
-export function mapColumns(headers: string[]) {
+type Column = keyof typeof HEADERS;
+
+/** Which column holds what, by index (two columns can share a header name). */
+export function mapColumnIndexes(headers: string[]): Partial<Record<Column, number>> {
   const norm = headers.map(normHeader);
-  const out: Partial<Record<keyof typeof HEADERS, string>> = {};
-  for (const [key, names] of Object.entries(HEADERS) as Array<[keyof typeof HEADERS, string[]]>) {
+  const out: Partial<Record<Column, number>> = {};
+  const taken = (i: number) => Object.values(out).includes(i);
+  for (const [key, names] of Object.entries(HEADERS) as Array<[Column, string[]]>) {
     // Earlier names in each list are more specific; prefer exact matches, then prefixes.
     for (const n of names) {
-      const i = norm.findIndex((h, idx) => h === n && !Object.values(out).includes(headers[idx]));
+      const i = norm.findIndex((h, idx) => h === n && !taken(idx));
       if (i >= 0) {
-        out[key] = headers[i];
+        out[key] = i;
         break;
       }
     }
-    if (!out[key]) {
+    if (out[key] === undefined) {
       for (const n of names) {
-        const i = norm.findIndex((h, idx) => h.startsWith(n) && !Object.values(out).includes(headers[idx]));
+        const i = norm.findIndex((h, idx) => h.startsWith(n) && !taken(idx));
         if (i >= 0) {
-          out[key] = headers[i];
+          out[key] = i;
           break;
         }
       }
     }
   }
   return out;
+}
+
+/** The same mapping by header name. */
+export function mapColumns(headers: string[]) {
+  return Object.fromEntries(Object.entries(mapColumnIndexes(headers)).map(([k, i]) => [k, headers[i!]])) as Partial<Record<Column, string>>;
 }
 
 /** "1.234,56", "1,234.56", "$12.30", "(4.10)" → number */
@@ -77,10 +89,40 @@ export function parseAmount(raw: unknown): number {
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
-/** A month-level period from the formats distributors use. */
+const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
+/** One calendar day: "2026-06-01", "01/06/2026" (day first unless that can't be), "Jun 01, 2026", "1 June 2026". */
+export function parseDay(raw: string): string | null {
+  const s = raw.trim().toLowerCase();
+  let y = 0;
+  let m = 0;
+  let d = 0;
+  let mm: RegExpMatchArray | null;
+  if ((mm = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/))) [y, m, d] = [Number(mm[1]), Number(mm[2]), Number(mm[3])];
+  else if ((mm = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/))) [d, m, y] = Number(mm[2]) > 12 ? [Number(mm[2]), Number(mm[1]), Number(mm[3])] : [Number(mm[1]), Number(mm[2]), Number(mm[3])];
+  else if ((mm = s.match(/^([a-z]{3})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/))) [m, d, y] = [MONTHS.indexOf(mm[1]) + 1, Number(mm[2]), Number(mm[3])];
+  else if ((mm = s.match(/^(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3})[a-z]*\.?,?\s+(\d{4})$/))) [d, m, y] = [Number(mm[1]), MONTHS.indexOf(mm[2]) + 1, Number(mm[3])];
+  else return null;
+  if (m < 1 || m > 12 || d < 1 || d > new Date(Date.UTC(y, m, 0)).getUTCDate()) return null;
+  return iso(y, m, d);
+}
+
+/**
+ * The period a statement line covers: a month in the formats distributors
+ * use, or a range of days or months ("2026-06-01 – 2026-07-31", "Jun 01, 2026
+ * — Jul 31, 2026", "Jun 2026 - Jul 2026"), which some report over two months.
+ */
 export function parsePeriod(raw: unknown): { start: string; end: string } | null {
   const s = String(raw ?? '').trim().toLowerCase();
   if (!s) return null;
+  const sides = s.split(/\s+(?:to|until|through|thru|-)\s+|\s*[–—]\s*/);
+  if (sides.length === 2) {
+    const [a, b] = [parseDay(sides[0]), parseDay(sides[1])];
+    const [ma, mb] = [a ? null : parsePeriod(sides[0]), b ? null : parsePeriod(sides[1])];
+    const start = a ?? ma?.start;
+    const end = b ?? mb?.end;
+    if (start && end) return start <= end ? { start, end } : { start: b ?? mb!.start, end: a ?? ma!.end };
+  }
   let y: number | null = null;
   let m: number | null = null;
   let mm: RegExpMatchArray | null;
@@ -110,38 +152,106 @@ const SOURCE_ALIASES: Array<[RegExp, string]> = [
 
 export const canonicalSource = (raw: string) => SOURCE_ALIASES.find(([re]) => re.test(raw))?.[1] ?? (raw.trim() || 'Other');
 
-export function parseStatementCsv(csv: string, defaultCurrency = 'USD'): { lines: ParsedLine[]; columns: ReturnType<typeof mapColumns>; skipped: number } {
-  const parsed = Papa.parse<Record<string, string>>(csv.replace(/^﻿/, ''), { header: true, skipEmptyLines: true, dynamicTyping: false });
-  const headers = parsed.meta.fields ?? [];
-  const cols = mapColumns(headers);
-  if (!cols.net && !cols.gross) throw new Error('Could not find a revenue column (looked for net/earnings/royalty/amount)');
+const text = (c: Cell | undefined) => (c === null || c === undefined ? '' : String(c).trim());
+const isBlank = (row: Cell[]) => row.every((c) => text(c) === '');
+const TOTAL = /^(grand\s+|sub\s*)?totals?\b/i;
+const ADJUSTMENT = /\b(rounding|adjustment)\b/i;
+
+/** A table's header row: the first (within the first 50 rows) naming a revenue column and a track or release column. */
+function findHeader(rows: Cell[][]) {
+  for (let i = 0; i < Math.min(rows.length, 50); i++) {
+    const headers = rows[i].map((c) => (typeof c === 'string' ? c : ''));
+    if (headers.filter(Boolean).length < 2) continue;
+    const cols = mapColumnIndexes(headers);
+    if ((cols.net !== undefined || cols.gross !== undefined) && (cols.isrc !== undefined || cols.title !== undefined || cols.upc !== undefined)) {
+      return { headerRow: i, cols, score: Object.keys(cols).length };
+    }
+  }
+  return null;
+}
+
+export class SummaryReportError extends Error {
+  constructor() {
+    super('This looks like a summary report: it has totals, but not a line for each track, store and country. Download the detailed (line-by-line) report from your distributor and upload that instead.');
+  }
+}
+
+/**
+ * Statement lines from a sheet's rows. Blank rows, repeated header rows and
+ * total rows are skipped (a total would count everything twice); a rounding
+ * adjustment is kept as its own line so the net matches the payout. A line
+ * without a period of its own takes the statement's period.
+ */
+export function linesFromRows(rows: Cell[][], defaultCurrency = 'USD'): { lines: ParsedLine[]; columns: Partial<Record<Column, number>>; skipped: number; headerRow: number } {
+  const found = findHeader(rows);
+  if (!found) throw new Error('Could not find a revenue column (looked for net/earnings/royalty/revenue/amount next to an ISRC or track title)');
+  const { headerRow, cols } = found;
+  // A formatted summary (title and totals above small tables, no store column) can't give per-track lines.
+  if (headerRow > 0 && cols.source === undefined && rows.slice(0, headerRow).some((r) => !isBlank(r))) throw new SummaryReportError();
+  const header = rows[headerRow].map(text);
+  const get = (row: Cell[], key: Column) => (cols[key] === undefined ? undefined : row[cols[key]!]);
   const lines: ParsedLine[] = [];
   let skipped = 0;
-  for (const row of parsed.data) {
-    const net = parseAmount(cols.net ? row[cols.net] : row[cols.gross!]);
-    const gross = cols.gross ? parseAmount(row[cols.gross]) : net;
-    const units = Math.round(parseAmount(cols.units ? row[cols.units] : 0));
-    const isrc = cols.isrc ? String(row[cols.isrc] ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '') || null : null;
-    if (!net && !gross && !units) {
+  for (const row of rows.slice(headerRow + 1)) {
+    if (isBlank(row)) continue;
+    if (row.map(text).join('|') === header.join('|')) continue;
+    const net = parseAmount(cols.net !== undefined ? get(row, 'net') : get(row, 'gross'));
+    const gross = cols.gross !== undefined ? parseAmount(get(row, 'gross')) : net;
+    const units = Math.round(parseAmount(get(row, 'units') ?? 0));
+    const rawIsrc = text(get(row, 'isrc')).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const isrc = rawIsrc && /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(rawIsrc) ? rawIsrc : null;
+    const label = text(get(row, 'title')) || row.map(text).find(Boolean) || '';
+    if ((!net && !gross && !units) || (!isrc && TOTAL.test(label))) {
       skipped++;
       continue;
     }
-    const p = cols.period ? parsePeriod(row[cols.period]) : null;
+    const source = text(get(row, 'source'));
+    const adjustment = !isrc && !source && !units && ADJUSTMENT.test(label);
+    const p = parsePeriod(get(row, 'period'));
     lines.push({
       periodStart: p?.start ?? null,
       periodEnd: p?.end ?? null,
-      source: canonicalSource(cols.source ? String(row[cols.source] ?? '') : ''),
-      territory: cols.territory ? String(row[cols.territory] ?? '').trim().slice(0, 60) || null : null,
-      isrc: isrc && /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(isrc) ? isrc : null,
-      upc: cols.upc ? String(row[cols.upc] ?? '').replace(/\D/g, '') || null : null,
-      trackTitle: cols.title ? String(row[cols.title] ?? '').trim().slice(0, 300) || null : null,
+      source: adjustment ? 'Adjustment' : canonicalSource(source),
+      territory: text(get(row, 'territory')).slice(0, 60) || null,
+      isrc,
+      upc: text(get(row, 'upc')).replace(/\D/g, '') || null,
+      trackTitle: (adjustment ? label : text(get(row, 'title'))).slice(0, 300) || null,
       units,
       grossCents: Math.round(gross * 100),
       netCents: Math.round(net * 100),
-      currency: (cols.currency ? String(row[cols.currency] ?? '').trim().toUpperCase() : '') || defaultCurrency,
+      currency: text(get(row, 'currency')).toUpperCase() || defaultCurrency,
     });
   }
-  return { lines, columns: cols, skipped };
+  const periods = new Set(lines.filter((l) => l.periodStart).map((l) => `${l.periodStart}|${l.periodEnd}`));
+  if (periods.size === 1) {
+    const [start, end] = [...periods][0].split('|');
+    for (const l of lines) if (!l.periodStart) Object.assign(l, { periodStart: start, periodEnd: end });
+  }
+  return { lines, columns: cols, skipped, headerRow };
+}
+
+export function parseStatementCsv(csv: string, defaultCurrency = 'USD') {
+  const parsed = Papa.parse<string[]>(csv.replace(/^\uFEFF/, ''), { header: false, skipEmptyLines: true, dynamicTyping: false });
+  const out = linesFromRows(parsed.data, defaultCurrency);
+  return { ...out, columns: Object.fromEntries(Object.entries(out.columns).map(([k, i]) => [k, String(parsed.data[out.headerRow][i!] ?? '')])) as Partial<Record<Column, string>> };
+}
+
+/**
+ * An .xlsx export: the sheet holding the line-by-line table is used (one with
+ * a store column first), whichever tab it is on.
+ */
+export function parseStatementXlsx(body: Buffer, defaultCurrency = 'USD') {
+  const sheets = readXlsx(body);
+  const candidates = sheets
+    .map((sheet) => ({ sheet, found: findHeader(sheet.rows) }))
+    .filter((c): c is { sheet: (typeof sheets)[number]; found: NonNullable<ReturnType<typeof findHeader>> } => Boolean(c.found))
+    .sort((a, b) => Number(b.found.cols.source !== undefined) - Number(a.found.cols.source !== undefined) || b.found.score - a.found.score || b.sheet.rows.length - a.sheet.rows.length);
+  if (candidates.length === 0) {
+    const words = sheets.flatMap((s) => s.rows.slice(0, 40).flat().map(text)).join(' ');
+    if (/royalt|total|statement|payout/i.test(words)) throw new SummaryReportError();
+    throw new Error('Could not find a revenue column (looked for net/earnings/royalty/revenue/amount next to an ISRC or track title)');
+  }
+  return { ...linesFromRows(candidates[0].sheet.rows, defaultCurrency), sheet: candidates[0].sheet.name };
 }
 
 export function summarize(lines: ParsedLine[], opts: { distributor: string | null; unmatchedIsrcs: number; previousNetCents?: number | null }): StatementSummary {
@@ -156,14 +266,16 @@ export function summarize(lines: ParsedLine[], opts: { distributor: string | nul
   const ends = lines.map((l) => l.periodEnd).filter((x): x is string => Boolean(x)).sort();
   const netCents = lines.reduce((n, l) => n + l.netCents, 0);
   const anomalies: string[] = [];
-  const negatives = lines.filter((l) => l.netCents < 0);
+  const negatives = lines.filter((l) => l.netCents < 0 && l.source !== 'Adjustment');
   if (negatives.length) anomalies.push(`${negatives.length} line${negatives.length === 1 ? '' : 's'} with negative revenue (returns or chargebacks)`);
   if (opts.unmatchedIsrcs) anomalies.push(`${opts.unmatchedIsrcs} ISRC${opts.unmatchedIsrcs === 1 ? '' : 's'} not in the catalogue`);
-  const noIsrc = lines.filter((l) => !l.isrc).length;
+  const noIsrc = lines.filter((l) => !l.isrc && l.source !== 'Adjustment').length;
   if (noIsrc && noIsrc / lines.length > 0.05) anomalies.push(`${noIsrc} lines without an ISRC`);
+  // Stores often split small sales into identical rows (a few plays, a cent), so only rows with real amounts count as duplicates.
   const seen = new Set<string>();
   let dupes = 0;
   for (const l of lines) {
+    if (l.units < 50 && Math.abs(l.netCents) < 50) continue;
     const k = `${l.isrc}|${l.source}|${l.territory}|${l.periodStart}|${l.units}|${l.netCents}`;
     if (seen.has(k)) dupes++;
     seen.add(k);

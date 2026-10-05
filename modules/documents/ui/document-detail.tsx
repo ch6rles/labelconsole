@@ -5,7 +5,7 @@ import { Banner, Card, DataTable, Icon, InlineNote, KV, LinkButton, Page, PageHe
 import { ActionButton, FormModal, PollUntilDone } from '@labelconsole/ui/client';
 import type { ContractTerms, StatementSummary } from '../schema';
 import * as svc from '../service';
-import { documentFields, EXTRACTION_LABEL, KIND_LABEL, monthYear, rateLabel, STATUS_LABEL, TYPE_LABEL } from './fields';
+import { documentFields, EXTRACTION_LABEL, KIND_LABEL, periodLabel, rateLabel, STATUS_LABEL, TYPE_LABEL } from './fields';
 import { TermsReview } from './terms-review';
 
 export default async function DocumentDetailPage({ run, params, session }: PageProps) {
@@ -102,7 +102,7 @@ export default async function DocumentDetailPage({ run, params, session }: PageP
               <StatCard label="Net" icon="payments" value={fmt.moneyCents(summary.netCents, summary.currency ?? 'USD')} note={summary.distributor ?? 'distributor not detected'} />
               <StatCard label="Gross" icon="account_balance" value={fmt.moneyCents(summary.grossCents, summary.currency ?? 'USD')} note={`${fmt.int(summary.lineCount)} lines`} />
               <StatCard label="Units" icon="graphic_eq" value={fmt.compact(summary.units)} note="streams and downloads" />
-              <StatCard label="Period" icon="date_range" value={summary.periodStart ? monthYear(summary.periodStart) : '—'} note={summary.periodEnd ? `through ${fmt.date(summary.periodEnd)}` : ''} />
+              <StatCard label="Period" icon="date_range" value={periodLabel(summary.periodStart, summary.periodEnd)} note={summary.periodStart && summary.periodEnd ? `${fmt.date(summary.periodStart)} – ${fmt.date(summary.periodEnd)}` : ''} />
             </div>
           )}
           {summary?.anomalies.length ? (

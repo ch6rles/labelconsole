@@ -23,13 +23,13 @@ export default async function RoyaltiesPage({ run, session }: PageProps) {
   const importButton = session.permissions.has('documents:write') && (
     <FormModal
       title="Import distributor report"
-      description="Upload the CSV (or PDF) statement from your distributor. Lines are matched to the catalogue by ISRC and UPC."
+      description="Upload your distributor's statement as .xlsx, CSV or PDF. Lines are matched to the catalogue by ISRC and UPC."
       trigger={{ label: 'Import report', icon: 'upload', variant: 'primary' }}
       endpoint="/documents"
       multipart
       extra={{ type: 'statement' }}
       fields={[
-        { name: 'file', label: 'Statement file', type: 'file', required: true, full: true, accept: '.csv,.tsv,.txt,.pdf' },
+        { name: 'file', label: 'Statement file', type: 'file', required: true, full: true, accept: '.xlsx,.csv,.tsv,.txt,.pdf', hint: 'Use the detailed (line-by-line) report, not the summary: it has a row for each track, store and country.' },
         { name: 'title', label: 'Title', placeholder: 'e.g. DistroKid Jul 2026', full: true },
       ]}
       columns={1}

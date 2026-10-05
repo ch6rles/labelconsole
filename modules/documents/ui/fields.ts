@@ -26,7 +26,7 @@ const trim = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 export function uploadFields(opts: { canConfidential: boolean; canFinancial: boolean; type?: string }): FieldSpec[] {
   const types = DOCUMENT_TYPES.filter((t) => t !== 'statement' || opts.canFinancial);
   return [
-    { name: 'file', label: 'File', type: 'file', required: true, full: true, accept: '.pdf,.csv,.txt,.doc,.docx,.xlsx,.png,.jpg', hint: 'Contracts as PDF are read automatically. Statements can be the distributor CSV or PDF.' },
+    { name: 'file', label: 'File', type: 'file', required: true, full: true, accept: '.pdf,.csv,.txt,.doc,.docx,.xlsx,.png,.jpg', hint: 'Contracts as PDF are read automatically. Statements can be the distributor’s detailed report as .xlsx, CSV or PDF.' },
     { name: 'type', label: 'Type', type: 'select', required: true, options: types.map((t) => ({ value: t, label: TYPE_LABEL[t] })) },
     { name: 'title', label: 'Title', placeholder: 'Defaults to the file name' },
     { name: 'contractStatus', label: 'Contract status', type: 'select', options: CONTRACT_STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] })), hint: 'Contracts only' },
@@ -55,4 +55,13 @@ export function documentFields(opts: { canConfidential: boolean; contract: boole
 export function monthYear(d: string) {
   const x = new Date(d.length === 7 ? `${d}-01T00:00:00Z` : `${d.slice(0, 10)}T00:00:00Z`);
   return `${x.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })} ${x.getUTCFullYear()}`;
+}
+
+/** A statement period: "Jul 2026", "Jun–Jul 2026" or "Dec 2025–Jan 2026". */
+export function periodLabel(start: string | null | undefined, end: string | null | undefined) {
+  if (!start) return '—';
+  const a = monthYear(start);
+  if (!end || end.slice(0, 7) <= start.slice(0, 7)) return a;
+  const b = monthYear(end);
+  return start.slice(0, 4) === end.slice(0, 4) ? `${a.slice(0, 3)}–${b}` : `${a}–${b}`;
 }

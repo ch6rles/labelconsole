@@ -376,6 +376,28 @@ The owner asked whether YouTube Music streams can be tracked without a YouTube D
   - A real SpotScraper track read returned the artists' real Spotify IDs.
   - Pasting a share link through the form stored the ID.
 
+## Statements from .xlsx
+
+- **Excel statements import:** distributors that export .xlsx can be uploaded as they come, next to CSV and PDF.
+  - The reader is built in (`packages/core/src/xlsx.ts`: Node's zlib plus the spreadsheet XML), so no dependency was added.
+  - It reads text, numbers, booleans, dates (as YYYY-MM-DD) and saved formula results. It handles the variants Excel, Google Sheets and LibreOffice write.
+  - Old binary .xls files get a message asking for .xlsx or CSV.
+- **Finding the table:**
+  - The statement table is found by its header row, which need not be the first row (CSV too).
+  - In a workbook with several tabs, the tab with the line-by-line table (one with a store column) is used.
+  - "Total" rows are skipped so nothing counts twice.
+  - A "Rounding Adjustment" row is kept as an Adjustment line, so the net equals the payout. It is not flagged as a refund.
+- **Two-month periods:** ranges such as "2026-06-01 – 2026-07-31" and "Jun 01, 2026 — Jul 31, 2026" keep both ends. They were read as the first month only. The Statements list shows them as "Jun–Jul 2026".
+- **Summary reports are refused with a reason:** a formatted summary has a title and totals above small tables, and no store column, so it can't give per-track, per-store lines. The upload fails with "upload the detailed (line-by-line) report instead", shown on the document and in the Statements list.
+- **Fewer false alarms:**
+  - Identical small rows (a few plays, a cent) aren't counted as duplicates. Stores split small sales that way: one real report had 215 such rows, none of them duplicates.
+  - A statement is only compared with an earlier one in the same currency, and from the same distributor when both are known.
+  - The Statements total is shown per currency, never adding EUR to USD.
+- **Verified with a real distributor's reports (not stored in the repository):**
+  - The detailed report (3,860 lines) imported through the website. Its net of 270.87 EUR and 269,642 streams match the distributor's summary exactly.
+  - The summary report was refused with the reason shown.
+  - Tests use made-up workbooks in the same layouts; 208 pass.
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.

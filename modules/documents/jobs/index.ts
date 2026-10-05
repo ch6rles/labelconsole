@@ -12,7 +12,8 @@ import { releases, tracks } from '@labelconsole/catalogue/schema';
 import { readFileBuffer } from '@labelconsole/drive/service';
 import { CONTRACT_SYSTEM, ContractTermsSchema, STATEMENT_LINES_HINT, STATEMENT_SYSTEM, StatementLinesSchema } from '../extract';
 import { documents, keyDates, statementLines, type ContractTerms, type StatementSummary } from '../schema';
-import { canonicalSource, parseStatementCsv, summarize, type ParsedLine } from '../statements';
+import { isXlsx } from '@labelconsole/core/xlsx';
+import { canonicalSource, parseStatementCsv, parseStatementXlsx, summarize, type ParsedLine } from '../statements';
 
 const MAX_PDF_BYTES = 30 * 1024 * 1024;
 
@@ -64,8 +65,14 @@ export const jobs = [
       const currency = org.settings.currency ?? 'USD';
       let lines: ParsedLine[];
       let distributor: string | null = org.settings.distributor ?? null;
-      if (file.mime === 'text/csv' || file.name.toLowerCase().endsWith('.csv') || file.mime === 'text/plain') {
+      const name = file.name.toLowerCase();
+      // By extension first: browsers often label a .csv as application/vnd.ms-excel.
+      if (/\.(csv|tsv|txt)$/.test(name) || file.mime.startsWith('text/')) {
         lines = parseStatementCsv(body.toString('utf8'), currency).lines;
+      } else if (isXlsx(body) && (name.endsWith('.xlsx') || name.endsWith('.xlsm') || file.mime.includes('spreadsheetml'))) {
+        lines = parseStatementXlsx(body, currency).lines;
+      } else if (name.endsWith('.xls') || file.mime === 'application/vnd.ms-excel') {
+        throw new Error('Old Excel files (.xls) can’t be read. Open it in Excel or Google Sheets, save it as .xlsx or CSV, and upload that.');
       } else if (file.mime === 'application/pdf') {
         const provider = await job.withOrg((ctx) => llmProviderFor(ctx));
         const { data: out, usage, model } = await provider.extract({
@@ -91,7 +98,7 @@ export const jobs = [
           currency: out.currency ?? currency,
         }));
       } else {
-        throw new Error('Statements must be CSV or PDF');
+        throw new Error('Statements must be an .xlsx, CSV or PDF file');
       }
       if (lines.length === 0) throw new Error('No revenue lines found in the statement');
 
@@ -106,8 +113,11 @@ export const jobs = [
         const trackBy = new Map(trackRows.map((t) => [t.isrc!, t.id]));
         const releaseBy = new Map(releaseRows.map((r) => [r.upc!.replace(/^0/, ''), r.id]));
         const unmatched = isrcs.filter((i) => !trackBy.has(i)).length;
-        const [prev] = await ctx.tx.select().from(documents).where(and(eq(documents.type, 'statement'), eq(documents.isLatest, true), ne(documents.id, doc.id), eq(documents.extractionStatus, 'done'))).orderBy(desc(documents.createdAt)).limit(1);
-        const summary: StatementSummary = summarize(lines, { distributor, unmatchedIsrcs: unmatched, previousNetCents: (prev?.extractedTerms as StatementSummary | null)?.netCents ?? null });
+        // Compared with the last statement like it: same currency, and the same distributor when both are known.
+        const recent = await ctx.tx.select().from(documents).where(and(eq(documents.type, 'statement'), eq(documents.isLatest, true), ne(documents.id, doc.id), eq(documents.extractionStatus, 'done'))).orderBy(desc(documents.createdAt)).limit(20);
+        const currencyNow = [...lines.reduce((m, l) => m.set(l.currency, (m.get(l.currency) ?? 0) + 1), new Map<string, number>())].sort((x, y) => y[1] - x[1])[0]?.[0] ?? null;
+        const prev = recent.map((d) => d.extractedTerms as StatementSummary | null).find((p) => p && p.currency === currencyNow && (!p.distributor || !distributor || p.distributor === distributor));
+        const summary: StatementSummary = summarize(lines, { distributor, unmatchedIsrcs: unmatched, previousNetCents: prev?.netCents ?? null });
         await ctx.tx.delete(statementLines).where(eq(statementLines.documentId, doc.id));
         for (let i = 0; i < lines.length; i += 1000) {
           await ctx.tx.insert(statementLines).values(
