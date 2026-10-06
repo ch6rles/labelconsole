@@ -32,7 +32,7 @@ export const platformColor = (p: string) => PLATFORM_COLOR[p] ?? OTHER_COLOR;
  * Two sources for one platform (the API and the scraper, say) can't share a
  * colour, so the second takes the first colour no other line uses.
  */
-export function historyLines(series: Array<{ platform: string; source: string; since: string | null; points: Array<{ day: string; total: number; delta: number }> }>, granularity: 'day' | 'week' | 'month' = 'day'): TimeSeries[] {
+export function historyLines(series: Array<{ platform: string; source: string; since: string | null; points: Array<{ day: string; total: number; delta: number; pending?: boolean; estimated?: boolean }> }>, granularity: 'day' | 'week' | 'month' = 'day'): TimeSeries[] {
   const used = new Set<string>();
   return series.map((s) => {
     let color = platformColor(s.platform);
@@ -46,7 +46,8 @@ export function historyLines(series: Array<{ platform: string; source: string; s
       name: seriesName(s.platform, s.source),
       short: unique ? platformLabel(s.platform) : seriesName(s.platform, s.source),
       color,
-      points: s.points.map((p) => ({ day: p.day, total: Number(p.total), delta: p === first && (granularity === 'day' || Number(p.delta) === 0) ? null : Number(p.delta) })),
+      // A pending day (the platform hasn't refreshed its count) has no plays figure yet: a gap, not a 0.
+      points: s.points.map((p) => ({ day: p.day, total: Number(p.total), delta: p.pending || (p === first && (granularity === 'day' || Number(p.delta) === 0)) ? null : Number(p.delta), pending: p.pending, estimated: p.estimated })),
     };
   });
 }

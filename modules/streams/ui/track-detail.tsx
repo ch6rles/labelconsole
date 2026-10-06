@@ -157,7 +157,17 @@ export default async function StreamTrackPage({ run, params, session, searchPara
           columns={[
             { key: 'd', header: granularity === 'day' ? 'Day' : granularity === 'week' ? 'Week of' : 'Month', width: '140px', render: (r) => <span className="lc-mono" style={{ fontSize: 12 }}>{fmt.date(r.day)}</span> },
             { key: 's', header: 'Series', width: 'minmax(180px,1fr)', render: (r) => seriesName(r.platform, r.source) },
-            { key: 'p', header: 'Plays', width: '110px', align: 'right', render: (r) => (r.first ? <span className="lc-cell-sub" title="Tracking started: plays count from the next reading">first reading</span> : <span className="lc-cell-num">{fmt.int(r.delta)}</span>) },
+            { key: 'p', header: 'Plays', width: '110px', align: 'right', render: (r) =>
+                r.first ? (
+                  <span className="lc-cell-sub" title="Tracking started: plays count from the next reading">first reading</span>
+                ) : r.pending ? (
+                  <span className="lc-cell-sub" title="The count hasn't refreshed since the last reading. The plays are added when it does.">not refreshed yet</span>
+                ) : r.estimated ? (
+                  <span className="lc-cell-num" title="Spread over days the count didn't refresh; the total over those days is exact">≈ {fmt.int(r.delta)}</span>
+                ) : (
+                  <span className="lc-cell-num">{fmt.int(r.delta)}</span>
+                ),
+            },
             { key: 't', header: 'Running total', width: '140px', align: 'right', render: (r) => <span className="lc-cell-num lc-muted">{fmt.int(r.total)}</span> },
           ]}
         />

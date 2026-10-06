@@ -20,6 +20,7 @@ import { streamSnapshots } from '../schema/snapshots';
 import { parseVideoId } from '../sources/youtube';
 import type { Snapshot, TrackArtistRefs } from '../sources/types';
 import { DEFAULT_RULES, evaluateRules, nextPollAt, type DayPoint } from './alerts';
+import { addDays, MAX_SPREAD_DAYS, settle } from './settle';
 
 export { DEFAULT_RULES, evaluateRules, nextPollAt } from './alerts';
 
@@ -331,13 +332,61 @@ async function rollupDay(ctx: ServiceContext, trackId: string, platform: string,
            coalesce(sum(case when prev.count is null then 0 else greatest(cur.count - prev.count, 0) end), 0)::bigint as delta
     from cur left join prev using (ext)
   `)) as unknown as Array<{ total: string; delta: string }>;
-  const total = Number(row?.total ?? 0);
-  const delta = Number(row?.delta ?? 0);
+  return saveReading(ctx, trackId, platform, source, day, Number(row?.total ?? 0), Number(row?.delta ?? 0));
+}
+
+/** Store a day's reading (its change as read), then settle the series so late refreshes don't read as 0 plays. */
+async function saveReading(ctx: ServiceContext, trackId: string, platform: string, source: StreamSource, day: string, total: number, rawDelta: number) {
   await ctx.tx
     .insert(streamDaily)
-    .values({ trackId, platform, source, day, total, delta })
-    .onConflictDoUpdate({ target: [streamDaily.orgId, streamDaily.trackId, streamDaily.platform, streamDaily.source, streamDaily.day], set: { total, delta } });
-  return { total, delta };
+    .values({ trackId, platform, source, day, total, delta: rawDelta, rawDelta })
+    .onConflictDoUpdate({ target: [streamDaily.orgId, streamDaily.trackId, streamDaily.platform, streamDaily.source, streamDaily.day], set: { total, rawDelta } });
+  const settled = await settleSeries(ctx, trackId, platform, source, day);
+  const today = settled.find((d) => d.day === day);
+  return { total, delta: today?.delta ?? rawDelta, pending: today?.pending ?? false, estimated: today?.estimated ?? false };
+}
+
+/**
+ * Re-settle a series' recent days from its readings (see ./settle): pending
+ * days for counts the platform hasn't refreshed, catch-ups spread over the
+ * days they cover, missed days filled in. Only days a spread could reach are
+ * rewritten; the weeks before them are read to know where the series stood.
+ */
+async function settleSeries(ctx: ServiceContext, trackId: string, platform: string, source: StreamSource, day: string) {
+  const series = and(eq(streamDaily.trackId, trackId), eq(streamDaily.platform, platform), eq(streamDaily.source, source));
+  const rows = await ctx.tx
+    .select({ day: sql<string>`${streamDaily.day}::text`, total: streamDaily.total, rawDelta: streamDaily.rawDelta, delta: streamDaily.delta, estimated: streamDaily.estimated, pending: streamDaily.pending })
+    .from(streamDaily)
+    .where(and(series, gte(streamDaily.day, addDays(day, -(MAX_SPREAD_DAYS + 21)))))
+    .orderBy(streamDaily.day);
+  const from = addDays(day, -MAX_SPREAD_DAYS);
+  const settled = settle(rows).filter((d) => d.day >= from);
+  const keep = new Set(settled.map((d) => d.day));
+  const before = new Map(rows.map((r) => [r.day, r]));
+  // Days filled in earlier that no longer need filling (a late reading arrived for them) go.
+  const stale = rows.filter((r) => r.rawDelta === null && r.day >= from && !keep.has(r.day)).map((r) => r.day);
+  if (stale.length) await ctx.tx.delete(streamDaily).where(and(series, inArray(streamDaily.day, stale)));
+  for (const d of settled) {
+    const b = before.get(d.day);
+    if (b && b.delta === d.delta && b.estimated === d.estimated && b.pending === d.pending && b.total === d.total) continue;
+    await ctx.tx
+      .insert(streamDaily)
+      .values({ trackId, platform, source, day: d.day, total: d.total, delta: d.delta, rawDelta: d.filled ? null : (b?.rawDelta ?? d.delta), estimated: d.estimated, pending: d.pending })
+      .onConflictDoUpdate({ target: [streamDaily.orgId, streamDaily.trackId, streamDaily.platform, streamDaily.source, streamDaily.day], set: { total: d.total, delta: d.delta, estimated: d.estimated, pending: d.pending } });
+  }
+  // An open spike or drop raised on a figure the series no longer shows (a late refresh read as 0 plays,
+  // or two days of plays read as one) is withdrawn. Alerts already seen are left alone.
+  const byDay = new Map(settled.map((d) => [d.day, d]));
+  const open = await ctx.tx
+    .select({ id: alerts.id, day: sql<string>`${alerts.day}::text`, value: alerts.value })
+    .from(alerts)
+    .where(and(eq(alerts.trackId, trackId), eq(alerts.platform, platform), inArray(alerts.kind, ['spike', 'drop']), gte(alerts.day, from), isNull(alerts.acknowledgedAt)));
+  const withdrawn = open.filter((a) => {
+    const d = byDay.get(a.day);
+    return d && (d.pending || (d.estimated && a.value !== d.delta));
+  });
+  if (withdrawn.length) await ctx.tx.delete(alerts).where(inArray(alerts.id, withdrawn.map((a) => a.id)));
+  return settled;
 }
 
 /** One running total per track: the newest reading, growth counted only against a reading of the same ID. */
@@ -358,13 +407,7 @@ async function rollupSingle(ctx: ServiceContext, trackId: string, platform: stri
            coalesce(case when prev.ext = cur.ext then greatest(cur.count - prev.count, 0) else 0 end, 0)::bigint as delta
     from cur left join prev on true
   `)) as unknown as Array<{ total: string; delta: string }>;
-  const total = Number(row?.total ?? 0);
-  const delta = Number(row?.delta ?? 0);
-  await ctx.tx
-    .insert(streamDaily)
-    .values({ trackId, platform, source, day, total, delta })
-    .onConflictDoUpdate({ target: [streamDaily.orgId, streamDaily.trackId, streamDaily.platform, streamDaily.source, streamDaily.day], set: { total, delta } });
-  return { total, delta };
+  return saveReading(ctx, trackId, platform, source, day, Number(row?.total ?? 0), Number(row?.delta ?? 0));
 }
 
 /**
@@ -375,8 +418,8 @@ export async function rollupStatementCounts(ctx: ServiceContext, totals: Array<{
   for (const t of totals) {
     await ctx.tx
       .insert(streamDaily)
-      .values({ trackId: t.trackId, platform: t.platform, source: 'statement-import', day: t.periodEnd, total: t.units, delta: t.units })
-      .onConflictDoUpdate({ target: [streamDaily.orgId, streamDaily.trackId, streamDaily.platform, streamDaily.source, streamDaily.day], set: { total: t.units, delta: t.units } });
+      .values({ trackId: t.trackId, platform: t.platform, source: 'statement-import', day: t.periodEnd, total: t.units, delta: t.units, rawDelta: t.units })
+      .onConflictDoUpdate({ target: [streamDaily.orgId, streamDaily.trackId, streamDaily.platform, streamDaily.source, streamDaily.day], set: { total: t.units, delta: t.units, rawDelta: t.units } });
     // The append-only audit trail: one snapshot per distinct reading.
     await ctx.tx.execute(sql`
       insert into stream_snapshots (track_id, platform, source, external_id, captured_at, count)
@@ -416,7 +459,11 @@ export const HistoryQuery = z.object({
   granularity: z.enum(['day', 'week', 'month']).default('day'),
 });
 
-type SeriesRow = { platform: string; source: string; day: string; total: number; delta: number };
+type SeriesRow = { platform: string; source: string; day: string; total: number; delta: number; pending: boolean; estimated: boolean };
+/** A history point. `pending`: the platform hasn't refreshed since the last reading, so the plays aren't known yet (never 0). `estimated`: plays spread over days it didn't refresh. */
+export type HistoryPoint = DayPoint & { pending: boolean; estimated: boolean };
+/** Per bucket: pending only when every day in it is; estimated when any day is estimated or still pending. */
+const flags = { pending: sql<boolean>`bool_and(${streamDaily.pending})`, estimated: sql<boolean>`bool_or(${streamDaily.estimated} or ${streamDaily.pending})` };
 
 function bucket(granularity: 'day' | 'week' | 'month') {
   // The unit is inlined from a fixed list: as a bind parameter, the SELECT and GROUP BY expressions would differ and Postgres rejects the query.
@@ -425,11 +472,11 @@ function bucket(granularity: 'day' | 'week' | 'month') {
 }
 
 function groupSeries(rows: SeriesRow[]) {
-  const map = new Map<string, { platform: string; source: string; points: DayPoint[] }>();
+  const map = new Map<string, { platform: string; source: string; points: HistoryPoint[] }>();
   for (const r of rows) {
     const k = `${r.platform}|${r.source}`;
     const s = map.get(k) ?? { platform: r.platform, source: r.source, points: [] };
-    s.points.push({ day: r.day, total: Number(r.total), delta: Number(r.delta) });
+    s.points.push({ day: r.day, total: Number(r.total), delta: Number(r.delta), pending: Boolean(r.pending), estimated: Boolean(r.estimated) && !r.pending });
     map.set(k, s);
   }
   return [...map.values()];
@@ -460,7 +507,7 @@ export async function trackHistory(ctx: ServiceContext, trackId: string, q: Part
   const b = bucket(granularity);
   const [rows, start] = await Promise.all([
     ctx.tx
-      .select({ platform: streamDaily.platform, source: streamDaily.source, day: b, total: sql<number>`max(${streamDaily.total})::bigint`, delta: sql<number>`sum(${streamDaily.delta})::bigint` })
+      .select({ platform: streamDaily.platform, source: streamDaily.source, day: b, total: sql<number>`max(${streamDaily.total})::bigint`, delta: sql<number>`sum(${streamDaily.delta})::bigint`, ...flags })
       .from(streamDaily)
       .where(and(eq(streamDaily.trackId, trackId), gte(streamDaily.day, q.from ?? daysAgo(90)), lte(streamDaily.day, q.to ?? today()), q.platform ? eq(streamDaily.platform, q.platform) : undefined))
       .groupBy(streamDaily.platform, streamDaily.source, b)
@@ -480,7 +527,7 @@ export async function artistHistory(ctx: ServiceContext, artistId: string, q: Pa
   const where = and(inArray(streamDaily.trackId, trackIds), gte(streamDaily.day, q.from ?? daysAgo(90)), lte(streamDaily.day, q.to ?? today()), q.platform ? eq(streamDaily.platform, q.platform) : undefined);
   const [rows, top, start] = await Promise.all([
     ctx.tx
-      .select({ platform: streamDaily.platform, source: streamDaily.source, day: b, total: sql<number>`sum(${streamDaily.total})::bigint`, delta: sql<number>`sum(${streamDaily.delta})::bigint` })
+      .select({ platform: streamDaily.platform, source: streamDaily.source, day: b, total: sql<number>`sum(${streamDaily.total})::bigint`, delta: sql<number>`sum(${streamDaily.delta})::bigint`, ...flags })
       .from(streamDaily)
       .where(where)
       .groupBy(streamDaily.platform, streamDaily.source, b)
@@ -698,7 +745,8 @@ export async function evaluateTrackAlerts(ctx: ServiceContext, trackId: string, 
     await ctx.tx
       .select({ day: sql<string>`${streamDaily.day}::text`, total: streamDaily.total, delta: streamDaily.delta })
       .from(streamDaily)
-      .where(and(eq(streamDaily.trackId, trackId), eq(streamDaily.platform, platform), eq(streamDaily.source, source), gte(streamDaily.day, daysAgo(maxWindow + 2))))
+      // A pending day (the platform hasn't refreshed yet) is not a drop, and isn't part of anyone's baseline.
+      .where(and(eq(streamDaily.trackId, trackId), eq(streamDaily.platform, platform), eq(streamDaily.source, source), eq(streamDaily.pending, false), gte(streamDaily.day, daysAgo(maxWindow + 2))))
       .orderBy(streamDaily.day)
   ).map((p) => ({ day: p.day, total: Number(p.total), delta: Number(p.delta) }));
   const hits = evaluateRules(rules, platform, points, daysAgo(1));
@@ -756,7 +804,8 @@ export async function historyForAgent(ctx: ServiceContext, input: { trackId?: st
       playsInWindow: plays,
       last7Days: last7,
       previous7Days: prev7,
-      points: s.points.slice(-60).map((p) => ({ day: p.day, value: s.source === 'statement-import' ? p.total : p.day === first ? null : p.delta })),
+      // Pending: the platform hasn't refreshed its count yet, so the day has no figure (it is not a day with 0 plays).
+      points: s.points.slice(-60).map((p) => ({ day: p.day, value: s.source === 'statement-import' ? p.total : p.day === first || p.pending ? null : p.delta, ...(p.pending ? { pending: true } : p.estimated ? { estimated: true } : {}) })),
     };
   });
 }

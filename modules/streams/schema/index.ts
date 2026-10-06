@@ -42,8 +42,14 @@ export const streamDaily = pgTable(
     day: date('day').notNull(),
     /** Cumulative count at the last snapshot of the day (or period total for statements). */
     total: bigint('total', { mode: 'number' }).notNull(),
-    /** Change versus the previous day with data. */
+    /** Plays that day: the change versus the previous day, settled (see `settleSeries`). */
     delta: bigint('delta', { mode: 'number' }).notNull().default(0),
+    /** The change as read, before settling; null on a day the tracker filled in (no reading that day). */
+    rawDelta: bigint('raw_delta', { mode: 'number' }),
+    /** Plays spread over days the platform didn't refresh its count (exact in total, estimated per day). */
+    estimated: boolean('estimated').notNull().default(false),
+    /** The platform hasn't refreshed its count since the last reading: plays not known yet, not zero. */
+    pending: boolean('pending').notNull().default(false),
   },
   (t) => [primaryKey({ columns: [t.orgId, t.trackId, t.platform, t.source, t.day] }), index('stream_daily_day_idx').on(t.orgId, t.day)],
 );

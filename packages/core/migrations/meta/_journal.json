@@ -36,6 +36,13 @@
       "when": 1790992822342,
       "tag": "0004_catalogue_import_meta",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791251538445,
+      "tag": "0005_stream_daily_settled",
+      "breakpoints": true
     }
   ]
 }

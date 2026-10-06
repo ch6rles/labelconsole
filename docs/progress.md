@@ -398,6 +398,32 @@ The owner asked whether YouTube Music streams can be tracked without a YouTube D
   - The summary report was refused with the reason shown.
   - Tests use made-up workbooks in the same layouts; 208 pass.
 
+## Late platform refreshes (no more false "0 plays" days)
+
+- **The problem:**
+  - Spotify refreshes the public play count about once a day, not at a fixed time, and sometimes skips a day.
+  - The tracker read an unchanged count as "0 plays that day", and the next day as two days of plays.
+  - That showed a false 0, raised a "plays down 100%" alert (which the stream-alert agent then explained), and then a doubled day.
+  - A missed poll (no reading at all one day) doubled the next day the same way.
+- **The fix (`modules/streams/service/settle.ts`):**
+  - Each series is settled from its readings after every poll.
+  - An unchanged count within a week of the last growth is **pending**: the plays aren't known yet. It is never shown, summed or alerted on as 0.
+  - When the count moves, the increase is spread evenly over the days it covers (pending days, missed days and the day it arrived), marked **estimated**. The total is exact; only the split between those days is estimated.
+  - A count unchanged for over a week is taken at its word.
+  - The change as read is kept in `stream_daily.raw_delta` (migration 0005), so settling again always gives the same result.
+- **Where it shows:**
+  - Charts leave a pending day as a gap with a note ("Spotify hasn't refreshed its count since the last reading").
+  - Estimated days are drawn dashed, with "≈" in the tooltip and table. The Latest readings table says "not refreshed yet".
+  - Agents get no figure for a pending day, with a flag, and are told never to call it a 0-play day.
+- **Alerts:**
+  - Pending days are left out of spike and drop checks.
+  - An open spike or drop raised on a figure the series no longer shows is withdrawn.
+  - A real drop on a refreshed count still alerts.
+- **Existing data repairs itself:** the next poll of each track re-settles its last 31 days, so a past false 0 is corrected without any manual step.
+- **Verified:**
+  - 216 tests pass, including the reported case (a stale day, then a catch-up), a missed poll, a real drop, and an old false alert being withdrawn.
+  - The chart was checked at desktop and phone width.
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.

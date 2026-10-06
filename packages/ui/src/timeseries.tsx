@@ -12,7 +12,12 @@ import { compact, int } from './format';
  * phone. Dates are placed on a time scale, so a missing day shows as a gap
  * rather than being squeezed out.
  */
-export type TimePoint = { day: string; total: number | null; delta: number | null };
+/**
+ * `pending`: the platform hasn't refreshed its count yet, so the plays aren't
+ * known (shown as a gap, never as 0). `estimated`: plays spread over days the
+ * count didn't refresh (drawn dashed, shown with ≈).
+ */
+export type TimePoint = { day: string; total: number | null; delta: number | null; pending?: boolean; estimated?: boolean };
 /** `short` names the line where space is tight (the tooltip), e.g. "Spotify" for "Spotify · SpotScraper". */
 export type TimeSeries = { id: string; name: string; short?: string; color: string; points: TimePoint[] };
 type Metric = 'daily' | 'total';
@@ -138,11 +143,15 @@ export function TimeSeriesChart({
   const paths = view.series.map((s) => {
     const pts = s.points.filter((p) => valueOf(p, metric) != null);
     let d = '';
+    // Segments into an estimated point, drawn dashed over the line.
+    let est = '';
     pts.forEach((p, i) => {
       const gap = i > 0 && ms(p.day) - ms(pts[i - 1].day) > usual * 2;
-      d += `${i === 0 || gap ? 'M' : 'L'}${x(p.day).toFixed(1)},${y(valueOf(p, metric)!).toFixed(1)}`;
+      const at = `${x(p.day).toFixed(1)},${y(valueOf(p, metric)!).toFixed(1)}`;
+      d += `${i === 0 || gap ? 'M' : 'L'}${at}`;
+      if (i > 0 && !gap && p.estimated) est += `M${x(pts[i - 1].day).toFixed(1)},${y(valueOf(pts[i - 1], metric)!).toFixed(1)}L${at}`;
     });
-    return { s, pts, d };
+    return { s, pts, d, est };
   });
 
   // Date ticks: about one per 80px, on whole intervals.
@@ -156,8 +165,12 @@ export function TimeSeriesChart({
 
   const hoverDay = hover != null ? view.days[hover] : null;
   const readout = hoverDay
-    ? view.series.map((s) => ({ s, p: s.points.find((p) => p.day === hoverDay) })).filter((r) => r.p && valueOf(r.p, metric) != null)
+    ? view.series.map((s) => ({ s, p: s.points.find((p) => p.day === hoverDay) })).filter((r) => r.p && (valueOf(r.p, metric) != null || r.p.pending))
     : [];
+  const known = readout.filter((r) => valueOf(r.p!, metric) != null);
+  // Lines whose latest reading the platform hasn't refreshed yet, and whether any plays shown are spread estimates.
+  const waiting = view.series.filter((s) => s.points.at(-1)?.pending).map((s) => s.short ?? s.name);
+  const anyEstimated = view.series.some((s) => s.points.some((p) => p.estimated && valueOf(p, metric) != null));
 
   const pick = (e: PointerEvent<SVGRectElement>) => {
     if (!view.days.length) return;
@@ -272,9 +285,10 @@ export function TimeSeriesChart({
             {!multi && metric === 'daily' && paths[0]?.pts.length > 1 && (
               <path d={`${paths[0].d} L${x(paths[0].pts[paths[0].pts.length - 1].day).toFixed(1)},${y(Math.max(0, domain.min)).toFixed(1)} L${x(paths[0].pts[0].day).toFixed(1)},${y(Math.max(0, domain.min)).toFixed(1)} Z`} fill={paths[0].s.color} opacity={0.1} />
             )}
-            {paths.map(({ s, d, pts }) => (
+            {paths.map(({ s, d, pts, est }) => (
               <g key={s.id}>
                 {pts.length > 1 && <path d={d} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
+                {est && <path d={est} fill="none" stroke="var(--lc-surface)" strokeWidth={2.5} strokeDasharray="3 4" />}
                 {pts.length > 0 && (pts.length === 1 || hover == null) && (
                   <circle cx={x(pts[pts.length - 1].day)} cy={y(valueOf(pts[pts.length - 1], metric)!)} r={4} fill={s.color} stroke="var(--lc-surface)" strokeWidth={2} />
                 )}
@@ -288,7 +302,7 @@ export function TimeSeriesChart({
             {hoverDay && (
               <g pointerEvents="none">
                 <line className="lc-ts-cross" x1={x(hoverDay)} x2={x(hoverDay)} y1={pad.t} y2={H - pad.b} />
-                {readout.map(({ s, p }) => (
+                {known.map(({ s, p }) => (
                   <circle key={s.id} cx={x(hoverDay)} cy={y(valueOf(p!, metric)!)} r={4.5} fill={s.color} stroke="var(--lc-surface)" strokeWidth={2} />
                 ))}
               </g>
@@ -302,13 +316,13 @@ export function TimeSeriesChart({
             {readout.map(({ s, p }) => (
               <div key={s.id} className="lc-ts-tip-row">
                 <i style={{ background: s.color }} aria-hidden />
-                <b>{int(valueOf(p!, metric)!)}</b>
-                <span>{s.short ?? s.name}</span>
+                <b>{valueOf(p!, metric) == null ? '—' : `${p!.estimated ? '≈ ' : ''}${int(valueOf(p!, metric)!)}`}</b>
+                <span>{s.short ?? s.name}{valueOf(p!, metric) == null ? ' · not refreshed yet' : ''}</span>
               </div>
             ))}
-            {multi && readout.length > 1 && (
+            {multi && known.length > 1 && (
               <div className="lc-ts-tip-row lc-ts-tip-total">
-                <b>{int(readout.reduce((a, r) => a + (valueOf(r.p!, metric) ?? 0), 0))}</b>
+                <b>{readout.some((r) => r.p!.estimated || r.p!.pending) ? '≈ ' : ''}{int(known.reduce((a, r) => a + (valueOf(r.p!, metric) ?? 0), 0))}</b>
                 <span>All sources</span>
               </div>
             )}
@@ -316,7 +330,15 @@ export function TimeSeriesChart({
         )}
       </div>
       <div className="lc-ts-foot">
-        <p className="lc-ts-note">{only1 ? `One ${unitWord} of plays so far: each new reading adds a point.` : ''}</p>
+        <p className="lc-ts-note">
+          {[
+            only1 ? `One ${unitWord} of plays so far: each new reading adds a point.` : '',
+            metric === 'daily' && waiting.length ? `${waiting.join(' and ')} hasn’t refreshed its count since the last reading; the latest plays appear when it does.` : '',
+            anyEstimated ? 'Dashed: plays spread over days the count didn’t refresh (the total is exact).' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        </p>
         <button type="button" className="lc-btn lc-btn--sm lc-btn--ghost" aria-pressed={table} onClick={() => setTable((t) => !t)}>
           {table ? 'Hide table' : 'Show as table'}
         </button>
@@ -341,13 +363,14 @@ export function TimeSeriesChart({
               {[...view.days].reverse().map((d) => {
                 const cells = view.series.map((s) => s.points.find((p) => p.day === d));
                 const vals = cells.map((p) => (p ? valueOf(p, metric) : null));
+                const approx = cells.some((p) => p?.estimated || p?.pending);
                 return (
                   <tr key={d}>
                     <td>{unit === 'month' ? dateLabel(d) : longDate(d)}</td>
                     {vals.map((v, i) => (
-                      <td key={i}>{v != null ? int(v) : '—'}</td>
+                      <td key={i}>{v != null ? `${cells[i]?.estimated ? '≈ ' : ''}${int(v)}` : cells[i]?.pending ? 'pending' : '—'}</td>
                     ))}
-                    {multi && <td>{vals.some((v) => v != null) ? int(vals.reduce<number>((a, v) => a + (v ?? 0), 0)) : '—'}</td>}
+                    {multi && <td>{vals.some((v) => v != null) ? `${approx ? '≈ ' : ''}${int(vals.reduce<number>((a, v) => a + (v ?? 0), 0))}` : '—'}</td>}
                   </tr>
                 );
               })}
