@@ -9,6 +9,8 @@ import { ForbiddenError, NotFoundError, ValidationError } from '@labelconsole/co
 import { PlanLimitError, planOf } from '@labelconsole/core/plans';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
 import { storage, storageKey, UPLOAD_RULES } from '@labelconsole/core/storage';
+import { extensionOf, fileKind, unsupportedReason } from '../kinds';
+import { buildPreview, readPlan, type Preview } from '../preview';
 import { fileLinks, files, folderPermissions, folders, type DriveFile, type DriveFolder } from '../schema';
 
 export type Access = 'none' | 'view' | 'edit' | 'manage';
@@ -174,16 +176,28 @@ export function sniffMismatch(mime: string, head: Buffer) {
   return rule ? !rule.test(head) : false;
 }
 
+const OOXML = 'application/vnd.openxmlformats-officedocument';
 const EXT_MIME: Record<string, string> = {
   pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', tif: 'image/tiff', tiff: 'image/tiff',
-  mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', aif: 'audio/aiff', aiff: 'audio/aiff', m4a: 'audio/mp4', ogg: 'audio/ogg',
-  csv: 'text/csv', txt: 'text/plain', json: 'application/json', zip: 'application/zip', mp4: 'video/mp4', mov: 'video/quicktime',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  avif: 'image/avif', bmp: 'image/bmp', ico: 'image/x-icon', svg: 'image/svg+xml', heic: 'image/heic', heif: 'image/heif',
+  mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', aif: 'audio/aiff', aiff: 'audio/aiff', m4a: 'audio/mp4', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', aac: 'audio/aac', weba: 'audio/webm',
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', ogv: 'video/ogg', mkv: 'video/x-matroska',
+  csv: 'text/csv', tsv: 'text/tab-separated-values', txt: 'text/plain', log: 'text/plain', md: 'text/markdown', markdown: 'text/markdown', html: 'text/html', htm: 'text/html',
+  json: 'application/json', xml: 'application/xml', rtf: 'application/rtf', zip: 'application/zip',
+  docx: `${OOXML}.wordprocessingml.document`, xlsx: `${OOXML}.spreadsheetml.sheet`, xlsm: `${OOXML}.spreadsheetml.sheet`, pptx: `${OOXML}.presentationml.presentation`,
+  doc: 'application/msword', xls: 'application/vnd.ms-excel', ppt: 'application/vnd.ms-powerpoint',
+  odt: 'application/vnd.oasis.opendocument.text', ods: 'application/vnd.oasis.opendocument.spreadsheet', odp: 'application/vnd.oasis.opendocument.presentation',
+  pages: 'application/vnd.apple.pages', numbers: 'application/vnd.apple.numbers', key: 'application/vnd.apple.keynote',
+  ttf: 'font/ttf', otf: 'font/otf', woff: 'font/woff', woff2: 'font/woff2',
 };
+/** Code and config files are stored as plain text (browsers send nothing, or video/mp2t for .ts). */
+const TEXT_EXT = new Set(['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'css', 'scss', 'yaml', 'yml', 'toml', 'ini', 'env', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'h', 'cpp', 'cs', 'php', 'sh', 'sql', 'graphql', 'srt', 'vtt', 'lrc', 'nfo', 'mdx']);
 
 export function mimeFor(name: string, declared?: string | null) {
+  const ext = name.includes('.') ? (name.split('.').pop()?.toLowerCase() ?? '') : '';
+  if (TEXT_EXT.has(ext)) return 'text/plain';
   if (declared && declared !== 'application/octet-stream') return declared;
-  return EXT_MIME[name.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream';
+  return EXT_MIME[ext] ?? 'application/octet-stream';
 }
 
 export type StoreInput = {
@@ -313,6 +327,87 @@ export async function readFileHead(ctx: ServiceContext, id: string, bytes = 4 * 
   return { file: f, head: Buffer.concat(chunks).subarray(0, bytes) };
 }
 
+/* ------------------------------------------------------------ viewing -- */
+
+const SHOWN_DIRECTLY = new Set(['image', 'audio', 'video', 'pdf', 'font']);
+
+/**
+ * What the viewer shows for a file browsers can't open themselves (see
+ * ../preview.ts). Opening a confidential file is logged, as a download is.
+ */
+export async function previewFile(ctx: ServiceContext, id: string): Promise<Preview> {
+  const f = await getFile(ctx, id);
+  if (f.status === 'quarantined') throw new ForbiddenError('This file failed the virus scan and cannot be opened');
+  const reason = unsupportedReason(f.name);
+  if (reason) return { kind: 'unsupported', reason };
+  const kind = fileKind(f.name, f.mime);
+  const plan = readPlan(SHOWN_DIRECTLY.has(kind) ? 'other' : kind, f.name);
+  if (plan.whole && f.size > plan.bytes) return { kind: 'unsupported', reason: `This file is too large to preview (${Math.round(f.size / 1024 / 1024)} MB). Download it to open it.` };
+  if (f.confidential) await ctx.audit({ action: 'file.viewed', module: 'drive', targetType: 'file', targetId: f.id, targetLabel: f.name });
+  const complete = f.size <= plan.bytes;
+  const stream = await storage().get(f.storageKey, complete ? undefined : { start: 0, end: plan.bytes - 1 });
+  const body = Buffer.concat(await stream.toArray());
+  try {
+    return await buildPreview(SHOWN_DIRECTLY.has(kind) ? 'other' : kind, f.name, body, complete);
+  } catch (err) {
+    return { kind: 'unsupported', reason: `This file couldn’t be read (${(err as Error).message.replace(/\.$/, '')}). Download it to open it in its own app.` };
+  }
+}
+
+const FONT_TYPE: Record<string, string> = { ttf: 'font/ttf', otf: 'font/otf', woff: 'font/woff', woff2: 'font/woff2' };
+
+/** The type a file is served as: text-like files as plain text, so nothing in them ever runs. */
+export function servedType(f: Pick<DriveFile, 'name' | 'mime'>) {
+  const kind = fileKind(f.name, f.mime);
+  if (kind === 'markdown' || kind === 'html' || kind === 'code' || kind === 'text') return 'text/plain; charset=utf-8';
+  if (kind === 'font') return FONT_TYPE[extensionOf(f.name)] ?? 'application/octet-stream';
+  if (kind === 'image' && extensionOf(f.name) === 'svg') return 'image/svg+xml';
+  return f.mime || 'application/octet-stream';
+}
+
+/** A Range header ("bytes=0-499", "bytes=500-", "bytes=-500") against a size; null when absent, false when unsatisfiable. */
+export function parseRange(header: string | null | undefined, size: number): { start: number; end: number } | null | false {
+  const m = header?.match(/^bytes=(\d*)-(\d*)$/);
+  if (!m) return null;
+  let start: number;
+  let end: number;
+  if (m[1] === '') {
+    if (m[2] === '') return false;
+    start = Math.max(0, size - Number(m[2]));
+    end = size - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+  }
+  return start <= end && start < size ? { start, end } : false;
+}
+
+/**
+ * The file's bytes from the app's own address, for viewers that read a file
+ * (PDF pages, text, waveforms, fonts): no bucket CORS needed, ranges for
+ * seeking and large PDFs. Opening a confidential file is logged once (on its
+ * first byte), not on every range.
+ */
+export async function fileContent(ctx: ServiceContext, id: string, rangeHeader?: string | null) {
+  const f = await getFile(ctx, id);
+  if (f.status === 'quarantined') throw new ForbiddenError('This file failed the virus scan and cannot be opened');
+  const range = parseRange(rangeHeader, f.size);
+  if (range === false) return { file: f, unsatisfiable: true as const };
+  if (f.confidential && (!range || range.start === 0)) await ctx.audit({ action: 'file.viewed', module: 'drive', targetType: 'file', targetId: f.id, targetLabel: f.name });
+  const stream = await storage().get(f.storageKey, range ?? undefined);
+  return { file: f, stream, range, unsatisfiable: false as const };
+}
+
+/** The files in a file's folder, in the order the folder lists them, for previous/next in the viewer. */
+export async function siblings(ctx: ServiceContext, id: string) {
+  const f = await getFile(ctx, id);
+  const conds = [isNull(files.deletedAt), f.folderId ? eq(files.folderId, f.folderId) : isNull(files.folderId)];
+  if (!canSeeConfidential(ctx)) conds.push(eq(files.confidential, false));
+  const rows = await ctx.tx.select({ id: files.id, name: files.name }).from(files).where(and(...conds)).orderBy(desc(files.createdAt)).limit(2000);
+  const i = rows.findIndex((r) => r.id === id);
+  return { previous: i > 0 ? rows[i - 1] : null, next: i >= 0 && i < rows.length - 1 ? rows[i + 1] : null, position: i + 1, count: rows.length };
+}
+
 export const FilePatch = z.object({ name: z.string().trim().min(1).max(250), folderId: z.uuid().nullable(), confidential: z.boolean() }).partial();
 
 export async function updateFile(ctx: ServiceContext, id: string, patch: z.infer<typeof FilePatch>) {
@@ -345,6 +440,25 @@ export async function linkFile(ctx: ServiceContext, fileId: string, entityType: 
 export async function unlinkFile(ctx: ServiceContext, fileId: string, entityType: string, entityId: string) {
   ctx.assert('drive:write');
   await ctx.tx.delete(fileLinks).where(and(eq(fileLinks.fileId, fileId), eq(fileLinks.entityType, entityType), eq(fileLinks.entityId, entityId)));
+}
+
+/** The records a file is attached to. */
+export async function linksOf(ctx: ServiceContext, fileId: string) {
+  await getFile(ctx, fileId);
+  return ctx.tx.select({ entityType: fileLinks.entityType, entityId: fileLinks.entityId }).from(fileLinks).where(eq(fileLinks.fileId, fileId));
+}
+
+/** Folders the reader can put files in, labelled with their path, for "Move to". */
+export async function folderOptions(ctx: ServiceContext) {
+  const rows = await ctx.tx.select().from(folders).orderBy(asc(folders.path), asc(folders.name)).limit(500);
+  const names = new Map(rows.map((r) => [r.id, r.name]));
+  const out: Array<{ value: string; label: string }> = [];
+  for (const f of rows) {
+    if (f.externalProvider) continue; // mirrors are read-only
+    if (RANK[await folderAccess(ctx, f)] < RANK.edit) continue;
+    out.push({ value: f.id, label: [...pathIds(f).map((id) => names.get(id) ?? '…')].join(' / ') });
+  }
+  return out.sort((a, b) => a.label.localeCompare(b.label));
 }
 
 export async function filesFor(ctx: ServiceContext, entityType: string, entityId: string) {

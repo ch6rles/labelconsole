@@ -2,6 +2,7 @@ import type { PanelProps } from '@labelconsole/core/web';
 import { EmptyState, Icon, fmt } from '@labelconsole/ui';
 import { UploadZone } from '@labelconsole/ui/client';
 import Link from 'next/link';
+import { KIND_ICON, fileKind } from '../kinds';
 import * as svc from '../service';
 
 /** "Files" panel that any record page can show, contributed by Drive. */
@@ -16,8 +17,8 @@ export function filesPanel(entityType: string) {
         ) : (
           <div className="lc-list">
             {rows.map(({ file: f }) => (
-              <Link key={f.id} href={`/drive?${f.folderId ? `folder=${f.folderId}&` : ''}file=${f.id}`} className="lc-popover-item" style={{ padding: '10px 16px' }}>
-                <Icon name={f.mime.startsWith('audio/') ? 'audio_file' : f.mime.startsWith('image/') ? 'image' : 'draft'} />
+              <Link key={f.id} href={`/drive/files/${f.id}`} className="lc-popover-item" style={{ padding: '10px 16px' }}>
+                <Icon name={KIND_ICON[fileKind(f.name, f.mime)]} />
                 <span style={{ flex: 1 }} className="lc-ellipsis">{f.name}</span>
                 <span className="lc-mono lc-muted" style={{ fontSize: 12 }}>{fmt.bytes(f.size)} · {fmt.shortDate(f.createdAt)}</span>
               </Link>

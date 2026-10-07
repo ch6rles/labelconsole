@@ -4,9 +4,11 @@ import { getCredentialHandle } from '@labelconsole/core/vault';
 import type { PageProps } from '@labelconsole/core/web';
 import { Chip, EmptyState, Icon, KV, Page, PageHeader, SectionLabel, Summary, fmt } from '@labelconsole/ui';
 import { ActionButton, Drawer, DrawerClose, FormModal, SearchInput, UploadZone } from '@labelconsole/ui/client';
+import { KIND_ICON, KIND_LABEL, fileKind } from '../kinds';
 import * as svc from '../service';
+import { FileViewer } from './viewer';
 
-const ICON = (mime: string) => (mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio_file' : mime.startsWith('video/') ? 'movie' : mime === 'application/pdf' ? 'picture_as_pdf' : mime.includes('sheet') || mime === 'text/csv' ? 'table' : 'draft');
+const ICON = (f: { name: string; mime: string }) => KIND_ICON[fileKind(f.name, f.mime)];
 
 export default async function DrivePage({ run, session, searchParams }: PageProps) {
   const folderId = searchParams.folder ?? null;
@@ -16,11 +18,10 @@ export default async function DrivePage({ run, session, searchParams }: PageProp
       await Promise.all(listing.files.filter((f) => f.mime.startsWith('image/') && f.status === 'ready').slice(0, 60).map(async (f) => [f.id, await svc.downloadUrl(ctx, f.id, { inline: true }).catch(() => null)] as const)),
     );
     const selected = searchParams.file ? await svc.getFile(ctx, searchParams.file).catch(() => null) : null;
-    const selectedUrl = selected && selected.status !== 'quarantined' ? await svc.downloadUrl(ctx, selected.id, { inline: true }) : null;
     const grants = listing.folder ? await svc.listGrants(ctx, listing.folder.id) : [];
     const google = Boolean(await getCredentialHandle(ctx, 'google_drive'));
     const usage = await svc.storageUsage(ctx);
-    return { ...listing, thumbs, selected, selectedUrl, grants, google, usage };
+    return { ...listing, thumbs, selected, grants, google, usage };
   });
   const here = (extra: Record<string, string> = {}) => `/drive?${new URLSearchParams({ ...(folderId ? { folder: folderId } : {}), ...extra })}`;
   const canEdit = data.access === 'edit' || data.access === 'manage';
@@ -80,7 +81,7 @@ export default async function DrivePage({ run, session, searchParams }: PageProp
           ))}
           {data.files.map((f) => (
             <Link key={f.id} href={here({ file: f.id })} className="lc-file-tile" scroll={false}>
-              <span className="lc-file-thumb">{data.thumbs[f.id] ? <img src={data.thumbs[f.id]!} alt="" /> : <Icon name={ICON(f.mime)} />}</span>
+              <span className="lc-file-thumb">{data.thumbs[f.id] ? <img src={data.thumbs[f.id]!} alt="" /> : <Icon name={ICON(f)} />}</span>
               <span className="lc-file-meta">
                 <span className="lc-ellipsis" style={{ fontWeight: 600, fontSize: 13 }}>{f.name}</span>
                 <span className="lc-muted lc-mono" style={{ fontSize: 11 }}>
@@ -101,7 +102,7 @@ export default async function DrivePage({ run, session, searchParams }: PageProp
           ))}
           {data.files.map((f) => (
             <Link key={f.id} href={here({ file: f.id, view: 'list' })} className="lc-popover-item" style={{ padding: '10px 16px' }} scroll={false}>
-              <Icon name={ICON(f.mime)} />
+              <Icon name={ICON(f)} />
               <span style={{ flex: 1 }} className="lc-ellipsis">{f.name}</span>
               <span className="lc-mono lc-muted" style={{ fontSize: 12 }}>{fmt.bytes(f.size)}</span>
               <span className="lc-mono lc-muted" style={{ fontSize: 12, width: 90, textAlign: 'right' }}>{fmt.shortDate(f.createdAt)}</span>
@@ -142,11 +143,11 @@ export default async function DrivePage({ run, session, searchParams }: PageProp
       {data.selected && (
         <Drawer closeHref={here(view === 'list' ? { view } : {})} wide>
           <div className="lc-drawer-head">
-            <span className="lc-cover" style={{ width: 52, height: 52 }}><Icon name={ICON(data.selected.mime)} /></span>
+            <span className="lc-cover" style={{ width: 52, height: 52 }}><Icon name={ICON(data.selected)} /></span>
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span className="lc-drawer-title" style={{ fontSize: 18, wordBreak: 'break-word' }}>{data.selected.name}</span>
               <div className="lc-row" style={{ gap: 6 }}>
-                <Chip>{data.selected.mime}</Chip>
+                <Chip>{KIND_LABEL[fileKind(data.selected.name, data.selected.mime)]}</Chip>
                 {data.selected.confidential && <Chip tone="ink">Confidential</Chip>}
                 <Chip tone={data.selected.scanStatus === 'clean' ? 'blue' : data.selected.scanStatus === 'infected' ? 'red' : 'neutral'}>Scan: {data.selected.scanStatus}</Chip>
               </div>
@@ -154,11 +155,11 @@ export default async function DrivePage({ run, session, searchParams }: PageProp
             <DrawerClose closeHref={here(view === 'list' ? { view } : {})} />
           </div>
           <div className="lc-drawer-section">
-            {data.selectedUrl && data.selected.mime.startsWith('image/') && <img src={data.selectedUrl} alt={data.selected.name} style={{ maxWidth: '100%', border: '1px solid var(--lc-border)' }} />}
-            {data.selectedUrl && data.selected.mime.startsWith('audio/') && <audio controls src={data.selectedUrl} style={{ width: '100%' }} />}
-            {data.selectedUrl && data.selected.mime.startsWith('video/') && <video controls src={data.selectedUrl} style={{ width: '100%' }} />}
-            {data.selectedUrl && data.selected.mime === 'application/pdf' && <iframe title="Preview" src={data.selectedUrl} style={{ width: '100%', height: 420, border: '1px solid var(--lc-border)' }} />}
-            {!data.selectedUrl && <span className="lc-danger-text">This file failed the virus scan and is quarantined.</span>}
+            {data.selected.status === 'quarantined' ? (
+              <span className="lc-danger-text">This file failed the virus scan and is quarantined.</span>
+            ) : (
+              <FileViewer key={data.selected.id} file={{ id: data.selected.id, name: data.selected.name, mime: data.selected.mime, size: data.selected.size, kind: fileKind(data.selected.name, data.selected.mime) }} compact />
+            )}
           </div>
           <div className="lc-drawer-section">
             <SectionLabel>Details</SectionLabel>
@@ -168,7 +169,8 @@ export default async function DrivePage({ run, session, searchParams }: PageProp
             {data.selected.externalProvider && <KV k="Source" v="Google Drive mirror" />}
           </div>
           <div className="lc-drawer-foot">
-            {data.selectedUrl && <a className="lc-btn lc-btn--primary lc-btn--block" href={`/api/v1/drive/files/${data.selected.id}/download`}><Icon name="download" />Download</a>}
+            {data.selected.status !== 'quarantined' && <Link className="lc-btn lc-btn--primary lc-btn--block" href={`/drive/files/${data.selected.id}`}><Icon name="open_in_full" />Open viewer</Link>}
+            {data.selected.status !== 'quarantined' && <a className="lc-btn" href={`/api/v1/drive/files/${data.selected.id}/content?download=1`}><Icon name="download" />Download</a>}
             {session.permissions.has('drive:delete') && <ActionButton endpoint={`/drive/files/${data.selected.id}`} method="DELETE" label="Delete" icon="delete" confirm={`Delete ${data.selected.name}?`} redirectTo={here()} />}
           </div>
         </Drawer>

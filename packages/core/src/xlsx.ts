@@ -1,4 +1,5 @@
-import { inflateRawSync } from 'node:zlib';
+import { xmlAttr, xmlDecode } from './xml';
+import { isZip, readZip } from './zip';
 
 /**
  * A small reader for .xlsx workbooks (Office Open XML spreadsheets), enough to
@@ -11,56 +12,11 @@ import { inflateRawSync } from 'node:zlib';
 export type Cell = string | number | boolean | null;
 export type Sheet = { name: string; rows: Cell[][] };
 
-/** No single part of a workbook may unpack beyond this (guards against zip bombs). */
-const MAX_PART_BYTES = 256 * 1024 * 1024;
+export const isXlsx = isZip;
 
-export const isXlsx = (body: Buffer) => body.length > 4 && body.readUInt32LE(0) === 0x04034b50;
-
-/** The parts of a zip archive by name, unpacked on demand. */
-function unzip(buf: Buffer): Map<string, () => Buffer> {
-  let eocd = -1;
-  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65_557); i--) {
-    if (buf.readUInt32LE(i) === 0x06054b50) {
-      eocd = i;
-      break;
-    }
-  }
-  if (eocd < 0) throw new Error('This is not an .xlsx file (it has no zip directory)');
-  const count = buf.readUInt16LE(eocd + 10);
-  let p = buf.readUInt32LE(eocd + 16);
-  if (count === 0xffff || p === 0xffffffff) throw new Error('This spreadsheet is too large to read; export it as CSV instead');
-  const parts = new Map<string, () => Buffer>();
-  for (let n = 0; n < count; n++) {
-    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) throw new Error('This .xlsx file is damaged');
-    const method = buf.readUInt16LE(p + 10);
-    const compressed = buf.readUInt32LE(p + 20);
-    const size = buf.readUInt32LE(p + 24);
-    const nameLen = buf.readUInt16LE(p + 28);
-    const local = buf.readUInt32LE(p + 42);
-    const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
-    p += 46 + nameLen + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
-    parts.set(name, () => {
-      if (buf.readUInt32LE(local) !== 0x04034b50) throw new Error('This .xlsx file is damaged');
-      if (size > MAX_PART_BYTES) throw new Error('This spreadsheet is too large to read; export it as CSV instead');
-      const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
-      const data = buf.subarray(start, start + compressed);
-      if (method === 0) return data;
-      if (method === 8) return inflateRawSync(data, { maxOutputLength: MAX_PART_BYTES });
-      throw new Error(`This .xlsx file uses an unsupported compression (method ${method})`);
-    });
-  }
-  return parts;
-}
-
-const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
-const decode = (s: string) =>
-  s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) =>
-    e[0] === '#' ? String.fromCodePoint(e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : (ENTITIES[e] ?? m),
-  );
-const attr = (tag: string, name: string) => {
-  const m = tag.match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`));
-  return m ? decode(m[1] ?? m[2]) : null;
-};
+const unzip = (buf: Buffer) => new Map([...readZip(buf, '.xlsx file')].map(([name, e]) => [name, e.read]));
+const decode = xmlDecode;
+const attr = xmlAttr;
 /** All text runs inside an element, without phonetic hints. Tags may carry a namespace prefix. */
 const textOf = (xml: string) =>
   [...xml.replace(/<(\w+:)?rPh\b[\s\S]*?<\/(\w+:)?rPh>/g, '').matchAll(/<(?:\w+:)?t\b[^>]*\/>|<(?:\w+:)?t\b[^>]*>([\s\S]*?)<\/(?:\w+:)?t>/g)].map((m) => decode(m[1] ?? '')).join('');

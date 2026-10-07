@@ -453,6 +453,70 @@ The owner asked whether YouTube Music streams can be tracked without a YouTube D
     - the history split.
   - All changed pages were checked at desktop and phone width.
 
+## Drive file viewer
+
+- **Why files didn't open:**
+  - The Drive drawer only previewed images, audio, video and PDFs.
+  - Agents saved Markdown as text/plain with no extension, so nothing knew it was Markdown.
+  - Uploads of .md, .pptx, fonts and code files were rejected whenever the browser sent no type.
+- **A page per file:** `/drive/files/:id` is the full viewer.
+  - Around it: where the file lives, previous/next file in its folder (← →), Esc back to the folder.
+  - Actions: download, open original, copy link, rename, move, delete.
+  - Details panel: type, size, date, folder, SHA-256, virus scan, confidential switch, linked records, keyboard shortcuts.
+  - The Drive drawer shows the same viewer in compact form with an "Open viewer" button.
+  - The record "Files" panels, global search and the document page's "View" button all open it.
+- **What each kind gets** (`modules/drive/ui/viewer/`):
+  - **PDF** (pdf.js, parsing in a bundled Web Worker):
+    - Pages drawn as they scroll into view, and released far off screen.
+    - Selectable text, and search across the whole document with highlights.
+    - Thumbnails and the PDF's outline.
+    - Page jumps, zoom (fit width / page / %), rotate.
+    - Working links, password prompt, document properties, night mode, print.
+  - **Images:** fit or zoom (buttons, Ctrl/pinch wheel, keys, double-click), pan, rotate, checkerboard for transparency, pixel size.
+  - **Audio:**
+    - Clickable waveform, speed, loop, volume and keyboard control.
+    - ID3/FLAC tags with artwork (title, artist, album, ISRC, BPM, key, label).
+    - Levels: sample peak, RMS and integrated loudness in LUFS (BS.1770, checked against the EBU reference signal), compared with the −14 LUFS streaming level.
+  - **Video:** speed, loop, picture-in-picture, save the current frame as PNG, size and length.
+  - **Text and code:**
+    - Line numbers, syntax colours (about 15 languages), wrap, text size, search, copy.
+    - Markdown shown rendered or as source; HTML as a sealed page or as source; JSON formatted.
+  - **Spreadsheets** (CSV, TSV, .xlsx):
+    - Sheet tabs; a virtualised grid with column letters and row numbers.
+    - Sort, filter, header-row switch, keyboard cell moves.
+    - The cell's full value, and the column's count, sum, average, min and max.
+    - Save the view as CSV.
+  - **Word (.docx):** converted to HTML (mammoth) in a frame that runs no scripts, with an outline from the headings, search, zoom, word count and print.
+  - **PowerPoint (.pptx):** each slide's title, points, pictures and speaker notes; slide strip, grid of all slides, full-screen presenting.
+  - **Zip:** browse folders inside, sizes and compression, search all paths, totals.
+  - **Fonts:** type tester at any size, waterfall, character sets, and the font's own family, style, version, designer, licence and glyph count.
+  - **Anything else:**
+    - Opened as text if it is text; otherwise "looks like: SQLite database" (from its first bytes), a download and a hex dump.
+    - Formats that can't be shown (.doc, .xls, .ppt, iWork, OpenDocument, rar/7z) say what to save them as.
+- **Server side:**
+  - `GET /drive/files/:id/content` serves the bytes from the app with Range support (no bucket CORS, seeking in long audio and video).
+    - Text-like files are served as plain text inside a CSP `sandbox` with `nosniff`, so opening a stored HTML or SVG link runs nothing.
+    - Opening a confidential file is audited once, not for every range request.
+  - `GET /drive/files/:id/preview` builds the text, sheet, document, slides or archive preview, capped in size.
+  - `GET /drive/files/:id/siblings` gives previous and next.
+  - `StorageDriver.get` takes a byte range, on both disk and S3.
+- **Uploads:** the type table now covers Markdown, PowerPoint, OpenDocument/iWork, fonts, SVG/HEIC/AVIF, WebM/MKV, Opus and more. Code files are stored as plain text. Agent-saved files get the extension their type implies (`.md`, `.csv`, `.json`, `.txt`), and the tool returns the viewer link.
+- **Verified:**
+  - 251 tests pass. New ones cover:
+    - file kinds and encodings;
+    - CSV, xlsx, pptx, docx and zip previews;
+    - range requests and the sandbox headers;
+    - quarantined files refused;
+    - audit-once;
+    - previous/next skipping confidential files;
+    - the upload types;
+    - the syntax colourer;
+    - ID3/FLAC tags;
+    - the LUFS reference;
+    - font metadata.
+  - Every viewer was checked in Chromium at desktop and phone width (no sideways scroll).
+  - The production build was also checked, including the PDF worker.
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.

@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { z } from 'zod';
 import { ValidationError } from '@labelconsole/core/errors';
 import { defineRoutes, route } from '@labelconsole/core/router';
@@ -51,6 +52,34 @@ export const routes = defineRoutes('drive', [
     permission: 'drive:read',
     query: z.object({ inline: z.enum(['1', '0']).optional() }),
     handler: async (ctx, req) => Response.redirect(await svc.downloadUrl(ctx, req.params.id, { inline: req.query.inline === '1' }), 302),
+  }),
+  route({ method: 'GET', path: '/drive/files/:id/preview', permission: 'drive:read', handler: (ctx, req) => svc.previewFile(ctx, req.params.id) }),
+  route({ method: 'GET', path: '/drive/files/:id/siblings', permission: 'drive:read', handler: (ctx, req) => svc.siblings(ctx, req.params.id) }),
+  route({
+    method: 'GET',
+    path: '/drive/files/:id/content',
+    permission: 'drive:read',
+    query: z.object({ download: z.enum(['1', '0']).optional() }),
+    handler: async (ctx, req) => {
+      const c = await svc.fileContent(ctx, req.params.id, req.request.headers.get('range'));
+      if (c.unsatisfiable) return new Response(null, { status: 416, headers: { 'content-range': `bytes */${c.file.size}` } });
+      const length = c.range ? c.range.end - c.range.start + 1 : c.file.size;
+      return new Response(Readable.toWeb(c.stream) as ReadableStream, {
+        status: c.range ? 206 : 200,
+        headers: {
+          'content-type': svc.servedType(c.file),
+          'content-length': String(length),
+          'accept-ranges': 'bytes',
+          ...(c.range ? { 'content-range': `bytes ${c.range.start}-${c.range.end}/${c.file.size}` } : {}),
+          'content-disposition': `${req.query.download === '1' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(c.file.name)}`,
+          // Whatever the file holds, opened directly it is a sandboxed document that runs no scripts.
+          'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; font-src 'self'",
+          'x-content-type-options': 'nosniff',
+          'cross-origin-resource-policy': 'same-origin',
+          'cache-control': c.file.confidential ? 'private, no-store' : 'private, max-age=300',
+        },
+      });
+    },
   }),
   route({ method: 'PATCH', path: '/drive/files/:id', permission: 'drive:write', body: svc.FilePatch, handler: (ctx, req) => svc.updateFile(ctx, req.params.id, req.body) }),
   route({ method: 'DELETE', path: '/drive/files/:id', permission: 'drive:delete', handler: (ctx, req) => svc.deleteFile(ctx, req.params.id) }),

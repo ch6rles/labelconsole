@@ -14,7 +14,8 @@ import { env } from './env';
  */
 export interface StorageDriver {
   put(key: string, body: Buffer | Readable, opts: { contentType: string }): Promise<{ size: number }>;
-  get(key: string): Promise<Readable>;
+  /** The object's bytes, or a byte range of them (both ends inclusive). */
+  get(key: string, range?: { start: number; end: number }): Promise<Readable>;
   head(key: string): Promise<{ size: number } | null>;
   delete(key: string): Promise<void>;
   /** Remove every object under a prefix (org deletion). */
@@ -52,8 +53,8 @@ export class LocalDiskDriver implements StorageDriver {
     return { size: s.size };
   }
 
-  async get(key: string) {
-    return createReadStream(this.file(key));
+  async get(key: string, range?: { start: number; end: number }) {
+    return createReadStream(this.file(key), range ? { start: range.start, end: range.end } : undefined);
   }
 
   async head(key: string) {
@@ -111,9 +112,9 @@ export class S3Driver implements StorageDriver {
     return { size: buf.length };
   }
 
-  async get(key: string) {
+  async get(key: string, range?: { start: number; end: number }) {
     const { client, sdk } = await this.s3();
-    const res = await client.send(new sdk.GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    const res = await client.send(new sdk.GetObjectCommand({ Bucket: this.bucket, Key: key, Range: range ? `bytes=${range.start}-${range.end}` : undefined }));
     return res.Body as Readable;
   }
 
@@ -186,5 +187,5 @@ export const UPLOAD_RULES: Record<string, { mimes: RegExp; maxBytes: number }> =
     mimes: /^(application\/pdf|text\/csv|text\/plain|application\/vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet)|application\/msword|application\/vnd\.ms-excel)$/,
     maxBytes: 100 * 1024 * 1024,
   },
-  any: { mimes: /^(audio|image|video|text)\/|^application\/(pdf|zip|json|vnd\.)/, maxBytes: 2 * 1024 * 1024 * 1024 },
+  any: { mimes: /^(audio|image|video|text|font)\/|^application\/(pdf|zip|x-zip-compressed|json|xml|rtf|msword|vnd\.)/, maxBytes: 2 * 1024 * 1024 * 1024 },
 };

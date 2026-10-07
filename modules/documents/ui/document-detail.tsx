@@ -39,7 +39,8 @@ export default async function DocumentDetailPage({ run, params, session }: PageP
         description={`${TYPE_LABEL[d.type]} · version ${d.version}${d.isLatest ? '' : ' (superseded)'} · added ${fmt.date(d.createdAt)}${d.size ? ` · ${fmt.bytes(d.size)}` : ''}`}
         actions={
           <>
-            {d.fileId && <LinkButton href={`${fileUrl}?inline=1`} icon="visibility" external>Open</LinkButton>}
+            {/* Drive's viewer shows Word, Excel and PDF files in the app; without Drive access, the browser opens the file. */}
+            {d.fileId && (can('drive:read') ? <LinkButton href={`/drive/files/${d.fileId}`} icon="visibility">View</LinkButton> : <LinkButton href={`${fileUrl}?inline=1`} icon="visibility" external>Open</LinkButton>)}
             {d.fileId && <LinkButton href={fileUrl} icon="download">Download</LinkButton>}
             {canWrite && d.isLatest && (
               <FormModal title="Upload new version" description="The current version is kept in the history. Links and tags carry over." trigger={{ label: 'New version', icon: 'upload_file' }} endpoint={`/documents/${d.id}/versions`} multipart fields={[{ name: 'file', label: 'File', type: 'file', required: true, full: true }]} columns={1} redirectTo="/documents/{id}" success="New version uploaded" />

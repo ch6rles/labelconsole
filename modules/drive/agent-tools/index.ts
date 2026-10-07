@@ -4,6 +4,8 @@ import { extractText } from '@labelconsole/core/text';
 import { clip, compact, defineTool } from '@labelconsole/core/tools';
 import * as svc from '../service';
 
+const SAVE_EXT: Record<string, string> = { 'text/plain': '.txt', 'text/csv': '.csv', 'text/markdown': '.md', 'application/json': '.json' };
+
 export const tools = [
   defineTool({
     name: 'drive_list_files',
@@ -48,8 +50,11 @@ export const tools = [
     preview: (i) => `Save "${i.name}" (${i.content.length} characters) to Drive`,
     execute: (t, i) =>
       t.withOrg(async (ctx) => {
-        const row = await svc.storeFile(ctx, { name: i.name, mime: i.mime === 'text/markdown' ? 'text/plain' : i.mime, body: Buffer.from(i.content, 'utf8'), folderId: i.folderId ?? null });
-        return { id: row.id, name: row.name, size: row.size };
+        // Give the file the extension its type implies, so Drive opens Markdown rendered, CSV as a sheet, and so on.
+        const ext = SAVE_EXT[i.mime];
+        const name = /\.(md|markdown|txt|csv|tsv|json)$/i.test(i.name) ? i.name : `${i.name}${ext}`;
+        const row = await svc.storeFile(ctx, { name, mime: i.mime === 'text/markdown' ? 'text/plain' : i.mime, body: Buffer.from(i.content, 'utf8'), folderId: i.folderId ?? null });
+        return { id: row.id, name: row.name, size: row.size, href: `/drive/files/${row.id}` };
       }),
   }),
   defineTool({
