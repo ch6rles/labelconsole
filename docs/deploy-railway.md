@@ -123,6 +123,27 @@ What the first line does:
 4. Open the website's address. The first visit shows **Set up River Of Styxx**: enter your name, email and password. This creates the owner account, and setup closes after that.
 5. Invite the rest of your team under **Admin → Users**.
 
+## Use your own address (labelconsole.riverofstyxx.com)
+
+The app stays on Railway. Its worker, database and Redis need servers that are always on, which Netlify doesn't provide. Your domain only needs one DNS record pointing the subdomain at Railway. The main site at riverofstyxx.com stays on Netlify, untouched.
+
+1. **Railway:**
+   - Open **web → Settings → Networking**, click **Custom Domain**, enter `labelconsole.riverofstyxx.com` and port **3000**.
+   - Railway shows a **CNAME** record to add, for example `labelconsole` → `abc123.up.railway.app`.
+   - It sometimes also shows a **TXT** record for verification.
+2. **Netlify:** riverofstyxx.com uses Netlify DNS, so its records are managed there, not at Namecheap.
+   - Open **Domains → riverofstyxx.com → DNS settings → Add new record**.
+   - Add the CNAME: type **CNAME**, name `labelconsole`, value the address Railway showed.
+   - Add the TXT record the same way if Railway showed one.
+3. Wait until Railway shows the domain as **verified** (usually a few minutes, up to an hour). Railway issues the HTTPS certificate on its own.
+4. **Railway:**
+   - Set `APP_URL=https://labelconsole.riverofstyxx.com` in **web → Variables** and **worker → Variables**.
+   - Invite links and file links use this address.
+   - Changing a variable redeploys the service.
+5. Open `https://labelconsole.riverofstyxx.com/api/health` to check, then sign in. Sessions belong to each address, so everyone signs in once on the new one.
+
+The Railway address keeps working as well.
+
 ## Deploying updates
 
 After new code is pushed to the branch, open each service (**web**, then **worker**) and check that its latest deployment shows the newest commit message. If it doesn't, press **Cmd+K** (Ctrl+K on Windows) on the project canvas and choose **Deploy Latest Commit**, or use the **⋮** menu on the service. **Redeploy** on an old deployment rebuilds that same old commit, not the newest one.
