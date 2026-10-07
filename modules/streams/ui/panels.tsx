@@ -4,9 +4,27 @@ import { Card, DataTable, EmptyState, KV, ShareBars, StatCard, fmt } from '@labe
 import { ActionButton, FormModal } from '@labelconsole/ui/client';
 import { TimeSeriesChart } from '@labelconsole/ui/timeseries';
 import * as svc from '../service';
-import { historyLines, PLAY_RANGES, platformColor } from './shared';
+import { historyLines, PLAY_RANGES, platformColor, platformTotals } from './shared';
 
 const from90 = () => new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10);
+const PLATFORM_ICON: Record<string, string> = { spotify: 'graphic_eq', youtube_music: 'library_music', youtube: 'smart_display', apple_music: 'music_note' };
+
+/** One card per platform: the all-time count and the last 7 days. */
+export function PlatformCards({ totals, missing }: { totals: ReturnType<typeof platformTotals>; missing?: Record<string, string> }) {
+  return (
+    <div className="lc-grid-stats">
+      {totals.map((t) => (
+        <StatCard
+          key={t.platform}
+          label={t.label.toUpperCase()}
+          icon={PLATFORM_ICON[t.platform] ?? 'equalizer'}
+          value={t.total != null ? fmt.compact(t.total) : '—'}
+          note={t.total == null ? (missing?.[t.platform] ?? 'not matched yet') : t.plays7d != null ? `${fmt.compact(t.plays7d, { signed: true })} in the last 7 days` : t.platform === 'youtube' ? 'all-time video views' : 'all-time plays'}
+        />
+      ))}
+    </div>
+  );
+}
 
 /** On a catalogue track page: 90 days of plays and where the numbers come from. */
 export async function trackStreamsPanel({ entityId, run }: PanelProps) {
@@ -18,11 +36,19 @@ export async function trackStreamsPanel({ entityId, run }: PanelProps) {
         {d.tracked?.lastError ?? (d.tracked?.status === 'pending_match' ? 'The track needs a Spotify ID or a confirmed YouTube video.' : 'Readings arrive with the next scheduled poll.')}
       </EmptyState>
     );
+  const artTrack = d.youtube.some((v) => v.variant === 'topic' && v.status === 'confirmed');
+  const artTrackPending = d.youtube.some((v) => v.variant === 'topic' && v.status === 'pending_review');
   return (
-    <div className="lc-card">
-      <div className="lc-card-body lc-stack">
-        <TimeSeriesChart title="Plays" series={historyLines(polled)} ranges={PLAY_RANGES} defaultRange={90} height={220} />
-        <Link className="lc-btn lc-btn--link" href={`/streams/tracks/${entityId}`}>Open in Streams</Link>
+    <div className="lc-stack">
+      <PlatformCards
+        totals={platformTotals(polled)}
+        missing={{ spotify: d.spotify.length ? 'first reading on its way' : 'no Spotify match yet', youtube_music: artTrack ? 'first reading on its way' : artTrackPending ? 'art track waiting for review' : 'no art track matched yet' }}
+      />
+      <div className="lc-card">
+        <div className="lc-card-body lc-stack">
+          <TimeSeriesChart title="Plays" series={historyLines(polled)} ranges={PLAY_RANGES} defaultRange={90} height={220} />
+          <Link className="lc-btn lc-btn--link" href={`/streams/tracks/${entityId}`}>Open in Streams</Link>
+        </div>
       </div>
     </div>
   );
@@ -35,6 +61,7 @@ export async function artistStreamsPanel({ entityId, run }: PanelProps) {
   if (polled.length === 0 && h.topTracks.length === 0) return <EmptyState icon="monitoring" title="No stream data yet">Plays appear once the artist&apos;s tracks are matched on Spotify or YouTube and the first two readings are in.</EmptyState>;
   return (
     <div className="lc-stack">
+      <PlatformCards totals={platformTotals(polled)} />
       <div className="lc-card">
         <div className="lc-card-body">
           <TimeSeriesChart title="Plays across the artist's tracks" series={historyLines(polled)} ranges={PLAY_RANGES} defaultRange={90} height={220} />

@@ -26,9 +26,19 @@ export default async function StreamTracksPage({ run, session, searchParams, pat
     },
     { key: 'status', header: 'Status', width: '140px', render: (r) => <span className={STATUS_CHIP[r.status]?.className ?? 'lc-chip'}>{STATUS_CHIP[r.status]?.label ?? r.status}</span> },
     { key: 'tier', header: 'Polling', width: '110px', render: (r) => <span style={{ fontSize: 13, color: 'var(--lc-text-2)' }}>{r.status !== 'tracking' ? '—' : r.tier === 'active' ? 'Every 6 h' : 'Daily'}</span> },
-    { key: 'sources', header: 'Sources', width: '130px', render: (r) => <span style={{ fontSize: 13, color: 'var(--lc-text-2)' }}>{[r.spotify ? 'Spotify' : null, r.videos ? `${r.videos} video${r.videos === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ') || '—'}</span> },
+    {
+      key: 'sources',
+      header: 'Sources',
+      width: '150px',
+      render: (r) => {
+        const other = r.videos - (r.artTrack ? 1 : 0);
+        return <span style={{ fontSize: 13, color: 'var(--lc-text-2)' }}>{[r.spotify ? 'Spotify' : null, r.artTrack ? 'YouTube Music' : null, other > 0 ? `${other} video${other === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ') || '—'}</span>;
+      },
+    },
     { key: 'trend', header: '28 days', width: '100px', render: (r) => <Sparkline values={r.spark} /> },
     { key: 'plays', header: 'Plays 28d', width: '100px', align: 'right', render: (r) => <span className="lc-cell-num">{r.spark.length ? fmt.compact(r.plays28d) : '—'}</span> },
+    { key: 'sp28', header: 'Spotify 28d', width: '100px', align: 'right', render: (r) => <span className="lc-cell-num">{r.spotify28d != null ? fmt.compact(r.spotify28d) : '—'}</span> },
+    { key: 'ytm28', header: 'YT Music 28d', width: '110px', align: 'right', render: (r) => <span className="lc-cell-num">{r.youtubeMusic28d != null ? fmt.compact(r.youtubeMusic28d) : '—'}</span> },
     { key: 'total', header: 'Total', width: '100px', align: 'right', render: (r) => <span className="lc-cell-num lc-muted">{r.total != null ? fmt.compact(r.total) : '—'}</span> },
     {
       key: 'polled',
@@ -54,7 +64,7 @@ export default async function StreamTracksPage({ run, session, searchParams, pat
         <FilterPills items={[pill('All'), pill('Tracking', 'tracking'), pill('Needs a match', 'pending_match'), pill('Paused', 'paused')]} />
         <SearchInput placeholder="Search title or ISRC" />
       </div>
-      <DataTable rows={rows} rowKey={(r) => r.trackId} rowHref={(r) => `/streams/tracks/${r.trackId}`} columns={columns} minWidth={1060} empty={searchParams.q || status ? 'No tracks match.' : 'No tracks yet. Tracks are registered automatically when they enter the catalogue.'} />
+      <DataTable rows={rows} rowKey={(r) => r.trackId} rowHref={(r) => `/streams/tracks/${r.trackId}`} columns={columns} minWidth={1300} empty={searchParams.q || status ? 'No tracks match.' : 'No tracks yet. Tracks are registered automatically when they enter the catalogue.'} />
     </Page>
   );
 }

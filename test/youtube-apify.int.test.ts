@@ -69,7 +69,8 @@ describe('YouTube views without a Data API key', () => {
     await runJob(jobs, 'streams.poll-org', a.org.id);
     expect(apify.runs[1]).toMatchObject({ actor: ACTOR, input: { startUrls: ['https://www.youtube.com/watch?v=3BFTio5296w'], maxItems: 1 } });
     const day = await a.as((ctx) => ctx.tx.select().from(streamDaily).where(eq(streamDaily.trackId, track.id)));
-    expect(day.map((d) => [d.platform, d.source, d.total])).toEqual([['youtube', 'youtube-scraper', 12_947_987]]);
+    // The art track's views are YouTube Music plays.
+    expect(day.map((d) => [d.platform, d.source, d.total])).toEqual([['youtube_music', 'youtube-scraper', 12_947_987]]);
     expect(await a.as((ctx) => monthUsage(ctx, 'apify_results'))).toBe(6); // 5 search results + 1 video
 
     // Due again the same day: already read today, so nothing is paid for twice.

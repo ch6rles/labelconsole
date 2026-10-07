@@ -25,11 +25,11 @@ export default async function StreamsOverviewPage({ run, session, searchParams, 
     <Page>
       <PageHeader
         title="Streams"
-        description="Plays per day from Spotify play counts (SpotScraper) and public YouTube views (the art track is what YouTube Music plays), plus exact statement counts. Sources are never blended."
+        description="Plays per day from Spotify play counts (SpotScraper), YouTube Music (each track's art track) and YouTube video views, plus exact statement counts. Sources are never blended."
         actions={canManage && <ActionButton endpoint="/streams/poll" body={{}} label="Refresh now" icon="refresh" success="Polling queued" />}
       />
       <Summary>
-        {o.tracking.tracking} tracks tracked · {o.tracking.pendingMatch} waiting for a match · {o.tracking.paused} paused{o.throughDay ? ` · through ${o.throughDay}` : ''} · Spotify plays {sources.spotify ? 'on' : 'off'} · YouTube views {sources.youtubeViaApify ? 'daily via Apify' : sources.youtube ? 'on' : 'off'}{sources.licensed ? ' · licensed DSP counts configured' : ''}
+        {o.tracking.tracking} tracks tracked · {o.tracking.pendingMatch} waiting for a match · {o.tracking.paused} paused{o.throughDay ? ` · through ${o.throughDay}` : ''} · Spotify plays {sources.spotify ? 'on' : 'off'} · YouTube Music and YouTube {sources.youtubeViaApify ? 'daily via Apify' : sources.youtube ? 'on' : 'off'}{sources.licensed ? ' · licensed DSP counts configured' : ''}
       </Summary>
       {!sources.spotify && (
         <Banner icon="key" warn>
@@ -38,15 +38,28 @@ export default async function StreamsOverviewPage({ run, session, searchParams, 
       )}
       {!sources.youtube && (
         <Banner icon="key" warn>
-          YouTube views need a YouTube Data API key (free from Google Cloud) or an Apify token. {session.permissions.has('settings:credentials') ? <Link href="/settings/integrations">Add one under Settings → Integrations</Link> : 'Ask an admin to add one under Settings → Integrations'}. The key reads views as often as Streams polls at no cost; Apify reads them once a day for about $0.0005 per video.
+          YouTube Music plays and YouTube views need a YouTube Data API key (free from Google Cloud) or an Apify token. {session.permissions.has('settings:credentials') ? <Link href="/settings/integrations">Add one under Settings → Integrations</Link> : 'Ask an admin to add one under Settings → Integrations'}. The key reads views as often as Streams polls at no cost; Apify reads them once a day for about $0.0005 per video.
         </Banner>
       )}
       <div className="lc-grid-stats">
         <StatCard label="PLAYS · 28D" icon="visibility" value={o.throughDay ? fmt.compact(o.plays28d) : '—'} delta={o.changePct != null ? fmt.pct(o.changePct, { signed: true, decimals: 1 }) : undefined} deltaDown={(o.changePct ?? 0) < 0} note="vs the 28 days before · polled sources" />
-        {o.byPlatform.slice(0, 1).map((p) => (
-          <StatCard key={p.platform} label={`${platformLabel(p.platform).toUpperCase()} · 28D`} icon={p.platform === 'youtube' ? 'smart_display' : 'graphic_eq'} value={fmt.compact(p.current)} delta={p.previous > 0 ? fmt.pct(((p.current - p.previous) / p.previous) * 100, { signed: true }) : undefined} deltaDown={p.current < p.previous} note={p.platform === 'youtube' ? 'official view counts' : p.platform === 'spotify' ? 'Spotify play counts' : 'licensed provider'} />
-        ))}
-        {o.byPlatform.length === 0 && <StatCard label="YOUTUBE · 28D" icon="smart_display" value="—" note={sources.youtube ? 'first readings pending' : 'needs a key or an Apify token'} />}
+        {(['spotify', 'youtube_music', 'youtube'] as const).map((platform) => {
+          const p = o.byPlatform.find((x) => x.platform === platform);
+          // YouTube video views only when some are tracked; Spotify and YouTube Music always, so a gap is visible.
+          if (!p && platform === 'youtube') return null;
+          const ready = platform === 'spotify' ? sources.spotify : sources.youtube;
+          return (
+            <StatCard
+              key={platform}
+              label={`${platformLabel(platform).toUpperCase()} · 28D`}
+              icon={platform === 'spotify' ? 'graphic_eq' : platform === 'youtube_music' ? 'library_music' : 'smart_display'}
+              value={p ? fmt.compact(p.current) : '—'}
+              delta={p && p.previous > 0 ? fmt.pct(((p.current - p.previous) / p.previous) * 100, { signed: true }) : undefined}
+              deltaDown={p ? p.current < p.previous : false}
+              note={p ? (platform === 'spotify' ? 'Spotify play counts' : platform === 'youtube_music' ? 'plays of the art tracks' : 'official video views') : !ready ? (platform === 'spotify' ? 'needs a SpotScraper key' : 'needs a YouTube key or an Apify token') : platform === 'youtube_music' ? 'art tracks being matched' : 'first readings pending'}
+            />
+          );
+        })}
         <StatCard label="LATEST STATEMENT" icon="receipt_long" value={o.statement ? fmt.compact(o.statement.units) : '—'} note={o.statement ? `units, period ending ${fmt.date(o.statement.periodEnd)}` : 'import one under Finance'} href="/finance/statements" />
         <StatCard label="OPEN ALERTS" icon="notifications_active" value={String(o.openAlerts)} note="spikes, drops, milestones" href="/streams/alerts" />
       </div>

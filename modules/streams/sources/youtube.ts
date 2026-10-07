@@ -1,6 +1,6 @@
 import { fetchJson } from '@labelconsole/core/http';
 import { acquire } from '@labelconsole/core/ratelimit';
-import type { Snapshot, StreamSourceAdapter, TrackRef } from './types';
+import { YOUTUBE_PLATFORMS, type Snapshot, type StreamSourceAdapter, type TrackRef } from './types';
 
 /**
  * YouTube Data API v3. Polling uses videos.list only: 1 quota unit per call of
@@ -74,7 +74,7 @@ export function parseIsoDuration(d: string | undefined): number | null {
 export const youtubeAdapter: StreamSourceAdapter<YouTubeSecret> = {
   id: 'youtube-data-api',
   async fetch(secret, refs, opts) {
-    const yt = refs.filter((r) => r.platform === 'youtube');
+    const yt = refs.filter((r) => YOUTUBE_PLATFORMS.includes(r.platform));
     const items = await videosList(secret.apiKey, [...new Set(yt.map((r) => r.externalId))], ['statistics'], opts?.signal);
     const capturedAt = new Date();
     const byId = new Map(items.map((i) => [i.id, i]));
@@ -84,7 +84,7 @@ export const youtubeAdapter: StreamSourceAdapter<YouTubeSecret> = {
       const v = byId.get(r.externalId)?.statistics?.viewCount;
       // A video that disappeared or hides its count is reported, never recorded as zero.
       if (v == null) missing.push(r);
-      else snapshots.push({ trackId: r.trackId, platform: 'youtube', source: 'youtube-data-api', externalId: r.externalId, capturedAt, count: Number(v) });
+      else snapshots.push({ trackId: r.trackId, platform: r.platform, source: 'youtube-data-api', externalId: r.externalId, capturedAt, count: Number(v) });
     }
     return { snapshots, missing };
   },

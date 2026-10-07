@@ -38,6 +38,7 @@ describe('statement parsing', () => {
   it('canonicalises store names', () => {
     expect(canonicalSource('iTunes')).toBe('Apple Music');
     expect(canonicalSource('YouTube (Red)')).toBe('YouTube');
+    expect(canonicalSource('YouTube Music')).toBe('YouTube Music');
     expect(canonicalSource('Resso')).toBe('TikTok');
     expect(canonicalSource('Anghami')).toBe('Anghami');
   });

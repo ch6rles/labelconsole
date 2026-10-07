@@ -140,6 +140,7 @@ export function parsePeriod(raw: unknown): { start: string; end: string } | null
 const SOURCE_ALIASES: Array<[RegExp, string]> = [
   [/spotify/i, 'Spotify'],
   [/apple|itunes/i, 'Apple Music'],
+  [/youtube\s*music/i, 'YouTube Music'],
   [/youtube/i, 'YouTube'],
   [/amazon/i, 'Amazon Music'],
   [/deezer/i, 'Deezer'],

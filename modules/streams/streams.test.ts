@@ -130,6 +130,8 @@ describe('statement totals', () => {
       { trackId: 't1', platform: 'apple_music', periodEnd: '2026-07-31', units: 0 },
     ]);
     expect(platformSlug('Amazon Unlimited')).toBe('amazon_music');
+    expect(platformSlug('YouTube Music')).toBe('youtube_music');
+    expect(platformSlug('YouTube')).toBe('youtube');
     expect(platformSlug('Anghami')).toBe('anghami');
   });
 });

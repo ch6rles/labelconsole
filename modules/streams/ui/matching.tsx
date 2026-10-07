@@ -28,7 +28,7 @@ export default async function StreamMatchingPage({ run }: PageProps) {
             render: (r) => (
               <span className="lc-cell-stack">
                 <a href={r.identity.url ?? `https://www.youtube.com/watch?v=${r.identity.externalId}`} target="_blank" rel="noreferrer" className="lc-mono" style={{ fontSize: 13 }}>youtube.com/watch?v={r.identity.externalId}</a>
-                <span className="lc-cell-sub">{r.identity.variant === 'topic' ? 'Topic art track' : 'Official video'}</span>
+                <span className="lc-cell-sub">{r.identity.variant === 'topic' ? 'YouTube Music art track' : 'Official video'}</span>
               </span>
             ),
           },

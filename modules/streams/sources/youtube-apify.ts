@@ -1,6 +1,6 @@
 import type { ApifyClient } from '@labelconsole/core/apify';
 import type { SearchCandidate } from './youtube';
-import type { Snapshot, TrackRef } from './types';
+import { YOUTUBE_PLATFORMS, type Snapshot, type TrackRef } from './types';
 
 /**
  * YouTube without a Data API key: the same public view counts, read through
@@ -67,7 +67,7 @@ export async function searchVideosApify(client: ApifyClient, q: string, signal?:
 }
 
 export async function fetchViewsApify(client: ApifyClient, refs: TrackRef[], signal?: AbortSignal): Promise<{ snapshots: Snapshot[]; missing: TrackRef[] }> {
-  const yt = refs.filter((r) => r.platform === 'youtube');
+  const yt = refs.filter((r) => YOUTUBE_PLATFORMS.includes(r.platform));
   const views = await videoViews(client, yt.map((r) => r.externalId), signal);
   const capturedAt = new Date();
   const snapshots: Snapshot[] = [];
@@ -75,7 +75,7 @@ export async function fetchViewsApify(client: ApifyClient, refs: TrackRef[], sig
   for (const r of yt) {
     const v = views.get(r.externalId);
     if (v == null) missing.push(r);
-    else snapshots.push({ trackId: r.trackId, platform: 'youtube', source: 'youtube-scraper', externalId: r.externalId, capturedAt, count: v });
+    else snapshots.push({ trackId: r.trackId, platform: r.platform, source: 'youtube-scraper', externalId: r.externalId, capturedAt, count: v });
   }
   return { snapshots, missing };
 }

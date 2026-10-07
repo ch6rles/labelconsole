@@ -8,7 +8,7 @@ import { ActionButton, FormModal, UploadZone } from '@labelconsole/ui/client';
 import * as svc from '../service';
 import { STATUS_LABEL, TYPE_LABEL, releaseFields, trackFields } from './fields';
 import { ChecklistToggle } from './client';
-import { SpotifyPlays, type PlaysExtra } from './plays';
+import { SpotifyPlays, YouTubeMusicPlays, type PlaysExtra } from './plays';
 
 export default async function ReleaseDetailPage({ run, params, session, panels, searchParams, enabled }: PageProps) {
   const data = await run(async (ctx) => {
@@ -62,7 +62,7 @@ export default async function ReleaseDetailPage({ run, params, session, panels, 
         rows={data.tracks}
         rowKey={(t) => t.id}
         rowHref={(t) => `/catalog/tracks/${t.id}`}
-        minWidth={860}
+        minWidth={980}
         empty="No tracks yet. Add one, or import the release from a link or UPC."
         columns={[
           { key: 'pos', header: '#', width: '40px', render: (t) => <span className="lc-cell-num lc-muted">{t.position}</span> },
@@ -70,6 +70,7 @@ export default async function ReleaseDetailPage({ run, params, session, panels, 
           { key: 'isrc', header: 'ISRC', width: '150px', render: (t) => <span className="lc-mono" style={{ fontSize: 12 }}>{svc.formatIsrc(t.isrc) ?? '—'}</span> },
           { key: 'dur', header: 'Length', width: '70px', align: 'right', render: (t) => <span className="lc-cell-num">{fmt.duration(t.durationMs)}</span> },
           { key: 'plays', header: 'Spotify plays', width: '120px', align: 'right', render: (t) => <SpotifyPlays e={data.plays[t.id]} /> },
+          { key: 'ytm', header: 'YouTube Music', width: '120px', align: 'right', render: (t) => <YouTubeMusicPlays e={data.plays[t.id]} /> },
           { key: 'status', header: 'Status', width: 'minmax(200px,1fr)', render: (t) => (t.blockers.length ? <span className="lc-row" style={{ gap: 4 }}>{t.blockers.map((b) => <Chip key={b} tone="red">{b}</Chip>)}</span> : <Chip tone="blue">Ready</Chip>) },
         ]}
       />

@@ -424,6 +424,35 @@ The owner asked whether YouTube Music streams can be tracked without a YouTube D
   - 216 tests pass, including the reported case (a stale day, then a catch-up), a missed poll, a real drop, and an old false alert being withdrawn.
   - The chart was checked at desktop and phone width.
 
+## YouTube Music everywhere
+
+- **Its own line:** a track's art track (its Topic upload, the one YouTube Music plays) is now recorded as the **YouTube Music** platform.
+  - Its other videos (the official video) stay **YouTube**.
+  - Before, all of a track's videos were added into one "YouTube" figure.
+  - Distributor statement lines named "YouTube Music" map to the same platform.
+- **History kept:** custom migration `003_youtube_music_split.sql` moves past readings of confirmed art tracks to YouTube Music. It rebuilds those tracks' daily figures for both platforms the way the tracker rolls up a day. It is idempotent, and was checked to match the original figures exactly.
+- **Every track searched:**
+  - Until now a track was only searched on YouTube if it had no confirmed video at all.
+  - Re-searches only covered tracks with no match anywhere. Tracks already followed through Spotify (all those synced from Spotify) were never searched for their art track.
+  - Now any tracked track without an art track (confirmed or waiting for review) is searched every two weeks, five per label per scheduler run.
+  - Only the kind of video it lacks is added, and videos staff rejected never come back.
+- **Pasting a link:** "Add video" asks whether the link counts as YouTube Music (the art track) or YouTube. A music.youtube.com link is taken as the art track by default. Before, pasted videos were always official videos.
+- **Shown everywhere:**
+  - Catalogue track list and release page: a YouTube Music column next to Spotify plays, with the 7-day gain.
+  - Catalogue track page and artist page: Spotify and YouTube Music cards (plus YouTube video views when tracked) above the chart. Each says why it is empty ("no art track matched yet", "waiting for review").
+  - Streams overview: Spotify, YouTube Music and YouTube 28-day cards, with one chart line per platform.
+  - Streams track list: Sources shows YouTube Music, plus Spotify 28d and YT Music 28d columns.
+  - Streams track page: separate YouTube Music and YouTube views cards.
+  - Agents: the stream tools report youtube_music separately.
+- **Chart colours:** Spotify blue, YouTube Music violet, YouTube orange, Apple Music aqua (the palette passes the colour-blind checks).
+- **Verified:**
+  - 220 tests pass. New ones cover:
+    - recording the art track and the official video side by side;
+    - searching a Spotify-matched track without bringing back a rejected video;
+    - pasted music.youtube.com links;
+    - the history split.
+  - All changed pages were checked at desktop and phone width.
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.

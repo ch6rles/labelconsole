@@ -10,18 +10,19 @@ export const STATUS_CHIP: Record<string, { label: string; className: string }> =
 
 /**
  * One fixed colour per platform on every chart, from a categorical palette
- * checked for colour-blind separation (blue, orange, aqua, yellow, magenta,
- * green, violet, red). Platforms beyond those share a neutral "other" grey.
+ * checked for colour-blind separation (Spotify blue, YouTube Music violet,
+ * YouTube orange, Apple Music aqua, then yellow, magenta, green, red).
+ * Platforms beyond those share a neutral "other" grey.
  */
 const PLATFORM_COLOR: Record<string, string> = {
   spotify: '#2a78d6',
+  youtube_music: '#4a3aa7',
   youtube: '#eb6834',
   apple_music: '#1baf7a',
   amazon_music: '#eda100',
   deezer: '#e87ba4',
   tidal: '#008300',
-  tiktok: '#4a3aa7',
-  soundcloud: '#e34948',
+  tiktok: '#e34948',
 };
 const OTHER_COLOR = '#94a3b8';
 export const platformColor = (p: string) => PLATFORM_COLOR[p] ?? OTHER_COLOR;
@@ -50,6 +51,29 @@ export function historyLines(series: Array<{ platform: string; source: string; s
       points: s.points.map((p) => ({ day: p.day, total: Number(p.total), delta: p.pending || (p === first && (granularity === 'day' || Number(p.delta) === 0)) ? null : Number(p.delta), pending: p.pending, estimated: p.estimated })),
     };
   });
+}
+
+type PlatformSeries = { platform: string; source: string; since?: string | null; points: Array<{ day: string; total: number; delta: number; pending?: boolean }> };
+
+/**
+ * Per platform: the latest all-time count and the plays of the last 7 days,
+ * for the stat cards above stream charts. Spotify and YouTube Music always
+ * show (with "—" until matched); YouTube video views only when tracked.
+ */
+export function platformTotals(series: PlatformSeries[]) {
+  // The first day of a series holds a running total but no plays figure.
+  const since = (s: PlatformSeries) => s.since ?? null;
+  const weekStart = new Date(Date.now() - 6 * 86400_000).toISOString().slice(0, 10);
+  const out = [];
+  for (const platform of ['spotify', 'youtube_music', 'youtube', 'apple_music']) {
+    const mine = series.filter((s) => s.platform === platform && s.points.length);
+    if (mine.length === 0 && (platform === 'youtube' || platform === 'apple_music')) continue;
+    // A platform read two ways over time (an API key, later a scraper): the most recent reading wins.
+    const latest = mine.map((s) => s.points.at(-1)!).sort((a, b) => b.day.localeCompare(a.day))[0];
+    const week = mine.flatMap((s) => s.points.filter((p) => p.day >= weekStart && !p.pending && p.day !== since(s)));
+    out.push({ platform, label: platformLabel(platform), total: latest?.total ?? null, plays7d: week.length ? week.reduce((a, p) => a + p.delta, 0) : null });
+  }
+  return out;
 }
 
 /** Range chips for charts that load 90 days and filter in the browser. */

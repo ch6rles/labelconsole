@@ -5,7 +5,7 @@ import { Chip, DataTable, FilterPills, Page, PageHeader, Summary, fmt } from '@l
 import { ActionButton, FormModal, SearchInput } from '@labelconsole/ui/client';
 import * as svc from '../service';
 import { trackFields } from './fields';
-import { SpotifyPlays, type PlaysExtra } from './plays';
+import { SpotifyPlays, YouTubeMusicPlays, type PlaysExtra } from './plays';
 
 export default async function TracksPage({ run, session, searchParams, enabled }: PageProps) {
   const status = searchParams.status === 'ready' || searchParams.status === 'draft' ? searchParams.status : undefined;
@@ -45,7 +45,7 @@ export default async function TracksPage({ run, session, searchParams, enabled }
         rows={rows}
         rowKey={(t) => t.id}
         rowHref={(t) => `/catalog/tracks/${t.id}`}
-        minWidth={1040}
+        minWidth={1160}
         empty="No tracks match."
         columns={[
           { key: 'title', header: 'Track', width: 'minmax(220px,1.3fr)', render: (t) => <span className="lc-cell-stack"><span className="lc-cell-strong lc-ellipsis">{t.title}{t.version ? ` (${t.version})` : ''}</span><span className="lc-cell-sub lc-ellipsis">{t.artists.map((a) => a.name).join(', ') || '—'}</span></span> },
@@ -53,6 +53,7 @@ export default async function TracksPage({ run, session, searchParams, enabled }
           { key: 'isrc', header: 'ISRC', width: '150px', render: (t) => <span className="lc-mono" style={{ fontSize: 12 }}>{svc.formatIsrc(t.isrc) ?? '—'}</span> },
           { key: 'dur', header: 'Length', width: '70px', align: 'right', render: (t) => <span className="lc-cell-num">{fmt.duration(t.durationMs)}</span> },
           { key: 'plays', header: 'Spotify plays', width: '120px', align: 'right', render: (t) => <SpotifyPlays e={plays[t.id]} /> },
+          { key: 'ytm', header: 'YouTube Music', width: '120px', align: 'right', render: (t) => <YouTubeMusicPlays e={plays[t.id]} /> },
           { key: 'status', header: 'Status', width: 'minmax(220px,1fr)', render: (t) => (t.blockers.length ? <span className="lc-row" style={{ gap: 4 }}>{t.blockers.slice(0, 3).map((b) => <Chip key={b} tone="red">{b}</Chip>)}</span> : <Chip tone="blue">Ready</Chip>) },
         ]}
       />

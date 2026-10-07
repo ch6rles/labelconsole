@@ -21,7 +21,7 @@ import { streamTracks } from '../schema';
 import { licensedAdapter, licensedStreamProvider, type LicensedStreamSecret } from '../sources/licensed';
 import { spotifyAdapter } from '../sources/spotify';
 import { statementPeriodTotals } from '../sources/statements';
-import type { Snapshot, TrackRef } from '../sources/types';
+import { youtubePlatformFor, type Snapshot, type TrackRef } from '../sources/types';
 import { fetchViewsApify, searchVideosApify } from '../sources/youtube-apify';
 import { AUTO_CONFIRM, REVIEW, scoreCandidates, searchVideos, youtubeAdapter, type SearchCandidate } from '../sources/youtube';
 import {
@@ -44,6 +44,25 @@ import {
   type ArtistStatsInput,
 } from '../service';
 import type { TrackArtistRefs } from '../sources/types';
+
+/**
+ * Tracked tracks (matched on Spotify, say) still without a YouTube Music art
+ * track, confirmed or waiting for review: searched again every two weeks, a
+ * few per label per scheduler run so searches stay cheap.
+ */
+export async function artTrackSearchesDue(perOrg = 5) {
+  return (await systemDb().execute(sql`
+    select id, org_id from (
+      select st.id, st.org_id, row_number() over (partition by st.org_id order by st.last_resolved_at nulls first) as rn
+      from stream_tracks st
+      where st.status = 'tracking'
+        and (st.last_resolved_at is null or st.last_resolved_at < now() - interval '14 days')
+        and not exists (
+          select 1 from platform_identities i
+          where i.org_id = st.org_id and i.entity_type = 'track' and i.entity_id = st.track_id
+            and i.platform = 'youtube' and i.variant = 'topic' and i.status <> 'rejected')
+    ) t where rn <= ${perOrg}`)) as unknown as Array<{ id: string; org_id: string }>;
+}
 
 export const NO_YOUTUBE_KEY = 'Add a YouTube Data API key (free) or an Apify token under Settings → Integrations to track YouTube views';
 export const NO_SPOTSCRAPER_KEY = 'Add a SpotScraper key under Settings → Integrations to track Spotify plays';
@@ -172,11 +191,12 @@ export const jobs = [
           and (last_resolved_at is null and created_at < now() - interval '1 hour'
                or last_resolved_at < now() - case when last_error like 'Add a YouTube Data API key%' or last_error like 'YouTube search (Apify)%' then interval '1 day' else interval '7 days' end)
       ) t where rn <= 5`)) as unknown as Array<{ id: string; org_id: string }>;
-    for (const s of stale) {
+    const noArtTrack = await artTrackSearchesDue();
+    for (const s of [...stale, ...noArtTrack]) {
       if (!(await streamsEnabled(s.org_id))) continue;
       await enqueue('streams.resolve-track', s.org_id, { streamTrackId: s.id }, { jobId: `resolve-${s.id}-${Math.floor(now.getTime() / 86400_000)}`, attempts: 2 });
     }
-    job.log.info({ orgs: queued, resolves: stale.length }, 'streams scheduled');
+    job.log.info({ orgs: queued, resolves: stale.length, artTrackSearches: noArtTrack.length }, 'streams scheduled');
   }),
 
   /**
@@ -189,7 +209,11 @@ export const jobs = [
       if (!row) return null;
       const names = (await artistsOnTrack(ctx, [row.st.trackId])).get(row.st.trackId) ?? [];
       // Aliases (such as the name on Spotify) count when matching channels, after the roster names.
-      return { ...row, artists: [...new Set([...names.map((n) => n.name), ...names.flatMap((n) => n.aliases)])], videos: await confirmedVideos(ctx, [row.st.trackId]) };
+      const known = await ctx.tx
+        .select({ externalId: platformIdentities.externalId, status: platformIdentities.status, variant: platformIdentities.variant })
+        .from(platformIdentities)
+        .where(and(eq(platformIdentities.entityType, 'track'), eq(platformIdentities.entityId, row.st.trackId), eq(platformIdentities.platform, 'youtube')));
+      return { ...row, artists: [...new Set([...names.map((n) => n.name), ...names.flatMap((n) => n.aliases)])], videos: await confirmedVideos(ctx, [row.st.trackId]), known };
     });
     if (!info || info.st.status === 'paused') return;
     const trackId = info.st.trackId;
@@ -206,11 +230,13 @@ export const jobs = [
       }
     }
 
-    // YouTube: one search (100 quota units) unless a video is already confirmed.
+    // YouTube: one search (100 quota units) while the track has no YouTube Music art track (confirmed or
+    // waiting for review). Only the kinds of video it lacks are added, and videos staff rejected never come back.
     let youtubeNote: string | null = null;
     let candidates = 0;
     let picks: Array<{ variant: string; confidence: number }> = [];
-    if (info.videos.length === 0) {
+    const has = (variant: string) => info.known.some((k) => k.variant === variant && k.status !== 'rejected');
+    if (!has('topic')) {
       const reader = await youtubeReader(job);
       if (!reader) youtubeNote = NO_YOUTUBE_KEY;
       else {
@@ -230,15 +256,16 @@ export const jobs = [
           }
         }
         candidates = found.length;
-        const verdicts = scoreCandidates({ title: info.title, artists: info.artists, durationMs: info.durationMs }, found);
-        const chosen = [verdicts.find((v) => v.variant === 'topic'), verdicts.find((v) => v.variant === 'official')].filter((v): v is NonNullable<typeof v> => Boolean(v && v.confidence >= REVIEW));
+        const rejected = new Set(info.known.filter((k) => k.status === 'rejected').map((k) => k.externalId));
+        const verdicts = scoreCandidates({ title: info.title, artists: info.artists, durationMs: info.durationMs }, found).filter((v) => !rejected.has(v.videoId));
+        const chosen = [verdicts.find((v) => v.variant === 'topic'), has('official') ? undefined : verdicts.find((v) => v.variant === 'official')].filter((v): v is NonNullable<typeof v> => Boolean(v && v.confidence >= REVIEW));
         picks = chosen;
         await job.withOrg(async (ctx) => {
           for (const v of chosen) {
             await upsertIdentity(ctx, { entityType: 'track', entityId: trackId, platform: 'youtube', externalId: v.videoId, url: `https://www.youtube.com/watch?v=${v.videoId}`, source: 'key' in reader ? 'youtube-search' : 'youtube-scraper-search', confidence: v.confidence, status: v.confidence >= AUTO_CONFIRM ? 'confirmed' : 'pending_review', variant: v.variant });
           }
         });
-        if (chosen.length === 0) youtubeNote = searchError ?? (candidates ? 'No confident YouTube match; paste the video link on the Matching page' : 'No YouTube video found for this track');
+        if (!chosen.some((v) => v.variant === 'topic')) youtubeNote = searchError ?? (candidates ? 'No confident YouTube Music match; paste the art track link on the track page' : 'No YouTube Music art track found for this track');
       }
     }
 
@@ -274,7 +301,8 @@ export const jobs = [
     const snapshots: Snapshot[] = [];
 
     // YouTube: public view counts, through videos.list with a key, else through Apify once a day per track.
-    const ytRefs: TrackRef[] = videos.map((v) => ({ trackId: v.trackId, platform: 'youtube', externalId: v.externalId }));
+    // The art track's views are YouTube Music plays; other videos' are YouTube views.
+    const ytRefs: TrackRef[] = videos.map((v) => ({ trackId: v.trackId, platform: youtubePlatformFor(v.variant), externalId: v.externalId }));
     if (ytRefs.length) {
       const reader = await youtubeReader(job);
       if (!reader) for (const r of ytRefs) errors.set(r.trackId, NO_YOUTUBE_KEY);

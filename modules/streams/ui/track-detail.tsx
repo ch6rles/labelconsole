@@ -19,12 +19,15 @@ export default async function StreamTrackPage({ run, params, session, searchPara
   const stmt = statements.series.filter((s) => s.source === 'statement-import');
   const st = d.tracked;
   const sum = (days: number) => polled.reduce((a, s) => a + s.points.filter((p) => p.day > new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10)).reduce((x, p) => x + p.delta, 0), 0);
-  const yt = polled.find((s) => s.platform === 'youtube');
-  const sp = polled.find((s) => s.platform === 'spotify' && s.source === 'spotscraper');
+  // The newest reading per platform (a platform read through an API key, later Apify, has two series).
+  const latest = (platform: string) => polled.filter((s) => s.platform === platform && s.points.length).map((s) => s.points.at(-1)!).sort((a, b) => b.day.localeCompare(a.day))[0];
+  const sp = latest('spotify');
+  const ytm = latest('youtube_music');
+  const yt = latest('youtube');
   const spPrimary = d.spotify.find((i) => i.variant === 'primary' && i.status === 'confirmed');
-  // One card per source the track actually uses, so the row stays at four.
-  const showSpotify = d.spotScraper || d.spotify.length > 0;
-  const showYouTube = d.youtube.length > 0 || !showSpotify;
+  const artTrack = d.youtube.find((v) => v.variant === 'topic' && v.status === 'confirmed');
+  const artTrackPending = d.youtube.some((v) => v.variant === 'topic' && v.status === 'pending_review');
+  const officialVideo = d.youtube.some((v) => v.variant !== 'topic' && v.status === 'confirmed');
   // The first reading of a series has a total but no plays figure yet.
   const isFirst = (s: { since: string | null }, day: string) => granularity === 'day' && s.since === day;
   const latestStmt = stmt.flatMap((s) => s.points.map((p) => ({ ...p, platform: s.platform }))).sort((a, b) => b.day.localeCompare(a.day));
@@ -51,8 +54,9 @@ export default async function StreamTrackPage({ run, params, session, searchPara
       {st?.lastError && <InlineNote icon="error">{st.lastError}</InlineNote>}
       <div className="lc-grid-stats">
         <StatCard label="STATUS" icon="radar" value={st ? (STATUS_CHIP[st.status]?.label ?? st.status) : 'Not tracked'} note={st?.status === 'tracking' ? `${st.tier === 'active' ? 'every 6 h' : 'daily'} · last ${st.lastPolledAt ? fmt.relative(st.lastPolledAt) : 'pending'}` : st?.status === 'pending_match' ? 'waiting for a Spotify or YouTube match' : '—'} />
-        {showSpotify && <StatCard label="SPOTIFY PLAYS" icon="graphic_eq" value={sp?.points.length ? fmt.compact(sp.points.at(-1)!.total) : '—'} note={spPrimary ? 'all-time, from SpotScraper' : d.spotScraper ? 'no Spotify ID yet' : 'needs a SpotScraper key'} />}
-        {showYouTube && <StatCard label="YOUTUBE VIEWS" icon="smart_display" value={yt?.points.length ? fmt.compact(yt.points.at(-1)!.total) : '—'} note="total across matched videos" />}
+        <StatCard label="SPOTIFY PLAYS" icon="graphic_eq" value={sp ? fmt.compact(sp.total) : '—'} note={spPrimary ? 'all-time, from SpotScraper' : d.spotScraper ? 'no Spotify ID yet' : 'needs a SpotScraper key'} />
+        <StatCard label="YOUTUBE MUSIC" icon="library_music" value={ytm ? fmt.compact(ytm.total) : '—'} note={artTrack ? 'all-time plays of the art track' : artTrackPending ? 'art track waiting for review below' : 'no art track matched yet'} />
+        {(officialVideo || yt) && <StatCard label="YOUTUBE VIEWS" icon="smart_display" value={yt ? fmt.compact(yt.total) : '—'} note="official video, all-time" />}
         <StatCard label="PLAYS · 7D" icon="trending_up" value={polled.length ? fmt.compact(sum(7)) : '—'} note={`${fmt.compact(sum(28))} over 28 days`} />
         <StatCard label="LAST STATEMENT" icon="receipt_long" value={lastPeriod ? fmt.compact(latestStmt.filter((p) => p.day === lastPeriod).reduce((a, p) => a + p.total, 0)) : '—'} note={lastPeriod ? `units in ${new Date(`${lastPeriod}T00:00:00Z`).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}` : 'no statement lines matched'} />
       </div>
@@ -118,13 +122,22 @@ export default async function StreamTrackPage({ run, params, session, searchPara
           ))}
         </Card>
         <Card
-          title="YouTube videos"
-          sub="Views are summed across confirmed videos: the Topic art track (YouTube Music) and the official video."
+          title="YouTube Music and YouTube"
+          sub="The art track (the Topic upload YouTube Music plays) is counted as YouTube Music; the official video's views as YouTube. Each is its own line."
           actions={
             canManage && (
               <span className="lc-row" style={{ gap: 6 }}>
                 <ActionButton endpoint={`/streams/registry/${d.track.id}/resolve`} label="Search again" icon="travel_explore" size="sm" success="Search queued" />
-                <FormModal title="Add a YouTube video" description="Paste the link of this track's Topic upload or official video. It is confirmed straight away." trigger={{ label: 'Add video', icon: 'add', size: 'sm' }} endpoint={`/streams/registry/${d.track.id}/youtube`} fields={[{ name: 'video', label: 'YouTube link', required: true, full: true, placeholder: 'https://music.youtube.com/watch?v=…' }]} columns={1} success="Video added" />
+                <FormModal
+                  title="Add a YouTube video"
+                  description="Paste the link of this track's art track (open the song in YouTube Music and copy its link) or its official video. It is confirmed straight away."
+                  trigger={{ label: 'Add video', icon: 'add', size: 'sm' }}
+                  endpoint={`/streams/registry/${d.track.id}/youtube`}
+                  initial={{ kind: artTrack ? 'video' : 'art_track' }}
+                  fields={[
+                    { name: 'video', label: 'YouTube link', required: true, full: true, placeholder: 'https://music.youtube.com/watch?v=…' },
+                    { name: 'kind', label: 'Counts as', type: 'select', required: true, full: true, options: [{ value: 'art_track', label: 'YouTube Music (the art track)' }, { value: 'video', label: 'YouTube (official or other video)' }] },
+                  ]} columns={1} success="Video added" />
               </span>
             )
           }
@@ -136,7 +149,7 @@ export default async function StreamTrackPage({ run, params, session, searchPara
               k={
                 <span className="lc-cell-stack">
                   <a href={v.url ?? `https://www.youtube.com/watch?v=${v.externalId}`} target="_blank" rel="noreferrer" className="lc-mono" style={{ fontSize: 13 }}>{v.externalId}</a>
-                  <span className="lc-cell-sub">{v.variant === 'topic' ? 'Topic art track' : 'Official video'} · {v.source === 'youtube-search' ? `matched ${Math.round(Number(v.confidence) * 100)}%` : v.source}</span>
+                  <span className="lc-cell-sub">{v.variant === 'topic' ? 'YouTube Music art track' : 'Official video'} · {v.source === 'youtube-search' ? `matched ${Math.round(Number(v.confidence) * 100)}%` : v.source}</span>
                 </span>
               }
               v={<span className={v.status === 'confirmed' ? 'lc-chip lc-chip--blue' : v.status === 'rejected' ? 'lc-chip lc-chip--muted' : 'lc-chip lc-chip--ink'}>{v.status === 'pending_review' ? 'To review' : fmt.titleCase(v.status)}</span>}

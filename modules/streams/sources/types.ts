@@ -18,11 +18,20 @@ export interface StreamSourceAdapter<Secret = unknown> {
 /** The artists a platform lists on a track, with their IDs there (Spotify returns them with every track read). */
 export type TrackArtistRefs = { trackId: string; artists: Array<{ id: string; name: string }> };
 
+/**
+ * YouTube is read as two platforms: a track's Topic art track (the upload
+ * YouTube Music plays) counts as YouTube Music, its other videos (the official
+ * video) as YouTube.
+ */
+export const YOUTUBE_PLATFORMS = ['youtube_music', 'youtube'];
+export const youtubePlatformFor = (variant: string | null | undefined) => (variant === 'topic' ? 'youtube_music' : 'youtube');
+
 /** Platform slugs used across snapshots, rollups and charts. */
 export function platformSlug(source: string): string {
   const s = source.trim().toLowerCase();
   if (s.includes('spotify')) return 'spotify';
   if (s.includes('apple') || s.includes('itunes')) return 'apple_music';
+  if (s.includes('youtube music')) return 'youtube_music';
   if (s.includes('youtube')) return 'youtube';
   if (s.includes('amazon')) return 'amazon_music';
   if (s.includes('deezer')) return 'deezer';
@@ -35,6 +44,7 @@ export function platformSlug(source: string): string {
 
 export const PLATFORM_LABEL: Record<string, string> = {
   youtube: 'YouTube',
+  youtube_music: 'YouTube Music',
   spotify: 'Spotify',
   apple_music: 'Apple Music',
   amazon_music: 'Amazon Music',
@@ -47,7 +57,7 @@ export const PLATFORM_LABEL: Record<string, string> = {
 
 export const SOURCE_LABEL: Record<StreamSource, string> = {
   'youtube-data-api': 'YouTube Data API',
-  'youtube-scraper': 'YouTube views (Apify)',
+  'youtube-scraper': 'Apify',
   spotscraper: 'SpotScraper',
   'licensed-provider': 'Licensed provider',
   'statement-import': 'Distributor statements',

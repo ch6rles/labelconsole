@@ -85,6 +85,15 @@ export default defineModule({
       for (const r of listeners) out[r.artistId] = { ...out[r.artistId], monthlyListeners: r.monthlyListeners };
       return out;
     },
-    track: async (ctx, ids) => Object.fromEntries((await svc.spotifyPlaysByTrack(ctx, ids)).map((r) => [r.trackId, { spotifyPlays: r.total, spotifyPlays7d: r.plays7d }])),
+    track: async (ctx, ids) => {
+      const key = { spotify: 'spotify', youtube_music: 'youtubeMusic', youtube: 'youtube' } as Record<string, string>;
+      const out: Record<string, Record<string, number | null>> = {};
+      for (const r of await svc.playsByTrack(ctx, ids)) {
+        const k = key[r.platform];
+        if (!k) continue;
+        out[r.trackId] = { ...out[r.trackId], [`${k}Plays`]: r.total, [`${k}Plays7d`]: r.plays7d };
+      }
+      return out;
+    },
   },
 });
