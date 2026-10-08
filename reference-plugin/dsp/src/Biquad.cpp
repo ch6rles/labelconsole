@@ -186,6 +186,13 @@ BiquadCoeffs designMatched (const FilterSpec& s, double fs)
     // fit over 10 Hz .. min(Nyquist, 22 kHz) in relative terms tracks the
     // analogue curve about three times more closely near Nyquist, so that is
     // tried first and the three-point solution kept as the fallback.
+    //
+    // In p = sin^2(w/2) the same function is the quadratic
+    //   B0 + (B1 - B0 + 4 B2) p - 4 B2 p^2.
+    // The fit uses u = p / p(fHi) and Householder QR: at high sample rates p
+    // stays small across the audio band, phi1 and phi2 become nearly
+    // parallel, and solving them through normal equations made the result
+    // depend on last-bit rounding (different on every compiler and libm).
     auto factor = [&] (double B0, double B1, double B2, BiquadCoeffs& out)
     {
         if (! (B0 >= 0.0) || ! (B1 >= 0.0) || ! std::isfinite (B2))
@@ -204,9 +211,21 @@ BiquadCoeffs designMatched (const FilterSpec& s, double fs)
 
     BiquadCoeffs result;
     {
-        double N[3][4] {};
         constexpr int K = 256;
         const double fLo = 10.0, fHi = std::min (0.5 * fs, 22000.0);
+        const double sHi = std::sin (pi * fHi / fs);
+        const double pMax = sHi * sHi;
+
+        // A high-pass has |B(0)| = 0 exactly, so its constant term is pinned
+        // to zero; otherwise the stop band floors well short of the analogue
+        // slope when the corner sits near Nyquist.
+        const int first = s.type == FilterType::highPass ? 1 : 0;
+        const int cols = 3 - first;
+
+        // Rows scaled by 1 / target: minimises the relative error. The
+        // right-hand side (all ones) is the column after the basis.
+        double M[K][4];
+        int rows = 0;
         for (int k = 0; k < K; ++k)
         {
             const double f = fLo * std::pow (fHi / fLo, k / (K - 1.0));
@@ -215,41 +234,60 @@ BiquadCoeffs designMatched (const FilterSpec& s, double fs)
             const double target = analogMagnitudeSquared (s, f) * (A0 * p0 + A1 * p1 + A2 * p2);
             if (! (target > 1e-24))
                 continue;
-            const double w = 1.0 / (target * target);
-            const double ph[3] { p0, p1, p2 };
-            for (int i = 0; i < 3; ++i)
-            {
-                for (int j = 0; j < 3; ++j)
-                    N[i][j] += w * ph[i] * ph[j];
-                N[i][3] += w * ph[i] * target;
-            }
+            const double u = p1 / pMax;
+            const double basis[3] { 1.0, u, u * u };
+            for (int j = 0; j < cols; ++j)
+                M[rows][j] = basis[first + j] / target;
+            M[rows][cols] = 1.0;
+            ++rows;
         }
 
-        bool solved = true;
-        for (int c = 0; c < 3 && solved; ++c)
+        bool solved = rows >= cols;
+        for (int c = 0; c < cols && solved; ++c)
         {
-            int p = c;
-            for (int r = c + 1; r < 3; ++r)
-                if (std::abs (N[r][c]) > std::abs (N[p][c]))
-                    p = r;
-            if (std::abs (N[p][c]) < 1e-300)
+            double norm = 0.0;
+            for (int r = c; r < rows; ++r)
+                norm += M[r][c] * M[r][c];
+            norm = std::sqrt (norm);
+            if (! (norm > 0.0) || ! std::isfinite (norm))
             {
                 solved = false;
                 break;
             }
-            for (int k = 0; k < 4; ++k)
-                std::swap (N[c][k], N[p][k]);
-            for (int r = 0; r < 3; ++r)
+            const double alpha = M[c][c] > 0.0 ? -norm : norm;
+            M[c][c] -= alpha; // M[c..rows)[c] is now the Householder vector v
+            double vNorm2 = 0.0;
+            for (int r = c; r < rows; ++r)
+                vNorm2 += M[r][c] * M[r][c];
+            for (int k = c + 1; k <= cols; ++k)
             {
-                if (r == c)
-                    continue;
-                const double f = N[r][c] / N[c][c];
-                for (int k = c; k < 4; ++k)
-                    N[r][k] -= f * N[c][k];
+                double dot = 0.0;
+                for (int r = c; r < rows; ++r)
+                    dot += M[r][c] * M[r][k];
+                const double f = 2.0 * dot / vNorm2;
+                for (int r = c; r < rows; ++r)
+                    M[r][k] -= f * M[r][c];
             }
+            M[c][c] = alpha; // R's diagonal
         }
-        if (solved && factor (N[0][3] / N[0][0], N[1][3] / N[1][1], N[2][3] / N[2][2], result))
-            return result;
+
+        if (solved)
+        {
+            // Back-substitute R d = Q^T 1 (R on and above the diagonal,
+            // Q^T 1 in the last column).
+            double d[3] {};
+            for (int i = cols - 1; i >= 0; --i)
+            {
+                double v = M[i][cols];
+                for (int j = i + 1; j < cols; ++j)
+                    v -= M[i][j] * d[first + j];
+                d[first + i] = v / M[i][i];
+            }
+            const double c0 = d[0], c1 = d[1] / pMax, c2 = d[2] / (pMax * pMax);
+            const double B0 = c0, B2 = -0.25 * c2, B1 = c0 + c1 + c2;
+            if (std::isfinite (B1) && factor (B0, B1, B2, result))
+                return result;
+        }
     }
 
     const double hDc = s.type == FilterType::highPass ? 0.0 : analogMagnitudeSquared (s, 1e-9 * s.freqHz);

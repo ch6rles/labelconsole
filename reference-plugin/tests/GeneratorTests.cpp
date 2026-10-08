@@ -5,6 +5,7 @@
 
 #include "ref/dsp/Biquad.h"
 #include "ref/dsp/CorrectionGenerator.h"
+#include "ref/dsp/FilterSet.h"
 #include "ref/dsp/Format.h"
 #include "ref/dsp/Grid.h"
 
@@ -231,6 +232,62 @@ TEST_CASE ("biquad: matched design tracks the analogue prototype below 10 kHz")
                 const double f = 20.0 * std::pow (500.0, i / 199.0);
                 CHECK_NEAR (digitalMagnitudeDb (c, f, fs), analogMagnitudeDb (s, f), 0.05);
             }
+        }
+    }
+}
+
+TEST_CASE ("biquad: high-pass has no DC response and tracks the prototype")
+{
+    for (double fs : kSupportedSampleRates)
+    {
+        const FilterSpec s { FilterType::highPass, 80.0, 0.0, 0.7071 };
+        const auto c = designMatched (s, fs);
+        CHECK (std::abs (c.b0 + c.b1 + c.b2) < 1e-12);
+        for (int i = 0; i < 200; ++i)
+        {
+            const double f = 10.0 * std::pow (2000.0, i / 199.0); // down to -40 dB
+            CHECK_NEAR (digitalMagnitudeDb (c, f, fs), analogMagnitudeDb (s, f), 0.05);
+        }
+    }
+}
+
+// Compilers and maths libraries round differently in the last bit. The
+// Minimum Phase cascade must give the same accuracy on every platform, so
+// the design is checked with its inputs nudged by a few ulps.
+TEST_CASE ("biquad: cascade accuracy does not depend on last-bit rounding")
+{
+    const CorrectionResult corrections[] = {
+        reftest::mm520Studio(), generateCorrection (reftest::loadProfile ("audeze_mm500"), reftest::loadTarget ("neutral@1.csv"))
+    };
+    for (const auto& corr : corrections)
+    {
+        for (double fs : kSupportedSampleRates)
+        {
+            const auto analogue = reftest::configFor (corr, FilterMode::minimumPhase, fs).calibration;
+            double lo = 1e9, hi = 0.0;
+            for (int k = 0; k < 8; ++k)
+            {
+                auto nudged = analogue;
+                for (size_t j = 0; j < nudged.size(); ++j)
+                {
+                    nudged[j].freqHz *= 1.0 + (double) ((k * 7 + (int) j * 3) % 9 - 4) * 1e-15;
+                    nudged[j].q *= 1.0 + (double) ((k * 5 + (int) j) % 7 - 3) * 1e-15;
+                }
+                const auto digital = refineCascadeForRate (nudged, fs);
+                double worst = 0.0;
+                for (int i = 0; i < 400; ++i)
+                {
+                    const double f = 20.0 * std::pow (1000.0, i / 399.0);
+                    double db = 0.0;
+                    for (const auto& s : digital)
+                        db += digitalMagnitudeDb (designMatched (s, fs), f, fs);
+                    worst = std::max (worst, std::abs (db - analogCascadeDb (analogue.data(), (int) analogue.size(), f)));
+                }
+                lo = std::min (lo, worst);
+                hi = std::max (hi, worst);
+            }
+            CHECK_MSG (hi < 0.05 && hi - lo < 0.005,
+                       std::to_string (fs) + " Hz: " + std::to_string (lo) + " .. " + std::to_string (hi) + " dB");
         }
     }
 }
