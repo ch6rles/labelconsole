@@ -62,7 +62,7 @@ private:
 };
 
 // Header row 2 (58 px): headphone and target fields, badge, stats.
-class HeaderRow2 : public juce::Component, private EditorModel::Listener
+class HeaderRow2 : public juce::Component, public juce::SettableTooltipClient, private EditorModel::Listener
 {
 public:
     explicit HeaderRow2 (EditorHost&);

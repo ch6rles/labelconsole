@@ -22,13 +22,6 @@ std::vector<double> toDoubles (const juce::var& v)
     return out;
 }
 
-// Splits "id@version" into its parts.
-void splitKey (const juce::String& key, juce::String& id, int& version)
-{
-    id = key.upToFirstOccurrenceOf ("@", false, false);
-    version = key.contains ("@") ? key.fromFirstOccurrenceOf ("@", false, false).getIntValue() : 1;
-}
-
 // Locates the sha256 value inside the JSON text: [start, end) of the hex.
 bool findChecksumSpan (const juce::String& text, int& start, int& end)
 {

@@ -125,7 +125,7 @@ juce::AudioProcessorParameter* ReferenceProcessor::getBypassParameter() const
 
 juce::AudioProcessorEditor* ReferenceProcessor::createEditor()
 {
-    return new ReferenceEditor (*this);
+    return new ui::ReferenceEditor (*this);
 }
 
 //==============================================================================

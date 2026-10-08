@@ -12,7 +12,7 @@ namespace ref::ui
 // Base for everything clickable: hover, pressed and keyboard-focus states
 // (proposed in the handoff: hover border #8a8a8a, pressed #161616, focus
 // ring 1px ink at 2px offset), Enter/Space activation.
-class Clickable : public juce::Component
+class Clickable : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     Clickable();
@@ -196,7 +196,7 @@ private:
 // Rotary knob bound to a host parameter. Vertical drag (about 250 px for
 // full travel, Shift for fine), wheel steps, double-click or Alt-click
 // resets to default.
-class Knob : public juce::Component
+class Knob : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     enum class Kind

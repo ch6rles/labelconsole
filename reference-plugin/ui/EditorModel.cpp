@@ -4,6 +4,7 @@
 #include "../plugin/Parameters.h"
 #include "ref/dsp/Biquad.h"
 #include "ref/dsp/FirDesign.h"
+#include "ref/dsp/Format.h"
 #include "ref/dsp/Grid.h"
 #include "ref/dsp/Loudness.h"
 

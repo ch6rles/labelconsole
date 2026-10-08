@@ -505,6 +505,7 @@ Knob::Knob (Kind k, juce::RangedAudioParameter& p, double fineStep, double coars
     setWantsKeyboardFocus (true);
     setMouseClickGrabsKeyboardFocus (false);
     setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+    setPaintingIsUnclipped (true); // end labels sit a pixel or two outside the box
     attachment.sendInitialUpdate();
 }
 
@@ -530,8 +531,10 @@ void Knob::setValue (double v)
 
 void Knob::paint (juce::Graphics& g)
 {
-    const auto box = getLocalBounds().toFloat();
-    const float size = juce::jmin (box.getWidth(), box.getHeight());
+    const auto bounds = getLocalBounds().toFloat();
+    const float size = juce::jmin (bounds.getWidth(), bounds.getHeight());
+    // Wider bounds leave room for end labels that overhang the box.
+    const auto box = juce::Rectangle<float> (size, size).withCentre ({ bounds.getCentreX(), bounds.getY() + size * 0.5f });
     const float s = size / (kind == Kind::calibration ? 156.0f : 84.0f); // compact layouts scale the drawing
     const juce::Point<float> c (box.getCentreX(), box.getY() + size * 0.5f);
     const float boxR = size * 0.5f;
@@ -592,7 +595,7 @@ void Knob::paint (juce::Graphics& g)
         drawTick (g, c, bodyD * 0.5f, theta, 4.0f * s, 11.0f * s, 2.0f, colours::ink, 1.0f);
 
         const auto lf = mono (8.5f);
-        const float ly = box.getY() + 74.0f * s;
+        const float ly = box.getBottom() - 10.0f; // 74 px down an 84 px box; overhangs slightly
         const juce::String left = isOutput ? text::minus + "24" : juce::String ("L6");
         const juce::String right = isOutput ? juce::String ("+12") : juce::String ("R6");
         const float inset = isOutput ? -2.0f : 4.0f;

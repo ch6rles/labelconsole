@@ -75,8 +75,8 @@ std::string formatFrequencyRange (double loHz, double hiHz)
     if (loK && hiK)
         return compact (loHz / 1000.0) + kEnDash + compact (hiHz / 1000.0) + " kHz";
     if (! loK && ! hiK)
-        return compact (loHz) + kEnDash + compact (hiHz) + " Hz";
-    return compact (loHz) + " Hz" + kEnDash + compact (hiHz / 1000.0) + " kHz";
+        return formatNumber (loHz, 0) + kEnDash + formatNumber (hiHz, 0) + " Hz";
+    return formatNumber (loHz, 0) + " Hz" + kEnDash + compact (hiHz / 1000.0) + " kHz";
 }
 
 } // namespace ref::dsp

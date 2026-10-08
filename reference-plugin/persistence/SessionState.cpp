@@ -2,6 +2,8 @@
 
 #include "../measurement/TextUtil.h"
 
+#include <cstdio>
+
 namespace ref::state
 {
 
@@ -12,13 +14,21 @@ const juce::Identifier kSettings ("SETTINGS"), kOverlay ("OVERLAY"), kNode ("NOD
 
 juce::String modeToString (dsp::FilterMode m) { return m == dsp::FilterMode::linearPhase ? "linear" : "min"; }
 
+// Round-trips a double exactly through text.
+juce::String exact (double v)
+{
+    char buf[40];
+    std::snprintf (buf, sizeof (buf), "%.17g", v);
+    return buf;
+}
+
 juce::ValueTree filterToTree (const juce::Identifier& type, const dsp::FilterSpec& f)
 {
     juce::ValueTree t (type);
     t.setProperty ("type", juce::String (dsp::toString (f.type)), nullptr);
-    t.setProperty ("freq", f.freqHz, nullptr);
-    t.setProperty ("gain", f.gainDb, nullptr);
-    t.setProperty ("q", f.q, nullptr);
+    t.setProperty ("freq", exact (f.freqHz), nullptr);
+    t.setProperty ("gain", exact (f.gainDb), nullptr);
+    t.setProperty ("q", exact (f.q), nullptr);
     return t;
 }
 
@@ -26,9 +36,9 @@ bool filterFromTree (const juce::ValueTree& t, dsp::FilterSpec& f)
 {
     if (! dsp::filterTypeFromString (t.getProperty ("type").toString().toStdString(), f.type))
         return false;
-    f.freqHz = juce::jlimit (10.0, 40000.0, (double) t.getProperty ("freq", 1000.0));
-    f.gainDb = juce::jlimit (-30.0, 30.0, (double) t.getProperty ("gain", 0.0));
-    f.q = juce::jlimit (0.05, 20.0, (double) t.getProperty ("q", 0.7071));
+    f.freqHz = juce::jlimit (10.0, 40000.0, t.getProperty ("freq", "1000").toString().getDoubleValue());
+    f.gainDb = juce::jlimit (-30.0, 30.0, t.getProperty ("gain", "0").toString().getDoubleValue());
+    f.q = juce::jlimit (0.05, 20.0, t.getProperty ("q", "0.7071").toString().getDoubleValue());
     return true;
 }
 } // namespace
@@ -89,26 +99,23 @@ std::vector<dsp::FilterSpec> overlayFromTree (const juce::ValueTree& t)
 
 juce::String encodeCurve (const dsp::GridCurve& c)
 {
-    juce::String s;
-    s.preallocateBytes ((size_t) dsp::kGridSize * 8);
-    for (size_t i = 0; i < c.size(); ++i)
-    {
-        if (i > 0)
-            s << ',';
-        s << juce::String (c[i], 4);
-    }
-    return s;
+    // Exact: the session must reproduce the correction bit for bit.
+    juce::MemoryOutputStream out;
+    for (double v : c)
+        out.writeDouble (v); // little-endian
+    return out.getMemoryBlock().toBase64Encoding();
 }
 
 bool decodeCurve (const juce::String& s, dsp::GridCurve& c)
 {
-    const auto parts = juce::StringArray::fromTokens (s, ",", "");
-    if (parts.size() != dsp::kGridSize)
+    juce::MemoryBlock block;
+    if (! block.fromBase64Encoding (s) || block.getSize() != sizeof (double) * (size_t) dsp::kGridSize)
         return false;
-    for (int i = 0; i < dsp::kGridSize; ++i)
+    juce::MemoryInputStream in (block, false);
+    for (auto& v : c)
     {
-        c[(size_t) i] = parts[i].getDoubleValue();
-        if (! std::isfinite (c[(size_t) i]))
+        v = in.readDouble();
+        if (! std::isfinite (v))
             return false;
     }
     return true;
@@ -130,8 +137,8 @@ juce::ValueTree snapshotToTree (const CalibrationSnapshot& s)
     t.setProperty ("targetName", s.targetName, nullptr);
     t.setProperty ("placeholder", s.placeholder, nullptr);
     t.setProperty ("generated", s.result.generated, nullptr);
-    t.setProperty ("maxBoost", s.limits.maxBoostDb, nullptr);
-    t.setProperty ("maxCut", s.limits.maxCutDb, nullptr);
+    t.setProperty ("maxBoost", exact (s.limits.maxBoostDb), nullptr);
+    t.setProperty ("maxCut", exact (s.limits.maxCutDb), nullptr);
     t.setProperty ("largestBoost", s.result.largestBoostDb, nullptr);
     t.setProperty ("fitRms", s.result.fitRmsDb, nullptr);
     t.setProperty ("fitMax", s.result.fitMaxDb, nullptr);
@@ -184,8 +191,8 @@ std::shared_ptr<CalibrationSnapshot> snapshotFromTree (const juce::ValueTree& t)
     s->targetName = t.getProperty ("targetName").toString();
     s->placeholder = (bool) t.getProperty ("placeholder", false);
     s->result.generated = (bool) t.getProperty ("generated", false);
-    s->limits.maxBoostDb = (double) t.getProperty ("maxBoost", 6.0);
-    s->limits.maxCutDb = (double) t.getProperty ("maxCut", -12.0);
+    s->limits.maxBoostDb = t.getProperty ("maxBoost", "6").toString().getDoubleValue();
+    s->limits.maxCutDb = t.getProperty ("maxCut", "-12").toString().getDoubleValue();
     s->result.largestBoostDb = (double) t.getProperty ("largestBoost", 0.0);
     s->result.fitRmsDb = (double) t.getProperty ("fitRms", 0.0);
     s->result.fitMaxDb = (double) t.getProperty ("fitMax", 0.0);
