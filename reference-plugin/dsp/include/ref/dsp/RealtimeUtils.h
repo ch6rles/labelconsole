@@ -132,7 +132,7 @@ public:
     {
 #if REF_DSP_SSE
         saved = _mm_getcsr();
-        _mm_setcsr (saved | 0x8040);
+        _mm_setcsr ((unsigned int) saved | 0x8040u);
 #elif defined(__aarch64__)
         uint64_t fpcr;
         asm volatile ("mrs %0, fpcr" : "=r"(fpcr));
