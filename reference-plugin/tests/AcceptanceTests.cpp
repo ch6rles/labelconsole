@@ -21,8 +21,22 @@
 
 using namespace ref::dsp;
 
+// Under Clang's RealtimeSanitizer (REF_RTSAN, CI) the audio-thread calls run
+// inside a [[clang::nonblocking]] function, so any allocation, lock or
+// blocking call reached from process() aborts the test.
+#if defined(REF_RTSAN) && REF_RTSAN
+ #define REF_REALTIME [[clang::nonblocking]]
+#else
+ #define REF_REALTIME
+#endif
+
 namespace
 {
+void processRealtime (Engine& e, float* const* ch, int n, const EngineParams& p) noexcept REF_REALTIME
+{
+    e.process (ch, 2, n, p);
+}
+
 std::vector<double> impulseResponse (FilterSet& set, int length)
 {
     std::vector<double> l ((size_t) length, 0.0), r ((size_t) length, 0.0);
@@ -333,7 +347,7 @@ TEST_CASE ("acceptance: real-time safety, no allocations in process across every
         {
             float* ch[2] = { s.l.data() + off, s.r.data() + off };
             reftest::ScopedAudioThread audio;
-            e.process (ch, 2, 64, p);
+            processRealtime (e, ch, 64, p);
         }
         e.collectGarbage();
     };

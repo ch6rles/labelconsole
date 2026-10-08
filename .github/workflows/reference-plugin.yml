@@ -1,0 +1,126 @@
+name: REFERENCE plugin
+
+on:
+  push:
+    paths:
+      - "reference-plugin/**"
+      - ".github/workflows/reference-plugin.yml"
+  pull_request:
+    paths:
+      - "reference-plugin/**"
+      - ".github/workflows/reference-plugin.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-2022
+          - name: macOS
+            os: macos-14
+          - name: Linux
+            os: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+        working-directory: reference-plugin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libjack-jackd2-dev libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libxcomposite-dev \
+            libgl1-mesa-dev xvfb
+
+      - name: Configure
+        run: |
+          extra=""
+          if [ "$RUNNER_OS" = "macOS" ]; then extra='-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'; fi
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${extra:+"$extra"}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: DSP and acceptance tests
+        run: ctest --test-dir build -C Release --output-on-failure -R refdsp_tests
+
+      - name: Plugin tests
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a ctest --test-dir build -C Release --output-on-failure -R ReferencePluginTests
+          else
+            ctest --test-dir build -C Release --output-on-failure -R ReferencePluginTests
+          fi
+
+      - name: pluginval (strictness 10)
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   zip=pluginval_Linux.zip;   bin=./pluginval;                               pre="xvfb-run -a" ;;
+            Windows) zip=pluginval_Windows.zip; bin=./pluginval.exe;                           pre="" ;;
+            macOS)   zip=pluginval_macOS.zip;   bin=./pluginval.app/Contents/MacOS/pluginval;  pre="" ;;
+          esac
+          curl -sSL -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/$zip"
+          unzip -q -o pluginval.zip
+          $pre $bin --strictness-level 10 --validate-in-process \
+            --validate build/plugin/Reference_artefacts/Release/VST3/REFERENCE.vst3
+
+      - name: auval
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/plugin/Reference_artefacts/Release/AU/REFERENCE.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          auval -v aufx Rfhc Rfcl
+
+      - name: Package
+        run: |
+          out="$GITHUB_WORKSPACE/REFERENCE-${{ matrix.name }}"
+          mkdir -p "$out/Plugins" "$out/Tools"
+          a=build/plugin/Reference_artefacts/Release
+          cp -R "$a/VST3/REFERENCE.vst3" "$out/Plugins/"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            cp -R "$a/AU/REFERENCE.component" "$out/Plugins/"
+            cp -R "$a/Standalone/REFERENCE.app" "$out/"
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            cp "$a/Standalone/REFERENCE.exe" "$out/"
+          else
+            cp "$a/Standalone/REFERENCE" "$out/"
+          fi
+          cp build/plugin/ReferenceProfileTool_artefacts/Release/reference-profile-tool* "$out/Tools/"
+          cp README.md "$out/"
+          cp resources/fonts/OFL-*.txt "$out/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: REFERENCE-${{ matrix.name }}
+          path: REFERENCE-${{ matrix.name }}
+
+  realtime-sanitizer:
+    name: RealtimeSanitizer
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+        working-directory: reference-plugin
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clang 20
+        run: |
+          wget -q https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh 20
+      - name: Build the engine and tests with -fsanitize=realtime
+        run: |
+          cmake -S . -B build-rtsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DREF_BUILD_PLUGIN=OFF -DREF_RTSAN=ON \
+            -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20
+          cmake --build build-rtsan --parallel 4
+      - name: Process path under RTSan
+        run: ./build-rtsan/tests/refdsp_tests "real-time safety"

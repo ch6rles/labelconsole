@@ -97,3 +97,13 @@ target_link_libraries(Reference
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags)
+
+# Command-line tool that builds profiles and targets from measurement CSVs.
+juce_add_console_app(ReferenceProfileTool PRODUCT_NAME "reference-profile-tool")
+target_sources(ReferenceProfileTool PRIVATE
+    ${REF_ROOT}/tools/ProfileTool.cpp
+    ${REF_ROOT}/measurement/ProfileLibrary.cpp)
+target_compile_definitions(ReferenceProfileTool PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
+target_link_libraries(ReferenceProfileTool PRIVATE
+    refdsp RefBinaryData juce::juce_core juce::juce_cryptography juce::juce_recommended_config_flags)
+set_target_properties(ReferenceProfileTool PROPERTIES OUTPUT_NAME reference-profile-tool)
