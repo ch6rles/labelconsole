@@ -2,6 +2,7 @@
 
 #include "../measurement/TextUtil.h"
 
+#include <cmath>
 #include <cstdio>
 
 namespace ref::state
@@ -14,12 +15,12 @@ const juce::Identifier kSettings ("SETTINGS"), kOverlay ("OVERLAY"), kNode ("NOD
 
 juce::String modeToString (dsp::FilterMode m) { return m == dsp::FilterMode::linearPhase ? "linear" : "min"; }
 
-// Round-trips a double exactly through text.
+// Round-trips a double exactly through text: 17 significant digits, in
+// the C locale whatever the host has set (snprintf would write a decimal
+// comma in some locales).
 juce::String exact (double v)
 {
-    char buf[40];
-    std::snprintf (buf, sizeof (buf), "%.17g", v);
-    return buf;
+    return juce::String (v, 16, true);
 }
 
 juce::ValueTree filterToTree (const juce::Identifier& type, const dsp::FilterSpec& f)
@@ -36,9 +37,15 @@ bool filterFromTree (const juce::ValueTree& t, dsp::FilterSpec& f)
 {
     if (! dsp::filterTypeFromString (t.getProperty ("type").toString().toStdString(), f.type))
         return false;
-    f.freqHz = juce::jlimit (10.0, 40000.0, t.getProperty ("freq", "1000").toString().getDoubleValue());
-    f.gainDb = juce::jlimit (-30.0, 30.0, t.getProperty ("gain", "0").toString().getDoubleValue());
-    f.q = juce::jlimit (0.05, 20.0, t.getProperty ("q", "0.7071").toString().getDoubleValue());
+    f.freqHz = t.getProperty ("freq", "1000").toString().getDoubleValue();
+    f.gainDb = t.getProperty ("gain", "0").toString().getDoubleValue();
+    f.q = t.getProperty ("q", "0.7071").toString().getDoubleValue();
+    // A damaged session must not put NaN into the filters (jlimit passes it through).
+    if (! std::isfinite (f.freqHz) || ! std::isfinite (f.gainDb) || ! std::isfinite (f.q))
+        return false;
+    f.freqHz = juce::jlimit (10.0, 40000.0, f.freqHz);
+    f.gainDb = juce::jlimit (-30.0, 30.0, f.gainDb);
+    f.q = juce::jlimit (0.05, 20.0, f.q);
     return true;
 }
 } // namespace
@@ -70,7 +77,8 @@ void settingsFromTree (const juce::ValueTree& t, Settings& s)
     s.autoGain = (bool) t.getProperty ("autoGain", s.autoGain);
     s.monitorProtection = (bool) t.getProperty ("monitorProtection", s.monitorProtection);
     s.autoBypassOffline = (bool) t.getProperty ("autoBypassOffline", s.autoBypassOffline);
-    s.uiScale = juce::jlimit (0.75f, 2.0f, (float) t.getProperty ("uiScale", s.uiScale));
+    const float scale = (float) t.getProperty ("uiScale", s.uiScale);
+    s.uiScale = std::isfinite (scale) ? juce::jlimit (0.75f, 2.0f, scale) : 1.0f;
     s.graphRangeDb = juce::jlimit (3, 24, (int) t.getProperty ("graphRange", s.graphRangeDb));
     s.advancedView = (bool) t.getProperty ("advancedView", s.advancedView);
     s.presetName = t.getProperty ("presetName", s.presetName).toString();
@@ -91,7 +99,7 @@ std::vector<dsp::FilterSpec> overlayFromTree (const juce::ValueTree& t)
     for (const auto& c : t)
     {
         dsp::FilterSpec f;
-        if (c.hasType (kNode) && filterFromTree (c, f))
+        if (out.size() < 8 && c.hasType (kNode) && filterFromTree (c, f))
             out.push_back (f);
     }
     return out;

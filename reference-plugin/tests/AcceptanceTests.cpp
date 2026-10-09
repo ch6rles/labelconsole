@@ -402,21 +402,23 @@ TEST_CASE ("acceptance: robustness, NaN/Inf/denormal/full-scale input")
                 s.l[23 * 256 + (size_t) i] = s.r[23 * 256 + (size_t) i] = (i & 1) ? 1.0f : -1.0f;
                 s.l[24 * 256 + (size_t) i] = 1e30f;
             }
-            // The reference sees what the processing path sees.
-            auto sanitized = s;
-            for (auto* v : { &sanitized.l, &sanitized.r })
+            // The reference is the clean signal: the bad samples silenced,
+            // nothing absurd ever processed. From the block after the last
+            // bad one, the output must be identical to it.
+            auto clean = s;
+            for (auto* v : { &clean.l, &clean.r })
                 for (auto& x : *v)
-                    x = std::isfinite (x) ? std::clamp (x, -1e4f, 1e4f) : 0.0f;
+                    x = std::isfinite (x) && std::abs (x) <= 16.0f ? x : 0.0f;
 
             run (e, s, p, 256);
-            run (ref, sanitized, p, 256);
+            run (ref, clean, p, 256);
 
             bool finite = true, recovered = true;
             for (size_t i = 0; i < s.l.size(); ++i)
             {
                 finite = finite && std::isfinite (s.l[i]) && std::isfinite (s.r[i]);
-                if (i >= 26 * 256)
-                    recovered = recovered && s.l[i] == sanitized.l[i] && s.r[i] == sanitized.r[i];
+                if (i >= 25 * 256)
+                    recovered = recovered && s.l[i] == clean.l[i] && s.r[i] == clean.r[i];
             }
             CHECK (finite);
             CHECK (recovered);
@@ -428,6 +430,30 @@ TEST_CASE ("acceptance: robustness, NaN/Inf/denormal/full-scale input")
                 CHECK (peak <= 0.98856f);
             }
         }
+    }
+}
+
+TEST_CASE ("robustness: non-finite parameters keep the last good value")
+{
+    for (auto mode : { FilterMode::minimumPhase, FilterMode::linearPhase })
+    {
+        Engine e;
+        prepareWith (e, 48000.0, 256, reftest::configFor (reftest::mm520Studio(), mode, 48000.0));
+        auto s = noise (48000 / 4, 0.5f, 9);
+        EngineParams p;
+        bool finite = true;
+        for (size_t off = 0; off < s.l.size(); off += 256)
+        {
+            const auto block = (off / 256) % 4;
+            p.amount = block == 1 ? std::numeric_limits<double>::quiet_NaN() : 1.0;
+            p.outputGainDb = block == 2 ? std::numeric_limits<double>::infinity() : 0.0;
+            p.balanceDb = block == 3 ? -std::numeric_limits<double>::infinity() : 0.0;
+            float* ch[2] = { s.l.data() + off, s.r.data() + off };
+            e.process (ch, 2, (int) std::min<size_t> (256, s.l.size() - off), p);
+            for (size_t i = off; i < std::min (off + 256, s.l.size()); ++i)
+                finite = finite && std::isfinite (s.l[i]) && std::isfinite (s.r[i]);
+        }
+        CHECK_MSG (finite, mode == FilterMode::minimumPhase ? "Min Phase" : "Linear Phase");
     }
 }
 

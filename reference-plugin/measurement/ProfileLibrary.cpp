@@ -1,5 +1,7 @@
 #include "ProfileLibrary.h"
 
+#include <cmath>
+
 #include "TextUtil.h"
 
 #include <BinaryData.h>
@@ -210,6 +212,11 @@ bool ProfileLibrary::verifyChecksum (const juce::String& jsonText, juce::String&
 bool ProfileLibrary::parseProfile (const juce::String& jsonText, ProfileInfo& p, juce::String& error)
 {
     juce::var root;
+    if (! text::jsonIsSafeToParse (jsonText))
+    {
+        error = "not a profile (too large or too deeply nested)";
+        return false;
+    }
     const auto result = juce::JSON::parse (jsonText, root);
     if (result.failed() || ! root.isObject())
     {
@@ -254,12 +261,29 @@ bool ProfileLibrary::parseProfile (const juce::String& jsonText, ProfileInfo& p,
         for (const auto& t : *arr)
             p.targetKeys.add (t.toString());
 
+    // Limits shape the correction directly; a sign slip or a missing number
+    // must not turn it into a boost or into NaN, so out-of-range is an error.
     const auto lim = root.getProperty ("limits", {});
-    p.limits.maxBoostDb = (double) lim.getProperty ("max_boost_db", p.limits.maxBoostDb);
-    p.limits.maxCutDb = (double) lim.getProperty ("max_cut_db", p.limits.maxCutDb);
-    p.limits.trebleAverageAboveHz = (double) lim.getProperty ("treble_average_above_hz", p.limits.trebleAverageAboveHz);
-    p.limits.maxSlopeDbPerOctave = (double) lim.getProperty ("max_slope_db_per_oct", p.limits.maxSlopeDbPerOctave);
-    p.limits.maxQ = (double) lim.getProperty ("max_q", p.limits.maxQ);
+    struct Limit
+    {
+        const char* key;
+        double& value;
+        double lo, hi;
+    };
+    for (const Limit& l : { Limit { "max_boost_db", p.limits.maxBoostDb, 0.0, 12.0 }, Limit { "max_cut_db", p.limits.maxCutDb, -24.0, 0.0 },
+                            Limit { "treble_average_above_hz", p.limits.trebleAverageAboveHz, 2000.0, 20000.0 },
+                            Limit { "max_slope_db_per_oct", p.limits.maxSlopeDbPerOctave, 6.0, 48.0 }, Limit { "max_q", p.limits.maxQ, 0.5, 10.0 } })
+    {
+        if (! lim.hasProperty (l.key))
+            continue;
+        const double v = (double) lim.getProperty (l.key, {});
+        if (! std::isfinite (v) || v < l.lo || v > l.hi)
+        {
+            error = "limits." + juce::String (l.key) + " must be between " + juce::String (l.lo) + " and " + juce::String (l.hi);
+            return false;
+        }
+        l.value = v;
+    }
 
     const auto curve = root.getProperty ("curve", {});
     p.curve.freqHz = toDoubles (curve.getProperty ("freq_hz", {}));
@@ -273,6 +297,34 @@ bool ProfileLibrary::parseProfile (const juce::String& jsonText, ProfileInfo& p,
         return false;
     }
     return true;
+}
+
+bool ProfileLibrary::parseCsvRow (const juce::String& line, double& first, double& second)
+{
+    // Semicolon- or tab-separated files may use a decimal comma ("1000;2,5"),
+    // as European spreadsheet exports do; comma-separated ones cannot.
+    const bool commaIsDecimal = line.containsAnyOf (";\t");
+    const auto cols = juce::StringArray::fromTokens (line, commaIsDecimal ? ";\t" : ",;\t", "\"");
+    double v[2] {};
+    int found = 0;
+    for (auto c : cols)
+    {
+        c = c.trim().unquoted();
+        if (c.isEmpty())
+            continue;
+        if (commaIsDecimal)
+            c = c.replaceCharacter (',', '.');
+        if (! c.containsOnly ("0123456789+-.eE") || ! c.containsAnyOf ("0123456789"))
+            return false;
+        v[found] = c.getDoubleValue();
+        if (! std::isfinite (v[found]))
+            return false;
+        if (++found == 2)
+            break;
+    }
+    first = v[0];
+    second = v[1];
+    return found == 2;
 }
 
 bool ProfileLibrary::parseTargetCsv (const juce::String& csvText, TargetInfo& t, juce::String& error)
@@ -305,11 +357,14 @@ bool ProfileLibrary::parseTargetCsv (const juce::String& csvText, TargetInfo& t,
         }
         if (! (juce::CharacterFunctions::isDigit (line[0]) || line[0] == '.'))
             continue; // header row
-        const auto cols = juce::StringArray::fromTokens (line, ",;\t", "");
-        if (cols.size() < 2)
-            continue;
-        t.curve.freqHz.push_back (cols[0].getDoubleValue());
-        t.curve.db.push_back (cols[1].getDoubleValue());
+        double hz = 0.0, db = 0.0;
+        if (! parseCsvRow (line, hz, db))
+        {
+            error = "not a number in line: " + line.substring (0, 60);
+            return false;
+        }
+        t.curve.freqHz.push_back (hz);
+        t.curve.db.push_back (db);
     }
 
     if (t.id.isEmpty() || t.rigId.isEmpty())

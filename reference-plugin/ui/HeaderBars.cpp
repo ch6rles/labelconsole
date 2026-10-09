@@ -147,13 +147,19 @@ void PresetBox::paint (juce::Graphics& g)
     }
 
     const auto f = sans (12.0f, 500);
-    auto shown = name.isEmpty() ? juce::String ("No preset") : name;
     const juce::Rectangle<float> nameArea (31.0f, 0.0f, right - 31.0f, r.getHeight());
-    if (modified)
-        shown << " *";
-    // Truncate with an ellipsis rather than overflow.
-    while (shown.length() > 4 && textWidth (f, shown) > nameArea.getWidth() - 12.0f)
-        shown = shown.dropLastCharacters (modified ? 3 : 2).trimEnd() + text::ellipsis + (modified ? " *" : "");
+    const float available = nameArea.getWidth() - 12.0f;
+    auto base = name.isEmpty() ? juce::String ("No preset") : name;
+    const juce::String suffix (modified ? " *" : "");
+    auto shown = base + suffix;
+    // Truncate the name (never the modified mark) with an ellipsis rather
+    // than overflow; the name shrinks every pass, so this always ends.
+    if (textWidth (f, shown) > available)
+    {
+        while (base.length() > 1 && textWidth (f, base.trimEnd() + text::ellipsis + suffix) > available)
+            base = base.dropLastCharacters (1);
+        shown = base.trimEnd() + text::ellipsis + suffix;
+    }
     drawText (g, shown, nameArea, f, colours::ink, juce::Justification::centred);
 
     for (auto* c : { &menuButton, &prevButton, &nextButton })

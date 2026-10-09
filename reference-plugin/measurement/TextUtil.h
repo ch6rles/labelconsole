@@ -23,4 +23,38 @@ inline juce::String fromStd (const std::string& s)
     return juce::String::fromUTF8 (s.c_str(), (int) s.size());
 }
 
+// JUCE's JSON parser recurses once per nesting level, so a hostile file in a
+// user folder could overflow the stack on every launch. Profiles and presets
+// are shallow; anything deeper or larger than this is not one.
+inline bool jsonIsSafeToParse (const juce::String& json, int maxDepth = 32, int maxLength = 8 * 1024 * 1024)
+{
+    if (json.length() > maxLength)
+        return false;
+    int depth = 0;
+    bool inString = false, escaped = false;
+    for (auto p = json.getCharPointer(); ! p.isEmpty(); ++p)
+    {
+        const auto c = *p;
+        if (inString)
+        {
+            if (escaped)
+                escaped = false;
+            else if (c == '\\')
+                escaped = true;
+            else if (c == '"')
+                inString = false;
+        }
+        else if (c == '"')
+            inString = true;
+        else if (c == '[' || c == '{')
+        {
+            if (++depth > maxDepth)
+                return false;
+        }
+        else if (c == ']' || c == '}')
+            --depth;
+    }
+    return true;
+}
+
 } // namespace ref::text

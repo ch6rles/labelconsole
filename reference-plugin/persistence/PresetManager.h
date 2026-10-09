@@ -50,6 +50,10 @@ public:
     bool exportPreset (const PresetData&, const juce::File& destination, juce::String& error) const;
 
     static juce::File presetsDirectory();
+    // A file for a new preset called `name` that no other preset uses:
+    // different names can map to one file name (illegal characters, case-
+    // insensitive file systems). `keep` is the preset's current file, if any.
+    static juce::File fileFor (const juce::String& name, const juce::File& keep = {});
     static constexpr const char* kExtension = ".refpreset";
 
     static juce::String toJson (const PresetData&);

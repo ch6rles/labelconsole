@@ -46,6 +46,15 @@ public:
 
     std::shared_ptr<const CalibrationSnapshot> getSnapshot() const;
 
+    // Runs `fn` while the worker cannot touch the library: reloading it
+    // replaces the profiles and targets the worker reads.
+    template <typename Fn>
+    void withLibraryExclusive (Fn&& fn)
+    {
+        const juce::ScopedLock sl (buildLock);
+        fn();
+    }
+
     static std::shared_ptr<CalibrationSnapshot> generate (const ProfileLibrary&, const WorkerRequest&);
 
 private:

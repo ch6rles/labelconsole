@@ -10,6 +10,7 @@
 
 #include <BinaryData.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -228,6 +229,78 @@ int main()
         check (lib.findProfile ("user_crlf") != nullptr, "CRLF line endings do not break the checksum");
         check (lib.findProfile ("user_tampered") == nullptr, "a tampered profile is rejected");
         check (lib.getLoadErrors().size() == 1 && lib.getLoadErrors()[0].contains ("checksum"), "the rejection names the checksum");
+    }
+
+    std::printf ("[ RUN ] presets: names that share a file name never overwrite each other\n");
+    {
+        ref::ReferenceProcessor p;
+        auto& pm = p.getPresets();
+        juce::String err;
+        // "A/B" and "A_B" both become A_B.refpreset; "CON" is a Windows device name.
+        for (auto* name : { "A/B", "A_B", "Rock", "CON" })
+            check (pm.saveUser (p.captureCurrentAsPreset (name), err), "save presets with colliding file names");
+        check (pm.find ("A/B") != nullptr && pm.find ("A_B") != nullptr && pm.find ("Rock") != nullptr && pm.find ("CON") != nullptr,
+               "presets with colliding file names all survive");
+        check (pm.renameUser ("A/B", "A:B", err) && pm.find ("A:B") != nullptr && pm.find ("A_B") != nullptr,
+               "rename onto the same file name keeps both presets");
+        check (pm.renameUser ("Rock", "ROCK", err) && pm.find ("ROCK") != nullptr, "change-of-case rename keeps the preset");
+    }
+
+    std::printf ("[ RUN ] robustness: hostile profile, target and preset files\n");
+    {
+        auto dir = ref::ProfileLibrary::userProfilesDirectory();
+        dir.createDirectory();
+        dir.getChildFile ("deep.json").replaceWithText (juce::String::repeatedString ("[", 200000));
+        ref::ProfileLibrary lib; // must not overflow the stack
+        check (lib.findProfile ("deep") == nullptr, "a deeply nested file is rejected, not parsed");
+        dir.getChildFile ("deep.json").deleteFile();
+
+        ref::ProfileInfo info;
+        juce::String err;
+        int size = 0;
+        const char* data = nullptr;
+        for (int i = 0; i < BinaryData::namedResourceListSize; ++i)
+            if (juce::String (BinaryData::originalFilenames[i]) == "audeze_mm520.json")
+                data = BinaryData::getNamedResource (BinaryData::namedResourceList[i], size);
+        const auto text = juce::String::fromUTF8 (data, size);
+        check (ref::ProfileLibrary::parseProfile (text, info, err), "the factory profile parses");
+        check (! ref::ProfileLibrary::parseProfile (text.replace ("\"max_cut_db\": -12", "\"max_cut_db\": 12"), info, err) && err.contains ("max_cut_db"),
+               "a positive maximum cut is rejected");
+
+        ref::TargetInfo t;
+        const juce::String header = "# id: comma\n# version: 1\n# rig_id: rig-01\n";
+        juce::String rows;
+        for (int i = 0; i < 40; ++i)
+            rows << juce::String (20.0 * std::pow (1000.0, i / 39.0), 3).replaceCharacter ('.', ',') << ";" << juce::String (i % 5) << ",5\n";
+        check (ref::ProfileLibrary::parseTargetCsv (header + rows, t, err) && std::abs (t.curve.db[1] - 1.5) < 1e-9,
+               "decimal-comma target rows read correctly");
+        check (! ref::ProfileLibrary::parseTargetCsv (header + rows + "1000;n/a\n", t, err), "a non-numeric cell rejects the target");
+
+        ref::PresetData pd;
+        const auto bad = juce::String (R"({"format": "REFERENCE preset", "name": "Bad", "profileId": "audeze_mm520", "calAmount": 1e999,
+            "outputGain": -1e999, "balance": 1e999, "overlay": [{"type": "bell", "freq": 1000, "gain": 1e999, "q": 1}]})");
+        check (ref::PresetManager::fromJson (bad, pd, err) && std::isfinite (pd.calAmount) && std::isfinite (pd.outputGain)
+                   && std::isfinite (pd.balance) && pd.overlay.size() == 1 && std::isfinite (pd.overlay[0].gainDb),
+               "infinite preset values become defaults");
+    }
+
+    std::printf ("[ RUN ] ui: a long, modified preset name is shortened without hanging\n");
+    {
+        ref::ReferenceProcessor p;
+        p.setPlayConfigDetails (2, 2, 48000.0, 512);
+        p.prepareToPlay (48000.0, 512);
+        juce::String err;
+        const juce::String longName = juce::String::repeatedString ("Very long preset name ", 12).trim();
+        check (p.getPresets().saveUser (p.captureCurrentAsPreset (longName), err), "save a long-named preset");
+        p.loadPreset (*p.getPresets().find (longName));
+        setParam (p, ref::params::outputGain, -3.0f);
+        check (p.isPresetModified(), "the long-named preset is modified");
+        std::unique_ptr<juce::AudioProcessorEditor> editor (p.createEditorAndMakeActive());
+        editor->setSize (1200, 700);
+        const auto image = editor->createComponentSnapshot (editor->getLocalBounds());
+        check (image.isValid(), "the editor paints");
+        editor.reset();
+        p.releaseResources();
     }
 
     home.deleteRecursively();

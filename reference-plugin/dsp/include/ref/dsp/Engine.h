@@ -100,6 +100,7 @@ private:
     double dipGain = 1.0, dipStep = 1.0;
 
     bool firstBlock = true;
+    double goodAmount = 1.0, goodBalanceDb = 0.0, goodOutputDb = 0.0; // last finite parameter values
 
     std::atomic<int> activeLatencySamples { 0 };
     std::atomic<double> shownMatchDb { 0.0 }, shownHeadroomDb { 0.0 };

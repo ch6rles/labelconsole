@@ -10,14 +10,15 @@ namespace ref::dsp
 
 namespace
 {
-// Input to the processing path: non-finite samples become silence and
-// absurd levels are bounded, so the filters can never be driven to Inf
-// (spec Section 12, robustness). Bypass uses the untouched input.
+// Input to the processing path: non-finite samples and absurd levels
+// (beyond +24 dBFS, far past any real over) become silence, so they never
+// reach the filter states and the next block plays normally (spec Section
+// 12, robustness). Bypass uses the untouched input.
+constexpr double kGarbageLevel = 16.0;
+
 inline double sanitize (float x) noexcept
 {
-    if (! std::isfinite (x))
-        return 0.0;
-    return std::clamp ((double) x, -1.0e4, 1.0e4);
+    return std::isfinite (x) && std::abs (x) <= kGarbageLevel ? (double) x : 0.0;
 }
 
 inline double dbToGain (double db) noexcept { return std::pow (10.0, db / 20.0); }
@@ -240,7 +241,15 @@ void Engine::processChunk (float* const* ch, int numCh, int off, int len, const 
         return;
     }
 
-    const double amountTarget = std::clamp (p.amount, 0.0, 1.0);
+    // A NaN from a host or a damaged preset must not reach the filters: keep
+    // the last good value (std::clamp passes NaN through).
+    if (std::isfinite (p.amount))
+        goodAmount = std::clamp (p.amount, 0.0, 1.0);
+    if (std::isfinite (p.balanceDb))
+        goodBalanceDb = std::clamp (p.balanceDb, -6.0, 6.0);
+    if (std::isfinite (p.outputGainDb))
+        goodOutputDb = std::clamp (p.outputGainDb, -24.0, 12.0);
+    const double amountTarget = goodAmount;
     if (firstBlock)
     {
         amountSmoother.reset (amountTarget);
@@ -312,12 +321,12 @@ void Engine::processChunk (float* const* ch, int numCh, int off, int len, const 
     shownMatchDb.store (matchDb, std::memory_order_relaxed);
     shownHeadroomDb.store (headDb, std::memory_order_relaxed);
 
-    const double balance = std::clamp (p.balanceDb, -6.0, 6.0);
+    const double balance = goodBalanceDb;
     double trim[2] = { balance > 0.0 ? -balance : 0.0, balance < 0.0 ? balance : 0.0 };
     if (numCh == 1)
         trim[0] = trim[1] = 0.0;
 
-    const double outDb = std::clamp (p.outputGainDb, -24.0, 12.0);
+    const double outDb = goodOutputDb;
     double calTarget[2], rawTarget[2];
     for (int c = 0; c < 2; ++c)
     {

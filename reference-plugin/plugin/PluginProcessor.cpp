@@ -261,7 +261,7 @@ void ReferenceProcessor::setAdvancedView (bool on)
 
 void ReferenceProcessor::reloadLibrary()
 {
-    library.reload();
+    worker.withLibraryExclusive ([this] { library.reload(); });
     {
         const juce::ScopedLock sl (settingsLock);
         ++libraryGeneration;

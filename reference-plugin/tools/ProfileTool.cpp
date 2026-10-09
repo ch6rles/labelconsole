@@ -60,15 +60,17 @@ bool readCurve (const juce::File& f, std::vector<double>& freq, std::vector<doub
         line = line.trim();
         if (line.isEmpty() || line.startsWithChar ('#') || ! (juce::CharacterFunctions::isDigit (line[0]) || line[0] == '.'))
             continue;
-        const auto cols = juce::StringArray::fromTokens (line, ",;\t ", "\"");
-        juce::StringArray values;
-        for (const auto& c : cols)
-            if (c.isNotEmpty())
-                values.add (c);
-        if (values.size() < 2)
-            continue;
-        freq.push_back (values[0].getDoubleValue());
-        db.push_back (values[1].getDoubleValue());
+        // Space-separated columns are accepted too.
+        if (! line.containsAnyOf (",;\t"))
+            line = line.replaceCharacter (' ', '\t');
+        double hz = 0.0, level = 0.0;
+        if (! ref::ProfileLibrary::parseCsvRow (line, hz, level))
+        {
+            error = f.getFileName() + ": not a number in line: " + line.substring (0, 60);
+            return false;
+        }
+        freq.push_back (hz);
+        db.push_back (level);
     }
     ref::dsp::RawCurve rc { freq, db, {} };
     if (auto e = ref::dsp::sortAndValidate (rc))
@@ -110,9 +112,11 @@ juce::String q (const juce::String& s)
 int buildProfile (const Args& a)
 {
     const auto opt = [&] (const char* k, const char* def = "") { return a.options.getValue (k, def); };
-    if (opt ("id").isEmpty() || opt ("name").isEmpty() || opt ("rig").isEmpty() || opt ("out").isEmpty() || a.files.isEmpty())
+    // Provenance is recorded as given (spec Section 11); it is never assumed.
+    if (opt ("id").isEmpty() || opt ("name").isEmpty() || opt ("rig").isEmpty() || opt ("out").isEmpty() || opt ("source").isEmpty()
+        || opt ("license").isEmpty() || opt ("ear-simulator").isEmpty() || a.files.isEmpty())
     {
-        std::fprintf (stderr, "profile needs --id, --name, --rig, --out and at least one measurement CSV\n");
+        std::fprintf (stderr, "profile needs --id, --name, --rig, --ear-simulator, --source, --license, --out and at least one measurement CSV\n");
         return 2;
     }
 
@@ -133,6 +137,19 @@ int buildProfile (const Args& a)
         std::vector<double> c (kPoints);
         for (int i = 0; i < kPoints; ++i)
             c[(size_t) i] = interpolate (f, d, grid[(size_t) i]);
+        // Level each measurement to 0 dB over 500 Hz-2 kHz, as the generator
+        // does, so unit sensitivity or drive level differences are not
+        // mistaken for spread (which would weaken the whole correction).
+        double sum = 0.0;
+        int count = 0;
+        for (int i = 0; i < kPoints; ++i)
+            if (grid[(size_t) i] >= 500.0 && grid[(size_t) i] <= 2000.0)
+            {
+                sum += c[(size_t) i];
+                ++count;
+            }
+        for (auto& v : c)
+            v -= sum / juce::jmax (1, count);
         curves.push_back (std::move (c));
     }
 
@@ -164,9 +181,9 @@ int buildProfile (const Args& a)
          << "  \"model_revision\": " << q (opt ("revision", opt ("name").toRawUTF8())) << ",\n"
          << "  \"measurement\": {\n"
          << "    \"rig_id\": " << q (opt ("rig")) << ",\n"
-         << "    \"ear_simulator\": " << q (opt ("ear-simulator", "IEC 60318-4")) << ",\n"
-         << "    \"source\": " << q (opt ("source", "in-house")) << ",\n"
-         << "    \"license\": " << q (opt ("license", "owned")) << ",\n"
+         << "    \"ear_simulator\": " << q (opt ("ear-simulator")) << ",\n"
+         << "    \"source\": " << q (opt ("source")) << ",\n"
+         << "    \"license\": " << q (opt ("license")) << ",\n"
          << "    \"units\": " << units << ",\n"
          << "    \"reseats_per_unit\": " << reseats << ",\n"
          << "    \"date\": " << q (opt ("date", juce::Time::getCurrentTime().formatted ("%Y-%m-%d").toRawUTF8())) << "\n"

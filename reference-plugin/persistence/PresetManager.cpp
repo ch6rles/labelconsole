@@ -1,5 +1,7 @@
 #include "PresetManager.h"
 
+#include <cmath>
+
 #include "../measurement/ProfileLibrary.h"
 #include "../measurement/TextUtil.h"
 
@@ -8,6 +10,15 @@ namespace ref
 
 namespace
 {
+// A number from a file, clamped; anything non-finite becomes the default.
+double numberOr (const juce::var& v, double fallback, double lo, double hi)
+{
+    const double d = (double) v;
+    return std::isfinite (d) ? juce::jlimit (lo, hi, d) : fallback;
+}
+
+constexpr size_t kMaxOverlayNodes = 8; // as many as Advanced lets you place
+
 PresetData makeFactory (const char* model, const char* profileId, const char* targetName, const char* targetKey, float amount)
 {
     PresetData p;
@@ -73,6 +84,23 @@ const PresetData* PresetManager::find (const juce::String& name) const
     return nullptr;
 }
 
+juce::File PresetManager::fileFor (const juce::String& name, const juce::File& keep)
+{
+    auto base = juce::File::createLegalFileName (name.trim());
+    // Windows treats these as devices whatever the extension.
+    static const juce::StringArray reserved { "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+                                              "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
+    if (base.isEmpty() || base.containsOnly (".") || reserved.contains (base.toUpperCase()))
+        base = "_" + base;
+    const auto dir = presetsDirectory();
+    for (int n = 1;; ++n)
+    {
+        const auto f = dir.getChildFile ((n == 1 ? base : base + " (" + juce::String (n) + ")") + kExtension);
+        if (f == keep || ! f.exists())
+            return f;
+    }
+}
+
 bool PresetManager::isUserPreset (const juce::String& name) const
 {
     for (const auto& p : user)
@@ -107,7 +135,9 @@ bool PresetManager::saveUser (const PresetData& data, juce::String& error)
     PresetData copy = data;
     copy.name = name;
     copy.factory = false;
-    auto file = dir.getChildFile (juce::File::createLegalFileName (name) + kExtension);
+    // Saving over a user preset of the same name rewrites its file; anything
+    // else gets a file of its own.
+    auto file = data.file != juce::File() ? data.file : fileFor (name);
     for (const auto& u : user)
         if (u.name == name)
             file = u.file;
@@ -139,10 +169,13 @@ bool PresetManager::renameUser (const juce::String& oldName, const juce::String&
     PresetData copy = *existing;
     const auto oldFile = copy.file;
     copy.name = newName.trim();
-    copy.file = juce::File();
+    // A new file unless the new name maps onto the old one (a change of case
+    // on macOS or Windows): then the old file is rewritten, never deleted.
+    copy.file = fileFor (copy.name, oldFile);
     if (! saveUser (copy, error))
         return false;
-    oldFile.deleteFile();
+    if (copy.file != oldFile)
+        oldFile.deleteFile();
     refreshUserPresets();
     return true;
 }
@@ -223,7 +256,7 @@ juce::String PresetManager::toJson (const PresetData& p)
 bool PresetManager::fromJson (const juce::String& text, PresetData& p, juce::String& error)
 {
     juce::var root;
-    if (juce::JSON::parse (text, root).failed() || ! root.isObject())
+    if (! text::jsonIsSafeToParse (text) || juce::JSON::parse (text, root).failed() || ! root.isObject())
     {
         error = "Not a REFERENCE preset file.";
         return false;
@@ -236,9 +269,9 @@ bool PresetManager::fromJson (const juce::String& text, PresetData& p, juce::Str
     p.name = root.getProperty ("name", {}).toString().trim();
     p.profileId = root.getProperty ("profileId", {}).toString();
     p.targetKey = root.getProperty ("targetId", {}).toString();
-    p.calAmount = juce::jlimit (0.0f, 100.0f, (float) root.getProperty ("calAmount", 100.0f));
-    p.outputGain = juce::jlimit (-24.0f, 12.0f, (float) root.getProperty ("outputGain", 0.0f));
-    p.balance = juce::jlimit (-6.0f, 6.0f, (float) root.getProperty ("balance", 0.0f));
+    p.calAmount = (float) numberOr (root.getProperty ("calAmount", 100.0), 100.0, 0.0, 100.0);
+    p.outputGain = (float) numberOr (root.getProperty ("outputGain", 0.0), 0.0, -24.0, 12.0);
+    p.balance = (float) numberOr (root.getProperty ("balance", 0.0), 0.0, -6.0, 6.0);
     p.filterMode = root.getProperty ("filterMode", {}).toString() == "linear" ? dsp::FilterMode::linearPhase : dsp::FilterMode::minimumPhase;
     p.autoGain = (bool) root.getProperty ("autoGain", true);
     p.monitorProtection = (bool) root.getProperty ("monitorProtection", true);
@@ -248,11 +281,11 @@ bool PresetManager::fromJson (const juce::String& text, PresetData& p, juce::Str
         for (const auto& n : *arr)
         {
             dsp::FilterSpec f;
-            if (! dsp::filterTypeFromString (n.getProperty ("type", {}).toString().toStdString(), f.type))
+            if (p.overlay.size() >= kMaxOverlayNodes || ! dsp::filterTypeFromString (n.getProperty ("type", {}).toString().toStdString(), f.type))
                 continue;
-            f.freqHz = juce::jlimit (20.0, 20000.0, (double) n.getProperty ("freq", 1000.0));
-            f.gainDb = juce::jlimit (-18.0, 18.0, (double) n.getProperty ("gain", 0.0));
-            f.q = juce::jlimit (0.1, 10.0, (double) n.getProperty ("q", 0.7071));
+            f.freqHz = numberOr (n.getProperty ("freq", 1000.0), 1000.0, 20.0, 20000.0);
+            f.gainDb = numberOr (n.getProperty ("gain", 0.0), 0.0, -18.0, 18.0);
+            f.q = numberOr (n.getProperty ("q", 0.7071), 0.7071, 0.1, 10.0);
             p.overlay.push_back (f);
         }
     }

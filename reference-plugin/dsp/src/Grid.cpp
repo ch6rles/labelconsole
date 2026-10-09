@@ -114,6 +114,9 @@ std::optional<std::string> sortAndValidate (RawCurve& curve)
             return std::string ("Curve contains NaN or infinite values.");
         if (curve.freqHz[i] <= 0.0)
             return std::string ("Curve contains a frequency at or below 0 Hz.");
+        // Far outside any headphone response; also keeps the fit finite.
+        if (std::abs (curve.db[i]) > 200.0 || (! curve.spreadDb.empty() && (curve.spreadDb[i] < 0.0 || curve.spreadDb[i] > 100.0)))
+            return std::string ("Curve contains levels outside -200 to +200 dB or a spread outside 0 to 100 dB.");
     }
 
     std::vector<size_t> order (n);

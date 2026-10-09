@@ -74,6 +74,9 @@ public:
 
     // Parsing, exposed for the profile tool and tests.
     static bool parseProfile (const juce::String& jsonText, ProfileInfo& out, juce::String& error);
+    // One data row of a curve CSV: the first two numbers. False if a cell
+    // is not a number.
+    static bool parseCsvRow (const juce::String& line, double& first, double& second);
     static bool parseTargetCsv (const juce::String& csvText, TargetInfo& out, juce::String& error);
     static juce::String computeChecksum (const juce::String& jsonText); // sha256 field blanked
     static bool verifyChecksum (const juce::String& jsonText, juce::String& error);
