@@ -102,6 +102,7 @@ private:
     juce::uint32 lastProtectionEvents = 0, protectionUntil = 0, holdUntil[2] {};
     juce::uint32 lastTick = 0;
     juce::uint32 lastLatencyChange = 0;
+    juce::String systemError; // standalone device or routing problem, if any
 };
 
 } // namespace ref::ui

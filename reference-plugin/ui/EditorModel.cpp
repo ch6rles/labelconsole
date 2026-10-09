@@ -2,6 +2,7 @@
 
 #include "../measurement/TextUtil.h"
 #include "../plugin/Parameters.h"
+#include "../plugin/SystemAudio.h"
 #include "ref/dsp/Biquad.h"
 #include "ref/dsp/FirDesign.h"
 #include "ref/dsp/Format.h"
@@ -120,6 +121,10 @@ void EditorModel::recompute()
 std::vector<StatusMessage> EditorModel::statusMessages() const
 {
     std::vector<StatusMessage> out;
+    // Standalone: a stopped device or a feedback mute matters more than any
+    // calibration note.
+    if (systemError.isNotEmpty())
+        out.push_back ({ StatusMessage::Kind::alert, systemError, {} });
     if (renderActive)
     {
         out.push_back ({ StatusMessage::Kind::render, "Offline render detected. Auto-bypass is on; change it in Settings.", {} });
@@ -188,6 +193,9 @@ void EditorModel::timerCallback()
     }
     protectionHold = now < protectionUntil;
     renderActive = proc.isRenderBypassActive();
+    const auto previousSystemError = systemError;
+    if (auto* sys = SystemAudioController::instance())
+        systemError = sys->getStatus().error;
 
     if (metersMoved)
         listeners.call ([] (Listener& l) { l.metersChanged(); });
@@ -196,7 +204,7 @@ void EditorModel::timerCallback()
     const float a = amount(), o = outputDb(), b = balanceDb();
     const bool cal = calibrated(), byp = bypassed();
     bool changed = protectionHold != lastHold || renderActive != lastRender || cal != lastCalibrated || byp != lastBypassed
-                || o != lastOutput || b != lastBalance;
+                || o != lastOutput || b != lastBalance || systemError != previousSystemError;
     if (a != lastAmount)
     {
         recompute();

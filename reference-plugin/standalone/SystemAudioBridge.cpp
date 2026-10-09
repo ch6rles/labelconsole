@@ -34,10 +34,18 @@ class SystemAudioBridge::OutputCallback : public juce::AudioIODeviceCallback
 public:
     explicit OutputCallback (SystemAudioBridge& b) : bridge (b) {}
 
-    void prepare (int maxBlock)
+    void prepare (int maxBlock, double sampleRate)
     {
-        work.setSize (2, juce::jmax (maxBlock, 4096));
+        // The processor is prepared for maxBlock; larger device callbacks are
+        // processed in pieces of that size.
+        work.setSize (2, juce::jmax (1, maxBlock));
         midi.ensureSize (16);
+        windowLength = juce::jmax (1, (int) (0.5 * sampleRate));
+        fadeStep = (float) (1.0 / (0.02 * sampleRate));
+        windowEnergy = 0.0;
+        windowFrames = loudWindows = 0;
+        muteGain = 1.0f;
+        muted.store (false);
     }
 
     void audioDeviceIOCallbackWithContext (const float* const*, int, float* const* out, int numOut, int n,
@@ -59,6 +67,7 @@ public:
                 else
                     bridge.processor.processBlock (view, midi);
             }
+            guardAgainstFeedback (ch, len);
             for (int c = 0; c < numOut; ++c)
             {
                 if (out[c] == nullptr)
@@ -77,11 +86,53 @@ public:
     void audioDeviceError (const juce::String&) override { failed.store (true); }
 
     std::atomic<bool> failed { false };
+    // Set here when the output looks like it is feeding back into the input;
+    // cleared by the bridge's timer to try again.
+    std::atomic<bool> muted { false };
 
 private:
+    // If Headphones is routed into the loopback device, the calibrated output
+    // comes back in as input and builds up until the protection clipper holds
+    // it near full scale. Music never stays above -2.5 dBFS RMS for 1.5 s (a
+    // full-scale sine is -3 dBFS), so that mutes the output, which breaks the
+    // loop, before the user reroutes and gets the full level in their ears.
+    void guardAgainstFeedback (float* const* ch, int len) noexcept
+    {
+        double energy = 0.0;
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < len; ++i)
+                energy += (double) ch[c][i] * ch[c][i];
+        windowEnergy += energy;
+        windowFrames += len;
+        if (windowFrames >= windowLength)
+        {
+            const double meanSquare = windowEnergy / (2.0 * windowFrames);
+            loudWindows = meanSquare > kLoudMeanSquare ? loudWindows + 1 : 0;
+            if (loudWindows >= 3)
+                muted.store (true);
+            windowEnergy = 0.0;
+            windowFrames = 0;
+        }
+
+        const float target = muted.load (std::memory_order_relaxed) ? 0.0f : 1.0f;
+        if (muteGain == 1.0f && target == 1.0f)
+            return;
+        for (int i = 0; i < len; ++i)
+        {
+            muteGain = target > muteGain ? juce::jmin (target, muteGain + fadeStep) : juce::jmax (target, muteGain - fadeStep);
+            ch[0][i] *= muteGain;
+            ch[1][i] *= muteGain;
+        }
+    }
+
+    static constexpr double kLoudMeanSquare = 0.5623413251903491; // -2.5 dBFS RMS
+
     SystemAudioBridge& bridge;
     juce::AudioBuffer<float> work;
     juce::MidiBuffer midi;
+    double windowEnergy = 0.0;
+    int windowFrames = 0, windowLength = 24000, loudWindows = 0;
+    float muteGain = 1.0f, fadeStep = 0.001f;
 };
 
 //==============================================================================
@@ -259,7 +310,7 @@ void SystemAudioBridge::reopen()
     processor.setPlayConfigDetails (2, 2, outputRate, outputBlock);
     processor.prepareToPlay (outputRate, outputBlock);
     fifo.prepare (2, inputRate, outputRate, inputBlock, outputBlock);
-    outputCallback->prepare (outputBlock);
+    outputCallback->prepare (outputBlock, outputRate);
 
     output->start (outputCallback.get());
     input->start (inputCallback.get());
@@ -281,6 +332,23 @@ void SystemAudioBridge::timerCallback()
     const auto now = juce::Time::getMillisecondCounter();
     if (fifo.takeSignalFlag())
         lastSignalMs = now;
+
+    // Unmute after a pause to see whether the routing has been fixed; if not,
+    // the guard trips again before the level builds up.
+    if (outputCallback->muted.load())
+    {
+        if (mutedSinceMs == 0)
+            mutedSinceMs = now;
+        else if (now - mutedSinceMs > 5000)
+        {
+            outputCallback->muted.store (false);
+            mutedSinceMs = 0;
+        }
+    }
+    else
+    {
+        mutedSinceMs = 0;
+    }
 
     if (running && (inputCallback->failed.load() || outputCallback->failed.load() || ! output->isPlaying() || ! input->isPlaying()))
     {
@@ -365,6 +433,8 @@ SystemAudioController::Status SystemAudioBridge::getStatus()
     Status s;
     s.running = running;
     s.error = lastError;
+    if (running && outputCallback->muted.load())
+        s.error = "Muted: REFERENCE is hearing its own output. Send it to your headphones, not the loopback.";
     s.receivingSignal = running && juce::Time::getMillisecondCounter() - lastSignalMs < 2000;
     if (running)
     {

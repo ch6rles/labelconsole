@@ -366,11 +366,13 @@ void DropdownField::paint (juce::Graphics& g)
     const float chevronW = style.chevronSize;
     auto inner = r.reduced (style.padX, 0.0f);
     float chevronX;
-    if (style.chevronAtEnd)
+    // Text too wide to centre with its chevron is shortened instead.
+    const bool tooWide = textWidth (style.font, text) + style.gap + chevronW > inner.getWidth();
+    if (style.chevronAtEnd || tooWide)
     {
         chevronX = inner.getRight() - chevronW * 0.5f;
         inner.removeFromRight (chevronW + style.gap);
-        drawText (g, text, inner, style.font, isEnabledLook() ? colours::ink : colours::muted);
+        drawText (g, text, inner, style.font, isEnabledLook() ? colours::ink : colours::muted, juce::Justification::centredLeft, true);
     }
     else
     {

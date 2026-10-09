@@ -73,10 +73,10 @@ std::vector<HelpPage::Topic> buildTopics()
         u ("1. Install VB-CABLE (free, from vb-audio.com) and restart.  2. In Windows sound settings, make \xe2\x80\x9C" "CABLE Input\xe2\x80\x9D the default output.  3. In REFERENCE, Settings: Driver \xe2\x80\x9CWindows Audio\xe2\x80\x9D, Source \xe2\x80\x9C" "CABLE Output\xe2\x80\x9D, Headphones your headphone output."),
         u ("## macOS"),
         u ("1. Install BlackHole 2ch (free, from existential.audio, or brew install blackhole-2ch).  2. In System Settings, Sound, choose BlackHole 2ch as the output.  3. In REFERENCE: Source BlackHole 2ch, Headphones your interface or headphones. Allow microphone access when macOS asks; it is how macOS names audio input."),
-        u ("## Linux (PipeWire or PulseAudio)"),
-        u ("1. Create a sink: pactl load-module module-null-sink sink_name=reference sink_properties=device.description=REFERENCE  2. Make it the default output.  3. Run REFERENCE with pw-jack (or choose ALSA \xe2\x80\x9Cpipewire\xe2\x80\x9D), then connect the REFERENCE monitor to its input and its output to your headphones in qpwgraph or pavucontrol."),
+        u ("## Linux (PulseAudio or PipeWire)"),
+        u ("1. Create a sink: pactl load-module module-null-sink sink_name=reference sink_properties=device.description=REFERENCE  2. Make it the default output.  3. In REFERENCE, Settings: Driver ALSA, and the PulseAudio or PipeWire sound server as both Source and Headphones.  4. In Volume Control (pavucontrol), Recording: set REFERENCE to \xe2\x80\x9CMonitor of REFERENCE\xe2\x80\x9D; Playback: set REFERENCE to your headphones."),
         u ("## Notes"),
-        u ("Expect 15 to 40 ms of added latency in Minimum Phase, more in Linear Phase: fine for listening, not for monitoring while you record. Never choose the loopback device as Headphones; that would feed the output back into the input. Closing the window keeps REFERENCE running in the system tray; quit from the tray to stop."),
+        u ("Expect roughly 30 to 70 ms of added latency, depending on the devices (Settings shows the estimate), and 85 ms more in Linear Phase: fine for listening, not for monitoring while you record. Never send REFERENCE's output to the loopback device; if its output comes back into its input, REFERENCE mutes itself and says so in the status line. Closing the window keeps REFERENCE running in the system tray; quit from the tray to stop."),
     } });
 
     t.push_back ({ "profiles", "Profiles and measurement data", {

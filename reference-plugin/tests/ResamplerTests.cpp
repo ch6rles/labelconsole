@@ -21,7 +21,7 @@ struct SimResult
 {
     std::vector<float> out;
     uint32_t underruns = 0, overruns = 0;
-    double ppm = 0.0;
+    double ppm = 0.0, meanPpm = 0.0; // final, and averaged after the first minute
 };
 
 // Simulates two free-running device clocks feeding and draining the FIFO.
@@ -68,6 +68,62 @@ SimResult simulate (double inRate, double outRate, double driftPpm, int inBlock,
     res.underruns = fifo.underruns();
     res.overruns = fifo.overruns();
     res.ppm = fifo.ratioCorrectionPpm();
+    return res;
+}
+
+// Delivery the way PulseAudio's ALSA plugin hands capture audio over: input
+// blocks arrive in pairs, and every `stepSeconds` the plugin shifts its own
+// buffering by one block (alternately later and earlier). Measured on a real
+// PulseAudio server: the old controller dropped out every 15-35 s.
+SimResult simulateBursty (double driftPpm, int block, double seconds, double stepSeconds)
+{
+    DriftCompensatedFifo fifo;
+    fifo.prepare (2, 48000.0, 48000.0, block, block);
+    const double trueInRate = 48000.0 * (1.0 + driftPpm * 1e-6);
+    const double period = block / trueInRate;
+    std::vector<float> in ((size_t) block), outL ((size_t) block), outR ((size_t) block);
+    SimResult res;
+    res.out.reserve ((size_t) (seconds * 48000.0) + (size_t) block);
+
+    int64_t k = 0, inFrames = 0, ppmCount = 0;
+    double nextPull = 0.0, ppmSum = 0.0;
+    auto deliveryTime = [&] (int64_t blockIndex)
+    {
+        const int64_t pairEnd = blockIndex | 1; // both blocks of a pair arrive with the second
+        const double captured = (double) (pairEnd + 1) * period;
+        const bool shifted = stepSeconds > 0.0 && ((int64_t) (captured / stepSeconds) % 2) == 1;
+        return captured + 0.004 + (shifted ? period : 0.0);
+    };
+    double nextPush = deliveryTime (0);
+    while (nextPull < seconds)
+    {
+        if (nextPush <= nextPull)
+        {
+            for (int i = 0; i < block; ++i)
+                in[(size_t) i] = (float) (0.5 * std::sin (2.0 * kPi * 1000.0 * (double) (inFrames + i) / 48000.0));
+            const float* p[2] = { in.data(), in.data() };
+            fifo.push (p, 2, block, nextPush);
+            inFrames += block;
+            ++k;
+            nextPush = std::max (nextPush, deliveryTime (k));
+        }
+        else
+        {
+            float* p[2] = { outL.data(), outR.data() };
+            fifo.pull (p, 2, block, nextPull);
+            res.out.insert (res.out.end(), outL.begin(), outL.end());
+            nextPull += block / 48000.0;
+            if (nextPull > 60.0)
+            {
+                ppmSum += fifo.ratioCorrectionPpm();
+                ++ppmCount;
+            }
+        }
+    }
+    res.underruns = fifo.underruns();
+    res.overruns = fifo.overruns();
+    res.ppm = fifo.ratioCorrectionPpm();
+    res.meanPpm = ppmCount > 0 ? ppmSum / ppmCount : 0.0;
     return res;
 }
 
@@ -162,4 +218,27 @@ TEST_CASE ("bridge: recovers after the input stalls")
         fifo.pull (o, 2, 256);
     }
     CHECK_NEAR (out[128], 0.25, 1e-3);
+}
+
+TEST_CASE ("bridge: paired deliveries and buffering shifts cause no dropouts (PulseAudio pattern)")
+{
+    for (int block : { 256, 512 })
+    {
+        const auto r = simulateBursty (0.0, block, 600.0, 20.0);
+        CHECK_MSG (r.underruns == 0 && r.overruns == 0, std::to_string (block) + ": " + std::to_string (r.underruns) + " underruns, "
+                                                            + std::to_string (r.overruns) + " overruns");
+        // Each shift moves the read rate briefly (a fraction of a cent); on
+        // average it must not.
+        CHECK_MSG (std::abs (r.meanPpm) < 25.0, std::to_string (block) + ": mean correction " + std::to_string (r.meanPpm) + " ppm with no drift");
+    }
+}
+
+TEST_CASE ("bridge: tracks drift without bias under paired deliveries")
+{
+    for (double drift : { 120.0, -250.0 })
+    {
+        const auto r = simulateBursty (drift, 480, 600.0, 0.0);
+        CHECK (r.underruns == 0 && r.overruns == 0);
+        CHECK_NEAR (r.ppm, drift, 15.0);
+    }
 }

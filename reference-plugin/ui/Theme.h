@@ -59,9 +59,11 @@ inline juce::Font mono (float px, int weight = 400, float trackingEm = 0.0f) { r
 
 float textWidth (const juce::Font&, const juce::String&);
 
-// Single-line text, never wrapped (the design's default is nowrap).
+// Single-line text, never wrapped (the design's default is nowrap). With
+// `ellipsis`, text too wide for the box ends in an ellipsis instead of
+// spilling past it.
 void drawText (juce::Graphics&, const juce::String&, juce::Rectangle<float>, const juce::Font&, juce::Colour,
-               juce::Justification = juce::Justification::centredLeft);
+               juce::Justification = juce::Justification::centredLeft, bool ellipsis = false);
 
 // Wrapped paragraph; returns the height it needs at `width`.
 float drawParagraph (juce::Graphics&, const juce::String&, juce::Rectangle<float>, const juce::Font&, juce::Colour, float lineHeight);

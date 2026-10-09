@@ -166,6 +166,9 @@ public:
             source.setText (sys->getInputDevice().isEmpty() ? juce::String ("Choose") + text::ellipsis : sys->getInputDevice());
             headphones.setText (sys->getOutputDevice().isEmpty() ? juce::String ("Choose") + text::ellipsis : sys->getOutputDevice());
             driver.setText (sys->getDeviceType());
+            // Device names can be long; the field shows the start, the tooltip all of it.
+            source.setTooltip (sys->getInputDevice());
+            headphones.setTooltip (sys->getOutputDevice());
             juce::String statusDesc;
             if (st.error.isNotEmpty())
                 statusDesc = st.error;
@@ -175,7 +178,7 @@ public:
                 statusDesc = "No audio from the source yet. Is it set as your computer's sound output?";
             else
                 statusDesc = "Receiving system audio. Clock drift " + text::fromStd (dsp::formatNumber (st.driftPpm, 0, true)) + " ppm, corrected"
-                           + (st.dropouts > 0 ? "; " + juce::String ((int) st.dropouts) + " dropouts." : juce::String ("."));
+                           + (st.dropouts > 0 ? "; " + juce::String ((int) st.dropouts) + (st.dropouts == 1 ? " dropout." : " dropouts.") : juce::String ("."));
             Section audio { "SYSTEM AUDIO", {}, {} };
             audio.rows.push_back ({ "Source", "Set this device as your computer's sound output; REFERENCE listens to it.", {}, {}, &source });
             audio.rows.push_back ({ "Headphones", "Calibrated audio plays here.", {}, {}, &headphones });

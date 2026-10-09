@@ -46,7 +46,8 @@ Plugin locations:
 The app listens to a virtual loopback device that your computer plays into,
 applies the calibration and plays the result on your headphones. The two
 devices run on different clocks; the app measures the drift and resamples by a
-few parts per million to absorb it, so there are no periodic dropouts.
+fraction of a cent of pitch to absorb it, so there are no periodic dropouts, even
+with sound servers that deliver audio in irregular bursts.
 
 **Windows**
 
@@ -62,19 +63,25 @@ few parts per million to absorb it, so there are no periodic dropouts.
 3. In REFERENCE: Source **BlackHole 2ch**, Headphones your interface or headphones.
    Allow microphone access when asked; macOS uses that name for any audio input.
 
-**Linux (PipeWire or PulseAudio)**
+**Linux (PulseAudio or PipeWire)**
 
 1. `pactl load-module module-null-sink sink_name=reference sink_properties=device.description=REFERENCE`
 2. Make **REFERENCE** the default output (`pactl set-default-sink reference`).
-3. Start the app with `pw-jack ./REFERENCE` and wire *REFERENCE monitor → app input*,
-   *app output → headphones* in qpwgraph (or use ALSA “pipewire” and pavucontrol).
+3. In REFERENCE → Settings → System audio: Driver **ALSA**, and the PulseAudio or
+   PipeWire sound server device as both Source and Headphones.
+4. In Volume Control (`pavucontrol`): on *Recording*, set REFERENCE to
+   **Monitor of REFERENCE**; on *Playback*, set REFERENCE to your headphones. The
+   sound server remembers both.
 
-The app recognises VB-CABLE, BlackHole, Loopback and PipeWire monitors and picks
-them as the source on first run. It refuses to play into the loopback device
-(that would loop audio back into itself). Closing the window keeps it running in
-the tray (Windows) or menu bar (macOS); quit from there. Expect roughly 15–40 ms
-of added latency in Minimum Phase: fine for listening, not for monitoring while
-recording. Settings remember your devices and the whole calibration state.
+The app recognises VB-CABLE, BlackHole and Loopback by name and picks them as the
+source on first run. It refuses to play into a loopback device it recognises, and
+if its output still comes back into its input (on Linux, until step 4 is done) it
+mutes itself and says so in the status line rather than let the level build up.
+Closing the window keeps it running in the tray (Windows) or menu bar (macOS);
+quit from there. Expect roughly 30–70 ms of added latency, depending on the
+devices: 47 ms measured through PulseAudio, and Settings shows the app's estimate
+for yours. That is fine for listening, not for monitoring while recording.
+Settings remember your devices and the whole calibration state.
 
 ## Using it
 

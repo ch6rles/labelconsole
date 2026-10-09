@@ -58,11 +58,12 @@ float textWidth (const juce::Font& f, const juce::String& s)
     return juce::GlyphArrangement::getStringWidth (f, s);
 }
 
-void drawText (juce::Graphics& g, const juce::String& s, juce::Rectangle<float> r, const juce::Font& f, juce::Colour c, juce::Justification j)
+void drawText (juce::Graphics& g, const juce::String& s, juce::Rectangle<float> r, const juce::Font& f, juce::Colour c, juce::Justification j,
+               bool ellipsis)
 {
     g.setFont (f);
     g.setColour (c);
-    g.drawText (s, r, j, false);
+    g.drawText (s, r, j, ellipsis);
 }
 
 float drawParagraph (juce::Graphics& g, const juce::String& s, juce::Rectangle<float> r, const juce::Font& f, juce::Colour c, float lineHeight)

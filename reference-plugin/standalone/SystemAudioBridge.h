@@ -67,7 +67,7 @@ private:
     double inputRate = 0.0, outputRate = 0.0;
     int outputBlock = 0, inputBlock = 0;
     bool running = false;
-    juce::uint32 lastSignalMs = 0, lastRetryMs = 0;
+    juce::uint32 lastSignalMs = 0, lastRetryMs = 0, mutedSinceMs = 0;
 };
 
 } // namespace ref::standalone
