@@ -65,8 +65,24 @@ ProfileLibrary::ProfileLibrary()
     reload();
 }
 
+namespace
+{
+juce::File& dataDirectoryOverride()
+{
+    static juce::File f;
+    return f;
+}
+} // namespace
+
+void ProfileLibrary::setUserDataDirectoryOverride (const juce::File& dir)
+{
+    dataDirectoryOverride() = dir;
+}
+
 juce::File ProfileLibrary::userDataDirectory()
 {
+    if (dataDirectoryOverride() != juce::File())
+        return dataDirectoryOverride();
 #if JUCE_MAC
     return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
         .getChildFile ("Application Support")

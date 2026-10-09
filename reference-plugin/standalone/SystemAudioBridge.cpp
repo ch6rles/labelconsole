@@ -2,6 +2,10 @@
 
 #if JucePlugin_Build_Standalone && JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP
 
+ #if JUCE_MAC
+  #include "MacSystem.h"
+ #endif
+
 namespace ref::standalone
 {
 
@@ -17,13 +21,22 @@ public:
         for (int c = 0; c < numOut; ++c)
             if (out[c] != nullptr)
                 juce::FloatVectorOperations::clear (out[c], n);
+        ticks.fetch_add (1, std::memory_order_relaxed);
     }
 
-    void audioDeviceAboutToStart (juce::AudioIODevice*) override {}
+    // A device restarted by the system at another rate (Sound settings,
+    // Audio MIDI Setup) must be prepared again.
+    void audioDeviceAboutToStart (juce::AudioIODevice* d) override
+    {
+        if (d != nullptr && expectedRate > 0.0 && d->getCurrentSampleRate() != expectedRate)
+            rateChanged.store (true);
+    }
     void audioDeviceStopped() override {}
     void audioDeviceError (const juce::String&) override { failed.store (true); }
 
-    std::atomic<bool> failed { false };
+    std::atomic<bool> failed { false }, rateChanged { false };
+    std::atomic<juce::uint32> ticks { 0 };
+    double expectedRate = 0.0;
 
 private:
     SystemAudioBridge& bridge;
@@ -72,20 +85,33 @@ public:
             {
                 if (out[c] == nullptr)
                     continue;
-                if (c < 2)
-                    juce::FloatVectorOperations::copy (out[c] + done, ch[numOut == 1 ? 0 : c], len);
+                if (numOut == 1)
+                {
+                    // A mono device gets both sides, not just the left.
+                    juce::FloatVectorOperations::copyWithMultiply (out[c] + done, ch[0], 0.5f, len);
+                    juce::FloatVectorOperations::addWithMultiply (out[c] + done, ch[1], 0.5f, len);
+                }
+                else if (c < 2)
+                    juce::FloatVectorOperations::copy (out[c] + done, ch[c], len);
                 else
                     juce::FloatVectorOperations::clear (out[c] + done, len);
             }
             done += len;
         }
+        ticks.fetch_add (1, std::memory_order_relaxed);
     }
 
-    void audioDeviceAboutToStart (juce::AudioIODevice*) override {}
+    void audioDeviceAboutToStart (juce::AudioIODevice* d) override
+    {
+        if (d != nullptr && expectedRate > 0.0 && d->getCurrentSampleRate() != expectedRate)
+            rateChanged.store (true);
+    }
     void audioDeviceStopped() override {}
     void audioDeviceError (const juce::String&) override { failed.store (true); }
 
-    std::atomic<bool> failed { false };
+    std::atomic<bool> failed { false }, rateChanged { false };
+    std::atomic<juce::uint32> ticks { 0 };
+    double expectedRate = 0.0;
     // Set here when the output looks like it is feeding back into the input;
     // cleared by the bridge's timer to try again.
     std::atomic<bool> muted { false };
@@ -152,7 +178,9 @@ SystemAudioBridge::~SystemAudioBridge()
 
 juce::String SystemAudioBridge::guessLoopbackInput (const juce::StringArray& inputs)
 {
-    for (const char* pattern : { "CABLE Output", "BlackHole", "Loopback", "Monitor of", "VB-Audio", "Soundflower", "VoiceMeeter Out", "Stereo Mix" })
+    // Stereo Mix is not offered: it records the sound card's own output, so it
+    // only works while the headphones are on a different device.
+    for (const char* pattern : { "CABLE Output", "BlackHole", "Loopback", "Monitor of", "VB-Audio", "Soundflower", "VoiceMeeter Out" })
         for (const auto& name : inputs)
             if (name.containsIgnoreCase (pattern))
                 return name;
@@ -164,11 +192,21 @@ bool SystemAudioBridge::looksLikeLoopbackOutput (const juce::String& out, const 
     for (const char* pattern : { "CABLE Input", "BlackHole", "Loopback", "Soundflower", "VoiceMeeter In", "VB-Audio" })
         if (out.containsIgnoreCase (pattern))
             return true;
+    // "Stereo Mix (Realtek Audio)" records "Speakers (Realtek Audio)": the same
+    // card, so playing there feeds back.
+    auto card = [] (const juce::String& name) { return name.fromLastOccurrenceOf ("(", false, false).upToLastOccurrenceOf (")", false, false).trim(); };
+    for (const char* mix : { "Stereo Mix", "What U Hear", "Wave Out Mix", "Wave Out" })
+        if (in.containsIgnoreCase (mix) && card (in).isNotEmpty() && card (in) == card (out))
+            return true;
     return out.isNotEmpty() && out == in && guessLoopbackInput ({ in }).isNotEmpty();
 }
 
 void SystemAudioBridge::restore()
 {
+   #if JUCE_MAC
+    // Reading any audio input needs the microphone permission on macOS.
+    mac::requestMicrophoneAccess();
+   #endif
     const auto savedType = props.getValue ("deviceType");
     for (auto* t : types)
         if (t->getTypeName() == savedType)
@@ -311,6 +349,12 @@ void SystemAudioBridge::reopen()
     processor.prepareToPlay (outputRate, outputBlock);
     fifo.prepare (2, inputRate, outputRate, inputBlock, outputBlock);
     outputCallback->prepare (outputBlock, outputRate);
+    outputCallback->expectedRate = outputRate;
+    inputCallback->expectedRate = inputRate;
+    outputCallback->rateChanged.store (false);
+    inputCallback->rateChanged.store (false);
+    lastTicks[0] = lastTicks[1] = 0;
+    quietTimerTicks = 0;
 
     output->start (outputCallback.get());
     input->start (inputCallback.get());
@@ -350,7 +394,25 @@ void SystemAudioBridge::timerCallback()
         mutedSinceMs = 0;
     }
 
-    if (running && (inputCallback->failed.load() || outputCallback->failed.load() || ! output->isPlaying() || ! input->isPlaying()))
+    // A device restarted at another sample rate: prepare everything again.
+    if (running && (inputCallback->rateChanged.load() || outputCallback->rateChanged.load()))
+    {
+        reopen();
+        return;
+    }
+
+    // Some drivers keep a device "playing" after it is unplugged but stop
+    // calling back. Two seconds without a callback counts as stopped.
+    if (running)
+    {
+        const juce::uint32 now0 = inputCallback->ticks.load(), now1 = outputCallback->ticks.load();
+        quietTimerTicks = (now0 == lastTicks[0] || now1 == lastTicks[1]) ? quietTimerTicks + 1 : 0;
+        lastTicks[0] = now0;
+        lastTicks[1] = now1;
+    }
+    const bool silentDevice = running && quietTimerTicks >= 4; // the timer runs at 2 Hz
+
+    if (running && (silentDevice || inputCallback->failed.load() || outputCallback->failed.load() || ! output->isPlaying() || ! input->isPlaying()))
     {
         const auto detail = output->getLastError().isNotEmpty() ? output->getLastError() : input->getLastError();
         close();
@@ -435,6 +497,12 @@ SystemAudioController::Status SystemAudioBridge::getStatus()
     s.error = lastError;
     if (running && outputCallback->muted.load())
         s.error = "Muted: REFERENCE is hearing its own output. Send it to your headphones, not the loopback.";
+   #if JUCE_MAC
+    // Without the permission macOS delivers silence, which would otherwise
+    // read as a routing problem.
+    if (running && s.error.isEmpty() && ! (juce::Time::getMillisecondCounter() - lastSignalMs < 2000) && mac::microphoneAccess() < 0)
+        s.error = "macOS is not letting REFERENCE hear the loopback device. Allow it in System Settings, Privacy & Security, Microphone.";
+   #endif
     s.receivingSignal = running && juce::Time::getMillisecondCounter() - lastSignalMs < 2000;
     if (running)
     {

@@ -69,6 +69,9 @@ public:
 
     // <user app data>/REFERENCE, with Profiles, Targets and Presets inside.
     static juce::File userDataDirectory();
+    // Points the user folder somewhere else (the standalone's --snapshot mode
+    // uses a temporary one so it never touches the real library).
+    static void setUserDataDirectoryOverride (const juce::File&);
     static juce::File userProfilesDirectory() { return userDataDirectory().getChildFile ("Profiles"); }
     static juce::File userTargetsDirectory() { return userDataDirectory().getChildFile ("Targets"); }
 

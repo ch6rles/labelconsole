@@ -80,6 +80,10 @@ if(REF_CUSTOM_STANDALONE)
     target_sources(Reference PRIVATE
         ${REF_ROOT}/standalone/StandaloneApp.cpp
         ${REF_ROOT}/standalone/SystemAudioBridge.cpp)
+    if(APPLE)
+        target_sources(Reference PRIVATE ${REF_ROOT}/standalone/MacSystem.mm)
+        target_link_libraries(Reference PRIVATE "-framework AVFoundation")
+    endif()
 endif()
 
 # Exact float comparisons (detents, settled smoothers) and partial

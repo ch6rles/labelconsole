@@ -13,6 +13,9 @@
  #include "../ui/PluginEditor.h"
  #include "../ui/Theme.h"
  #include "SystemAudioBridge.h"
+ #if JUCE_MAC
+  #include "MacSystem.h"
+ #endif
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter();
 
@@ -30,11 +33,20 @@ std::unique_ptr<juce::AudioProcessor> createStandaloneProcessor()
     return p;
 }
 
-juce::Image trayImage()
+// Windows: a white glyph on a dark badge, visible on light and dark
+// taskbars. macOS: a black template image the menu bar tints itself.
+juce::Image trayImage (bool templateImage)
 {
     juce::Image img (juce::Image::ARGB, 64, 64, true);
     juce::Graphics g (img);
-    ui::drawPowerIcon (g, { 8.0f, 8.0f, 48.0f, 48.0f }, juce::Colours::white, 1.6f);
+    if (templateImage)
+    {
+        ui::drawPowerIcon (g, { 8.0f, 8.0f, 48.0f, 48.0f }, juce::Colours::black, 1.6f);
+        return img;
+    }
+    g.setColour (juce::Colour (0xff141414));
+    g.fillRoundedRectangle (2.0f, 2.0f, 60.0f, 60.0f, 12.0f);
+    ui::drawPowerIcon (g, { 12.0f, 12.0f, 40.0f, 40.0f }, juce::Colours::white, 1.6f);
     return img;
 }
 
@@ -74,7 +86,10 @@ public:
         setContentOwned (editor, true);
         setResizable (true, false);
         setConstrainer (editor->getConstrainer());
-        centreWithSize (getWidth(), getHeight());
+        // JUCE dereferences the primary display here; with none (a headless
+        // session) keep the default position instead of crashing.
+        if (juce::Desktop::getInstance().getDisplays().getPrimaryDisplay() != nullptr)
+            centreWithSize (getWidth(), getHeight());
     }
 
     void closeButtonPressed() override { closeHandler(); }
@@ -91,6 +106,10 @@ public:
     explicit SnapshotRunner (juce::File dir) : outDir (std::move (dir))
     {
         outDir.createDirectory();
+        // Its test profile and any presets go to a throwaway folder, never
+        // into the user's library.
+        dataDir.createDirectory();
+        ProfileLibrary::setUserDataDirectoryOverride (dataDir);
         processor = createStandaloneProcessor();
         proc = dynamic_cast<ReferenceProcessor*> (processor.get());
         processor->setPlayConfigDetails (2, 2, 48000.0, 480);
@@ -99,6 +118,15 @@ public:
         editor.reset (processor->createEditorAndMakeActive());
         editor->setSize (1200, 700);
         startTimer (10);
+    }
+
+    ~SnapshotRunner() override
+    {
+        stopTimer();
+        editor.reset();
+        processor.reset();
+        ProfileLibrary::setUserDataDirectoryOverride ({});
+        dataDir.deleteRecursively();
     }
 
     std::function<void()> onFinished;
@@ -277,6 +305,8 @@ private:
     }
 
     juce::File outDir;
+    juce::File dataDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("REFERENCE-snapshot-" + juce::String (juce::Time::currentTimeMillis()));
     std::unique_ptr<juce::AudioProcessor> processor;
     ReferenceProcessor* proc = nullptr;
     std::unique_ptr<juce::AudioProcessorEditor> editor;
@@ -308,7 +338,11 @@ public:
         juce::PropertiesFile::Options opts;
         opts.applicationName = "REFERENCE";
         opts.filenameSuffix = ".settings";
+       #if JUCE_LINUX || JUCE_BSD
+        opts.folderName = ".config/REFERENCE"; // next to the profiles, not a visible ~/REFERENCE
+       #else
         opts.folderName = "REFERENCE";
+       #endif
         opts.osxLibrarySubFolder = "Application Support";
         settings = std::make_unique<juce::PropertiesFile> (opts);
 
@@ -327,6 +361,13 @@ public:
 
        #if ! JUCE_LINUX
         tray = std::make_unique<Tray> (*this);
+       #endif
+       #if JUCE_MAC
+        // Clicking the Dock icon brings the closed window back.
+        mac::onDockReopen ([] {
+            if (auto* app = dynamic_cast<ReferenceApp*> (juce::JUCEApplication::getInstance()))
+                app->showWindow();
+        });
        #endif
         startTimer (10000);
     }
@@ -369,8 +410,7 @@ private:
     public:
         explicit Tray (ReferenceApp& a) : app (a)
         {
-            const auto img = trayImage();
-            setIconImage (img, img);
+            setIconImage (trayImage (false), trayImage (true));
             setIconTooltip ("REFERENCE");
         }
 
