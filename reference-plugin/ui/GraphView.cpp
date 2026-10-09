@@ -5,6 +5,9 @@
 #include "ref/dsp/Format.h"
 #include "ref/dsp/Grid.h"
 
+#include <cmath>
+#include <optional>
+
 namespace ref::ui
 {
 
@@ -42,15 +45,21 @@ bool hasGain (dsp::FilterType t)
     return t != dsp::FilterType::lowPass && t != dsp::FilterType::highPass;
 }
 
-double parseNumber (const juce::String& s)
+// A typed number, or nothing if the text has no digits (an empty or
+// mistyped field must not commit 0).
+std::optional<double> parseNumber (const juce::String& s)
 {
-    return s.replace (text::minus, "-").retainCharacters ("-+.0123456789").getDoubleValue();
+    const auto t = s.replace (text::minus, "-").retainCharacters ("-+.0123456789");
+    if (! t.containsAnyOf ("0123456789"))
+        return std::nullopt;
+    const double v = t.getDoubleValue();
+    return std::isfinite (v) ? std::optional<double> (v) : std::nullopt;
 }
 
 double parseFrequency (const juce::String& s)
 {
     const auto t = s.toLowerCase();
-    double v = parseNumber (t);
+    double v = parseNumber (t).value_or (0.0); // 0 is ignored by the caller
     if (t.contains ("k"))
         v *= 1000.0;
     return v;
@@ -712,12 +721,15 @@ NodeStrip::NodeStrip (EditorHost& h)
     };
     gain.onCommit = [this] (const juce::String& s)
     {
-        const double v = parseNumber (s);
-        edit ([v] (dsp::FilterSpec& n) { if (hasGain (n.type)) n.gainDb = juce::jlimit (-12.0, 12.0, v); });
+        if (const auto typed = parseNumber (s))
+        {
+            const double v = *typed;
+            edit ([v] (dsp::FilterSpec& n) { if (hasGain (n.type)) n.gainDb = juce::jlimit (-12.0, 12.0, v); });
+        }
     };
     q.onCommit = [this] (const juce::String& s)
     {
-        const double v = parseNumber (s);
+        const double v = parseNumber (s).value_or (0.0);
         if (v > 0.0)
             edit ([v] (dsp::FilterSpec& n) { n.q = juce::jlimit (0.1, 10.0, v); });
     };

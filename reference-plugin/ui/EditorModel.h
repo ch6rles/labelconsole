@@ -75,6 +75,8 @@ public:
     void setParam (const char* id, float value);
 
     std::vector<StatusMessage> statusMessages() const;
+    // A short-lived message in the status line, e.g. a failed preset save.
+    void showNotice (const juce::String&);
     juce::String latencyText (dsp::FilterMode) const;
     juce::String formatDb (double, int decimals = 1, bool plusSign = false) const;
 
@@ -103,6 +105,8 @@ private:
     juce::uint32 lastTick = 0;
     juce::uint32 lastLatencyChange = 0;
     juce::String systemError; // standalone device or routing problem, if any
+    juce::String notice;
+    juce::uint32 noticeUntil = 0;
 };
 
 } // namespace ref::ui

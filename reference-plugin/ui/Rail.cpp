@@ -4,6 +4,9 @@
 #include "ref/dsp/Format.h"
 #include "../plugin/Parameters.h"
 
+#include <cmath>
+#include <optional>
+
 namespace ref::ui
 {
 
@@ -21,9 +24,15 @@ SegmentedControl::Style filterStyle()
     return s;
 }
 
-double parseNumber (const juce::String& s)
+// A typed number, or nothing if the text has no digits (an empty or
+// mistyped field must not commit 0).
+std::optional<double> parseNumber (const juce::String& s)
 {
-    return s.replace (text::minus, "-").retainCharacters ("-+.0123456789").getDoubleValue();
+    const auto t = s.replace (text::minus, "-").retainCharacters ("-+.0123456789");
+    if (! t.containsAnyOf ("0123456789"))
+        return std::nullopt;
+    const double v = t.getDoubleValue();
+    return std::isfinite (v) ? std::optional<double> (v) : std::nullopt;
 }
 
 juce::String outputText (float v)
@@ -72,16 +81,23 @@ Rail::Rail (EditorHost& h)
     protection.setTitle ("Monitor Protection");
 
     auto& m = host.model();
-    outputField.onCommit = [&m] (const juce::String& s) { m.setParam (params::outputGain, juce::jlimit (-24.0f, 12.0f, (float) parseNumber (s))); };
+    outputField.onCommit = [&m] (const juce::String& s)
+    {
+        if (const auto v = parseNumber (s))
+            m.setParam (params::outputGain, juce::jlimit (-24.0f, 12.0f, (float) *v));
+    };
     outputField.editText = [&m] { return juce::String (m.outputDb(), 1); };
     balanceField.onCommit = [&m] (const juce::String& s)
     {
         const auto t = s.trim().toUpperCase();
-        float v = std::abs ((float) parseNumber (t));
+        const auto typed = parseNumber (t);
+        if (! typed.has_value() && ! t.startsWithChar ('C'))
+            return; // nothing usable typed: keep the current balance
+        float v = typed.has_value() ? std::abs ((float) *typed) : 0.0f;
         if (t.startsWithChar ('R'))
             v = -v;
         else if (! t.startsWithChar ('L'))
-            v = (float) parseNumber (t);
+            v = typed.has_value() ? (float) *typed : 0.0f;
         m.setParam (params::balance, juce::jlimit (-6.0f, 6.0f, v));
     };
     balanceField.editText = [&m] { return balanceText (m.balanceDb()); };

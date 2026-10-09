@@ -71,6 +71,21 @@ MainView::MainView (ReferenceProcessor& p)
     addChildComponent (dismissLayer);
     dismissLayer.onClick = [this] { closeMenu(); };
     editorModel.addListener (this);
+    // Sees clicks on every child, so a click anywhere gives the A key a home.
+    addMouseListener (this, true);
+}
+
+void MainView::mouseDown (const juce::MouseEvent& e)
+{
+    // Knobs and most buttons do not take keyboard focus, so after clicking
+    // them nothing has it and the A shortcut is never delivered. Take it
+    // back here, unless the click is typing into a field.
+    auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    if (dynamic_cast<juce::TextEditor*> (e.eventComponent) != nullptr
+        || (focused != nullptr && dynamic_cast<juce::TextEditor*> (focused) != nullptr && isParentOf (focused)))
+        return;
+    if (! hasKeyboardFocus (true))
+        grabKeyboardFocus();
 }
 
 MainView::~MainView()
@@ -164,8 +179,8 @@ void MainView::closeMenu()
 void MainView::promptName (const juce::String& title, const juce::String& initial, std::function<void (const juce::String&)> onOk)
 {
     closeMenu();
-    if (title == "DELETE PRESET")
-        prompt = NamePrompt::confirmation (title, initial, "DELETE", [onOk, initial] { onOk (initial); });
+    if (title == "DELETE PRESET" || title == "REPLACE PRESET")
+        prompt = NamePrompt::confirmation (title, initial, title.upToFirstOccurrenceOf (" ", false, false), [onOk, initial] { onOk (initial); });
     else
         prompt = std::make_unique<NamePrompt> (title, initial, std::move (onOk));
     prompt->onDismiss = [this]

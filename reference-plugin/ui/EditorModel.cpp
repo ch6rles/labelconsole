@@ -118,9 +118,19 @@ void EditorModel::recompute()
     graph = std::move (g);
 }
 
+void EditorModel::showNotice (const juce::String& message)
+{
+    notice = message;
+    noticeUntil = juce::Time::getMillisecondCounter() + 6000;
+    statusIndex = 0;
+    notify();
+}
+
 std::vector<StatusMessage> EditorModel::statusMessages() const
 {
     std::vector<StatusMessage> out;
+    if (notice.isNotEmpty())
+        out.push_back ({ StatusMessage::Kind::alert, notice, {} });
     // Standalone: a stopped device or a feedback mute matters more than any
     // calibration note.
     if (systemError.isNotEmpty())
@@ -193,6 +203,11 @@ void EditorModel::timerCallback()
     }
     protectionHold = now < protectionUntil;
     renderActive = proc.isRenderBypassActive();
+    if (notice.isNotEmpty() && now > noticeUntil)
+    {
+        notice.clear();
+        notify();
+    }
     const auto previousSystemError = systemError;
     if (auto* sys = SystemAudioController::instance())
         systemError = sys->getStatus().error;

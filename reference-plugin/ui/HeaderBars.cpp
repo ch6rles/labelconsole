@@ -329,74 +329,107 @@ void HeaderRow1::openPresetMenu()
 
     const bool isUser = presets.isUserPreset (current);
     auto* hostPtr = &host;
-    auto saveAs = [hostPtr, &proc, current]
+    juce::Component::SafePointer<juce::Component> view (this);
+    // Every action reports a failure in the status line instead of doing nothing.
+    auto report = [hostPtr, view] (const juce::String& error)
+    {
+        if (view != nullptr && error.isNotEmpty())
+            hostPtr->model().showNotice (error);
+    };
+    auto save = [&proc, report] (const juce::String& name)
+    {
+        juce::String error;
+        if (proc.getPresets().saveUser (proc.captureCurrentAsPreset (name), error))
+        {
+            if (const auto* p = proc.getPresets().find (name))
+                proc.loadPreset (*p);
+        }
+        else
+            report (error);
+    };
+    auto saveAs = [hostPtr, view, &proc, current, save]
     {
         const auto base = current.isEmpty() ? juce::String ("My preset") : current;
-        hostPtr->promptName ("SAVE PRESET AS", base, [&proc] (const juce::String& name)
+        hostPtr->promptName ("SAVE PRESET AS", base, [hostPtr, view, &proc, current, save] (const juce::String& typed)
         {
-            juce::String error;
-            auto data = proc.captureCurrentAsPreset (name);
-            if (proc.getPresets().saveUser (data, error))
-                proc.loadPreset (*proc.getPresets().find (name));
+            const auto name = typed.trim();
+            if (proc.getPresets().isUserPreset (name) && name != current)
+            {
+                // Ask before replacing another preset. The prompt that called
+                // us is still running, so open the next one afterwards.
+                juce::MessageManager::callAsync ([hostPtr, view, name, save]
+                {
+                    if (view != nullptr)
+                        hostPtr->promptName ("REPLACE PRESET", name, [save] (const juce::String& n) { save (n); });
+                });
+                return;
+            }
+            save (name);
         });
     };
 
     MenuItem actions;
     actions.kind = MenuItem::Kind::actions;
-    actions.actions.push_back ({ "SAVE", [hostPtr, &proc, current, isUser, saveAs]
+    actions.actions.push_back ({ "SAVE", [current, isUser, saveAs, save]
     {
-        if (! isUser)
-        {
+        if (isUser)
+            save (current);
+        else
             saveAs();
-            return;
-        }
-        juce::String error;
-        if (proc.getPresets().saveUser (proc.captureCurrentAsPreset (current), error))
-            proc.loadPreset (*proc.getPresets().find (current));
-        juce::ignoreUnused (hostPtr);
     } });
-    actions.actions.push_back ({ "RENAME", [hostPtr, &proc, current]
+    actions.actions.push_back ({ "RENAME", [hostPtr, &proc, current, report]
     {
-        hostPtr->promptName ("RENAME PRESET", current, [&proc, current] (const juce::String& name)
+        hostPtr->promptName ("RENAME PRESET", current, [&proc, current, report] (const juce::String& name)
         {
             juce::String error;
             if (proc.getPresets().renameUser (current, name, error))
-                if (const auto* p = proc.getPresets().find (name))
+            {
+                if (const auto* p = proc.getPresets().find (name.trim()))
                     proc.loadPreset (*p);
+            }
+            else
+                report (error);
         });
     }, isUser });
-    actions.actions.push_back ({ "DELETE", [hostPtr, &proc, current]
+    actions.actions.push_back ({ "DELETE", [hostPtr, &proc, current, report]
     {
-        hostPtr->promptName ("DELETE PRESET", current, [&proc] (const juce::String& name)
+        hostPtr->promptName ("DELETE PRESET", current, [&proc, report] (const juce::String& name)
         {
             juce::String error;
+            // The sound stays as it is; it is simply no longer a saved preset.
             if (proc.getPresets().deleteUser (name, error))
-                proc.loadPreset (proc.getPresets().getFactory().front());
+                proc.setPresetName ({});
+            else
+                report (error);
         });
     }, isUser });
     actions.actions.push_back ({ "SAVE AS" + text::ellipsis, saveAs });
-    actions.actions.push_back ({ "IMPORT", [&proc]
+    actions.actions.push_back ({ "IMPORT", [&proc, report]
     {
         auto chooser = std::make_shared<juce::FileChooser> ("Import a REFERENCE preset", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory),
                                                             "*.refpreset");
-        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [&proc, chooser] (const juce::FileChooser& fc)
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [&proc, chooser, report] (const juce::FileChooser& fc)
         {
             const auto file = fc.getResult();
             if (file == juce::File())
                 return;
             juce::String name, error;
             if (proc.getPresets().importFile (file, name, error))
+            {
                 if (const auto* p = proc.getPresets().find (name))
                     proc.loadPreset (*p);
+            }
+            else
+                report (error);
         });
     } });
-    actions.actions.push_back ({ "EXPORT", [&proc, current]
+    actions.actions.push_back ({ "EXPORT", [&proc, current, report]
     {
         const auto name = current.isEmpty() ? juce::String ("REFERENCE preset") : current;
         auto chooser = std::make_shared<juce::FileChooser> (
             "Export preset", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (juce::File::createLegalFileName (name) + ".refpreset"),
             "*.refpreset");
-        chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting, [&proc, chooser, name] (const juce::FileChooser& fc)
+        chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting, [&proc, chooser, name, report] (const juce::FileChooser& fc)
         {
             auto file = fc.getResult();
             if (file == juce::File())
@@ -404,7 +437,8 @@ void HeaderRow1::openPresetMenu()
             if (! file.hasFileExtension ("refpreset"))
                 file = file.withFileExtension ("refpreset");
             juce::String error;
-            proc.getPresets().exportPreset (proc.captureCurrentAsPreset (name), file, error);
+            if (! proc.getPresets().exportPreset (proc.captureCurrentAsPreset (name), file, error))
+                report (error);
         });
     } });
     items.push_back (actions);

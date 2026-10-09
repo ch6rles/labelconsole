@@ -271,6 +271,15 @@ void ReferenceProcessor::reloadLibrary()
 }
 
 //==============================================================================
+void ReferenceProcessor::setPresetName (const juce::String& name)
+{
+    {
+        const juce::ScopedLock sl (settingsLock);
+        settings.presetName = name;
+    }
+    sendChangeMessage();
+}
+
 void ReferenceProcessor::loadPreset (const PresetData& p)
 {
     bool modeChanged;

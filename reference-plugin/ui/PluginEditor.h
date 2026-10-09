@@ -30,6 +30,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
+    void mouseDown (const juce::MouseEvent&) override;
 
     // EditorHost
     void showMenu (std::vector<MenuItem>, MenuStyle, juce::Component& anchor, float gapBelow, float xOffset) override;

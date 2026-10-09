@@ -72,6 +72,8 @@ public:
     void reloadLibrary();
 
     void loadPreset (const PresetData&);
+    // Names the current state without changing it (empty: no preset).
+    void setPresetName (const juce::String&);
     PresetData captureCurrentAsPreset (const juce::String& name) const;
     bool isPresetModified() const;
     void stepPreset (int delta);
