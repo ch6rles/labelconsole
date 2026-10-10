@@ -54,6 +54,8 @@ public:
         work.setSize (2, juce::jmax (1, maxBlock));
         midi.ensureSize (16);
         windowLength = juce::jmax (1, (int) (0.5 * sampleRate));
+        toneRate = sampleRate;
+        testToneLeft.store (0);
         fadeStep = (float) (1.0 / (0.02 * sampleRate));
         windowEnergy = 0.0;
         windowFrames = loudWindows = 0;
@@ -71,6 +73,7 @@ public:
             const int len = juce::jmin (n - done, work.getNumSamples());
             float* ch[2] = { work.getWritePointer (0), work.getWritePointer (1) };
             bridge.fifo.pull (ch, 2, len);
+            addTestTone (ch, len);
             {
                 juce::AudioBuffer<float> view (ch, 2, len);
                 midi.clear();
@@ -115,8 +118,44 @@ public:
     // Set here when the output looks like it is feeding back into the input;
     // cleared by the bridge's timer to try again.
     std::atomic<bool> muted { false };
+    // Samples of test tone still to play (set from the message thread).
+    std::atomic<int> testToneLeft { 0 };
 
 private:
+    // A 1 kHz tone at -20 dBFS for one second, faded in and out, mixed in
+    // before the calibration so it reaches the headphones like music would.
+    void addTestTone (float* const* ch, int len) noexcept
+    {
+        int left = testToneLeft.load (std::memory_order_relaxed);
+        if (left <= 0)
+            return;
+        const int total = juce::jmax (1, toneLength);
+        for (int i = 0; i < len && left > 0; ++i, --left)
+        {
+            const int pos = total - left;
+            const float fade = (float) juce::jmin (1.0, juce::jmin (pos, left) / (0.01 * toneRate));
+            const float v = 0.1f * fade * (float) std::sin (tonePhase);
+            tonePhase += juce::MathConstants<double>::twoPi * 1000.0 / toneRate;
+            if (tonePhase > juce::MathConstants<double>::twoPi)
+                tonePhase -= juce::MathConstants<double>::twoPi;
+            ch[0][i] += v;
+            ch[1][i] += v;
+        }
+        testToneLeft.store (left, std::memory_order_relaxed);
+    }
+
+public:
+    void startTestTone()
+    {
+        toneLength = (int) toneRate;
+        tonePhase = 0.0;
+        testToneLeft.store (toneLength);
+    }
+
+private:
+    double toneRate = 48000.0, tonePhase = 0.0;
+    int toneLength = 48000;
+
     // If Headphones is routed into the loopback device, the calibrated output
     // comes back in as input and builds up until the protection clipper holds
     // it near full scale. Music never stays above -2.5 dBFS RMS for 1.5 s (a
@@ -374,7 +413,14 @@ void SystemAudioBridge::save()
 void SystemAudioBridge::timerCallback()
 {
     const auto now = juce::Time::getMillisecondCounter();
-    if (fifo.takeSignalFlag())
+    // What actually arrives from the loopback device. Only audio above
+    // -70 dBFS counts as "receiving": a faint system sound or noise floor must
+    // not make it look as if the music is coming through.
+    juce::ignoreUnused (fifo.takeSignalFlag());
+    const float peak = fifo.takeInputPeak();
+    const double peakDb = peak > 1e-7f ? 20.0 * std::log10 ((double) peak) : -120.0;
+    sourceLevelDb = juce::jmax (peakDb, sourceLevelDb - 6.0); // falls 12 dB a second
+    if (peakDb > -70.0)
         lastSignalMs = now;
 
     // Unmute after a pause to see whether the routing has been fixed; if not,
@@ -426,6 +472,12 @@ void SystemAudioBridge::timerCallback()
         lastRetryMs = now;
         reopen();
     }
+}
+
+void SystemAudioBridge::playTestTone()
+{
+    if (running)
+        outputCallback->startTestTone();
 }
 
 juce::StringArray SystemAudioBridge::getDeviceTypes()
@@ -504,6 +556,7 @@ SystemAudioController::Status SystemAudioBridge::getStatus()
         s.error = "macOS is not letting REFERENCE hear the loopback device. Allow it in System Settings, Privacy & Security, Microphone.";
    #endif
     s.receivingSignal = running && juce::Time::getMillisecondCounter() - lastSignalMs < 2000;
+    s.sourceLevelDb = running ? sourceLevelDb : -120.0;
     if (running)
     {
         s.sampleRate = outputRate;

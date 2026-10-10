@@ -148,7 +148,7 @@ void DriftCompensatedFifo::push (const float* const* input, int numChannels, int
     }
     overflowing = n < numFrames;
 
-    bool signal = false;
+    float peak = 0.0f;
     for (int c = 0; c < channels; ++c)
     {
         const float* src = numChannels > 0 ? input[std::min (c, numChannels - 1)] : nullptr;
@@ -156,12 +156,14 @@ void DriftCompensatedFifo::push (const float* const* input, int numChannels, int
         for (int i = 0; i < n; ++i)
         {
             const float v = src != nullptr && std::isfinite (src[i]) ? src[i] : 0.0f;
-            signal = signal || std::abs (v) > 1e-6f;
+            peak = std::max (peak, std::abs (v));
             dst[(size_t) ((w + i) & mask)] = v;
         }
     }
-    if (signal)
+    if (peak > 1e-6f)
         receiving.store (true, std::memory_order_relaxed);
+    if (peak > inputPeak.load (std::memory_order_relaxed))
+        inputPeak.store (peak, std::memory_order_relaxed);
     written.store (w + n, std::memory_order_release);
 
     const double now = timestamp >= 0.0 ? timestamp : nowSeconds();

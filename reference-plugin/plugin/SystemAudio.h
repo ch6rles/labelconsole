@@ -21,6 +21,7 @@ public:
         double latencyMs = 0.0;
         double driftPpm = 0.0;
         juce::uint32 dropouts = 0;
+        double sourceLevelDb = -120.0; // peak of what arrives from the loopback device
         juce::String error;
     };
 
@@ -36,6 +37,10 @@ public:
     virtual void setOutputDevice (const juce::String&) = 0;
 
     virtual Status getStatus() = 0;
+
+    // Plays a short tone through the calibration to the headphones, to check
+    // the output side on its own.
+    virtual void playTestTone() = 0;
 
     static SystemAudioController* instance() { return current(); }
     static void setInstance (SystemAudioController* c) { current() = c; }

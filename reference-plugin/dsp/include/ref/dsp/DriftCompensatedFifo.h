@@ -44,6 +44,8 @@ public:
     uint32_t overruns() const noexcept { return overrunCount.load (std::memory_order_relaxed); }
     // True if any non-silent input arrived since the last call.
     bool takeSignalFlag() noexcept { return receiving.exchange (false, std::memory_order_relaxed); }
+    // Largest input sample since the last call (linear).
+    float takeInputPeak() noexcept { return inputPeak.exchange (0.0f, std::memory_order_relaxed); }
 
     static constexpr int kTaps = 64;
 
@@ -87,6 +89,7 @@ private:
     std::atomic<double> correctionPpm { 0.0 }, fillShown { 0.0 }, targetShown { 0.0 };
     std::atomic<uint32_t> underrunCount { 0 }, overrunCount { 0 };
     std::atomic<bool> receiving { false };
+    std::atomic<float> inputPeak { 0.0f };
 };
 
 } // namespace ref::dsp

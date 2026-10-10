@@ -163,6 +163,9 @@ std::vector<StatusMessage> EditorModel::statusMessages() const
     if (snap != nullptr && snap->placeholder)
         out.push_back ({ StatusMessage::Kind::info, "Placeholder profile: an illustrative curve, not a measurement.", {} });
 
+    if (systemHint.isNotEmpty() && systemError.isEmpty())
+        out.insert (out.begin(), { StatusMessage::Kind::info, systemHint, {} });
+
     if (out.empty())
         out.push_back ({ StatusMessage::Kind::idle, "No warnings. Correction within limits.", {} });
     return out;
@@ -208,9 +211,16 @@ void EditorModel::timerCallback()
         notice.clear();
         notify();
     }
-    const auto previousSystemError = systemError;
+    const auto previousSystemError = systemError, previousSystemHint = systemHint;
     if (auto* sys = SystemAudioController::instance())
-        systemError = sys->getStatus().error;
+    {
+        const auto st = sys->getStatus();
+        systemError = st.error;
+        // Running but silent for a while: say where to look.
+        quietSince = st.running && ! st.receivingSignal ? (quietSince == 0 ? now : quietSince) : 0;
+        systemHint = quietSince != 0 && now - quietSince > 5000 ? juce::String ("No audio is reaching REFERENCE. See Settings, System audio.")
+                                                                : juce::String();
+    }
 
     if (metersMoved)
         listeners.call ([] (Listener& l) { l.metersChanged(); });
@@ -219,7 +229,7 @@ void EditorModel::timerCallback()
     const float a = amount(), o = outputDb(), b = balanceDb();
     const bool cal = calibrated(), byp = bypassed();
     bool changed = protectionHold != lastHold || renderActive != lastRender || cal != lastCalibrated || byp != lastBypassed
-                || o != lastOutput || b != lastBalance || systemError != previousSystemError;
+                || o != lastOutput || b != lastBalance || systemError != previousSystemError || systemHint != previousSystemHint;
     if (a != lastAmount)
     {
         recompute();

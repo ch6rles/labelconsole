@@ -175,15 +175,20 @@ public:
             else if (! st.running)
                 statusDesc = "Not running. Choose a source and your headphones.";
             else if (! st.receivingSignal)
-                statusDesc = "No audio from the source yet. Is it set as your computer's sound output?";
+                statusDesc = "No audio is reaching REFERENCE. Play something. If it still plays with REFERENCE closed, "
+                             "that app is not sending its sound to the loopback device (see Help).";
             else
-                statusDesc = "Receiving system audio. Clock drift " + text::fromStd (dsp::formatNumber (st.driftPpm, 0, true)) + " ppm, corrected"
+                statusDesc = "Receiving system audio at " + text::fromStd (dsp::formatNumber (st.sourceLevelDb, 0)) + " dBFS. Clock drift "
+                           + text::fromStd (dsp::formatNumber (st.driftPpm, 0, true)) + " ppm, corrected"
                            + (st.dropouts > 0 ? "; " + juce::String ((int) st.dropouts) + (st.dropouts == 1 ? " dropout." : " dropouts.") : juce::String ("."));
             Section audio { "SYSTEM AUDIO", {}, {} };
             audio.rows.push_back ({ "Source", "Set this device as your computer's sound output; REFERENCE listens to it.", {}, {}, &source });
             audio.rows.push_back ({ "Headphones", "Calibrated audio plays here.", {}, {}, &headphones });
             audio.rows.push_back ({ "Driver", "The audio system both devices belong to.", {}, {}, &driver });
             audio.rows.push_back ({ "Status", statusDesc, st.running ? rateText (st.sampleRate) + "\n" + juce::String (st.latencyMs, 1) + " ms" : text::emDash });
+            Row tone { "Test sound", "Plays a one-second tone through REFERENCE to your headphones.", {}, "Play " + text::arrowRight };
+            tone.link = [sys] { sys->playTestTone(); };
+            audio.rows.push_back (tone);
             Row guide { "Setup guide", "Step by step for Windows, macOS and Linux.", {}, "Help " + text::arrowRight };
             guide.link = [this] { host.showHelpTopic ("systemwide"); };
             audio.rows.push_back (guide);

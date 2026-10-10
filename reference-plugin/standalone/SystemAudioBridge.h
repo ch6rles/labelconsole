@@ -35,6 +35,7 @@ public:
     void setInputDevice (const juce::String&) override;
     void setOutputDevice (const juce::String&) override;
     Status getStatus() override;
+    void playTestTone() override;
 
     // Loopback devices we recognise by name, best first.
     static juce::String guessLoopbackInput (const juce::StringArray& inputs);
@@ -68,6 +69,7 @@ private:
     int outputBlock = 0, inputBlock = 0;
     bool running = false;
     juce::uint32 lastSignalMs = 0, lastRetryMs = 0, mutedSinceMs = 0;
+    double sourceLevelDb = -120.0;
     juce::uint32 lastTicks[2] {};
     int quietTimerTicks = 0; // timer ticks in a row with a device not calling back
 };

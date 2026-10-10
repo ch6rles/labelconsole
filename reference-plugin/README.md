@@ -73,6 +73,16 @@ with sound servers that deliver audio in irregular bursts.
    **Monitor of REFERENCE**; on *Playback*, set REFERENCE to your headphones. The
    sound server remembers both.
 
+**If the sound does not change:** quit REFERENCE and play some music. If you still
+hear it, that app is not sending its sound to the loopback device, so REFERENCE
+never receives it. On Windows, open Settings → System → Sound → Volume mixer, set
+the app's output device to *Default* (or **CABLE Input**) and restart the app, and
+make sure *Listen to this device* is off for CABLE Output (Sound Control Panel →
+Recording → CABLE Output → Properties → Listen). On macOS, pick the system default
+or BlackHole in the app's own audio settings. Settings → System audio shows the level
+REFERENCE receives, and **Test sound** plays a tone through REFERENCE to your
+headphones.
+
 The app recognises VB-CABLE, BlackHole and Loopback by name and picks them as the
 source on first run. It refuses to play into a loopback device it recognises, and
 if its output still comes back into its input (on Linux, until step 4 is done) it

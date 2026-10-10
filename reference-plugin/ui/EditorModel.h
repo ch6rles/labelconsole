@@ -105,6 +105,8 @@ private:
     juce::uint32 lastTick = 0;
     juce::uint32 lastLatencyChange = 0;
     juce::String systemError; // standalone device or routing problem, if any
+    juce::String systemHint;  // standalone running but nothing arriving
+    juce::uint32 quietSince = 0;
     juce::String notice;
     juce::uint32 noticeUntil = 0;
 };
