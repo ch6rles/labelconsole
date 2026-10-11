@@ -133,6 +133,15 @@ export const INTEGRATIONS: Integration[] = [
     usedBy: ['Streams'],
   },
   {
+    provider: 'discogs',
+    name: 'Discogs',
+    icon: 'album',
+    description: 'Release labels, catalogue numbers, formats, credits and the companies behind a release (distributed by, licensed from), found by UPC. Community-maintained, so shown as source-reported. A free personal access token allows 60 requests a minute.',
+    fields: [{ name: 'token', label: 'Personal access token', secret: true, hint: 'Discogs → Settings → Developers → Generate new token' }],
+    usedBy: ['Catalogue', 'Discord'],
+    docs: 'https://www.discogs.com/settings/developers',
+  },
+  {
     provider: 'discord',
     name: 'Discord app',
     icon: 'forum',

@@ -457,3 +457,42 @@ export async function filesForDocuments(ctx: ServiceContext, docs: Document[]) {
 }
 
 export { tracks };
+
+/**
+ * Which distributors' statements list these codes: an authorised distributor
+ * export is direct evidence of who distributes a release. Returns only the
+ * distributor names and the latest period (no money), so other modules (the
+ * Discord app) can show it as verification to anyone who can read the catalogue.
+ */
+export async function statementDistributors(ctx: ServiceContext, codes: { upc?: string | null; isrc?: string | null }) {
+  const conds = [codes.upc ? eq(statementLines.upc, codes.upc) : undefined, codes.upc?.startsWith('0') ? eq(statementLines.upc, codes.upc.slice(1)) : undefined, codes.isrc ? eq(statementLines.isrc, codes.isrc) : undefined].filter((c) => c !== undefined);
+  if (!conds.length) return [];
+  const distributor = sql<string | null>`nullif(trim(${documents.extractedTerms}->>'distributor'), '')`;
+  const rows = await ctx.tx
+    .select({ name: distributor, periodEnd: sql<string | null>`max(${statementLines.periodEnd})::text` })
+    .from(statementLines)
+    .innerJoin(documents, eq(documents.id, statementLines.documentId))
+    .where(and(or(...conds), eq(documents.type, 'statement'), isNotNull(distributor)))
+    .groupBy(distributor)
+    .orderBy(desc(sql`max(${statementLines.periodEnd})`));
+  return rows.filter((r): r is { name: string; periodEnd: string | null } => Boolean(r.name));
+}
+
+/** Codes listed in statements from a distributor whose name matches, for /licensor. Names and codes only. */
+export async function statementCodesFor(ctx: ServiceContext, distributorQuery: string) {
+  const distributor = sql<string | null>`${documents.extractedTerms}->>'distributor'`;
+  const [docs, lines] = await Promise.all([
+    ctx.tx
+      .select({ name: distributor, n: sql<number>`count(*)::int` })
+      .from(documents)
+      .where(and(eq(documents.type, 'statement'), ilike(distributor, `%${distributorQuery}%`)))
+      .groupBy(distributor),
+    ctx.tx
+      .selectDistinct({ upc: statementLines.upc, isrc: statementLines.isrc, releaseId: statementLines.releaseId, trackId: statementLines.trackId })
+      .from(statementLines)
+      .innerJoin(documents, eq(documents.id, statementLines.documentId))
+      .where(and(eq(documents.type, 'statement'), ilike(distributor, `%${distributorQuery}%`)))
+      .limit(2000),
+  ]);
+  return { distributors: docs.filter((d) => d.name).map((d) => ({ name: d.name!, statements: d.n })), codes: lines };
+}

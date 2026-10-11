@@ -19,6 +19,8 @@ export type DistributorInput = {
   upc?: string | null;
   licensedDistributor?: string | null;
   mbLabels?: string[];
+  /** Companies a catalogue database credits as "Distributed By" (Discogs; community-entered). */
+  reportedDistributors?: string[];
 };
 
 const norm = (s: string) => s.toLowerCase().replace(/[℗©]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -27,6 +29,11 @@ export function inferDistributor(input: DistributorInput, aliases: Alias[], hint
   const evidence: DistributorEvidence[] = [];
 
   if (input.licensedDistributor) evidence.push({ source: 'licensed provider', signal: 'distributor field', value: input.licensedDistributor, weight: 0.95, distributor: input.licensedDistributor });
+  for (const name of new Set(input.reportedDistributors ?? [])) {
+    // Known distributors keep their canonical name; anything else is reported as written.
+    const known = aliases.find((a) => norm(name).includes(norm(a.pattern)))?.distributor;
+    evidence.push({ source: 'Discogs', signal: 'Distributed By', value: name, weight: 0.6, distributor: known ?? name });
+  }
 
   const texts: Array<[string, string | null | undefined]> = [
     ['label', input.labelName],

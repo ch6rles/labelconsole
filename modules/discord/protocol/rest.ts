@@ -1,8 +1,9 @@
 import { fetchJson } from '@labelconsole/core/http';
+import { ProviderError } from '@labelconsole/core/errors';
 import { commandDefinitions } from './commands';
 import { IntegrationType } from './types';
 import { isSnowflake } from './verify';
-import type { MessagePayload } from './types';
+import type { MessageFile, MessagePayload } from './types';
 
 const API = 'https://discord.com/api/v10';
 /** Discord asks every caller to identify itself this way, or requests may be blocked. */
@@ -18,7 +19,8 @@ function webhookPath(applicationId: string, token: string) {
  * bot token: the interaction token is the credential, valid for 15 minutes.
  * Returns false when Discord no longer knows the interaction.
  */
-export async function editOriginal(applicationId: string, token: string, message: MessagePayload): Promise<boolean> {
+export async function editOriginal(applicationId: string, token: string, message: MessagePayload, files: MessageFile[] = []): Promise<boolean> {
+  if (files.length) return editWithFiles(webhookPath(applicationId, token), message, files);
   const res = await fetchJson(webhookPath(applicationId, token), {
     provider: 'discord',
     method: 'PATCH',
@@ -30,6 +32,27 @@ export async function editOriginal(applicationId: string, token: string, message
     allow404: true,
   });
   return res !== null;
+}
+
+/**
+ * The same edit with files attached (multipart: `payload_json` plus
+ * `files[n]`). fetchJson sends JSON only, so this one call uses fetch directly;
+ * a 404 means the interaction is gone, like above.
+ */
+async function editWithFiles(url: string, message: MessagePayload, files: MessageFile[]): Promise<boolean> {
+  const form = new FormData();
+  const payload: MessagePayload = { ...message, allowed_mentions: { parse: [] }, attachments: files.map((f, i) => ({ id: i, filename: f.name, ...(f.description ? { description: f.description } : {}) })) };
+  form.append('payload_json', JSON.stringify(payload));
+  files.forEach((f, i) => form.append(`files[${i}]`, new Blob([new Uint8Array(f.data)], { type: f.contentType }), f.name));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(url, { method: 'PATCH', headers: { 'user-agent': USER_AGENT }, body: form, signal: AbortSignal.timeout(20_000) });
+    if (res.status === 404) return false;
+    if (res.ok) return true;
+    const retryAfter = Number(res.headers.get('retry-after') ?? 0);
+    if (res.status !== 429 && res.status < 500) throw new ProviderError('discord', `HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`, { status: res.status });
+    await new Promise((r) => setTimeout(r, Math.min(10_000, retryAfter ? retryAfter * 1000 : 500 * 2 ** attempt)));
+  }
+  throw new ProviderError('discord', 'Discord did not accept the upload', { transient: true });
 }
 
 /**

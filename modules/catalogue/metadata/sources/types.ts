@@ -25,6 +25,15 @@ export type SourceResult = {
   labels?: string[];
   /** Cover art hosted by the source (an https URL on its CDN). */
   artworkUrl?: string | null;
+  /** A short public preview of the recording (Deezer's 30 seconds). */
+  previewUrl?: string | null;
+  /** Countries (ISO 3166-1 alpha-2) where the source says the track can be played. */
+  availableCountries?: string[];
+  /** The platform's own all-time play count, as shown publicly (Spotify via SpotScraper). */
+  playCount?: number | null;
+  catalogNumber?: string | null;
+  /** Companies a source credits on the release (Discogs: "Distributed By", "Licensed From", ℗/© holders…). */
+  companies?: Array<{ role: string; name: string }>;
 };
 
 export type Query = { isrc?: string | null; upc?: string | null; title?: string | null; artist?: string | null };

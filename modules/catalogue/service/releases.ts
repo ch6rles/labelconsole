@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { patchOf } from '@labelconsole/core/zod';
 import type { ServiceContext } from '@labelconsole/core/context';
@@ -178,4 +178,42 @@ export async function reorderTracks(ctx: ServiceContext, releaseId: string, trac
 export async function findReleaseByUpc(ctx: ServiceContext, upc: string) {
   const [r] = await ctx.tx.select().from(releases).where(eq(releases.upc, upc));
   return r ?? null;
+}
+
+const scoped = (ctx: ServiceContext) => (ctx.artistScope ? inArray(releases.id, ctx.tx.select({ id: releaseArtists.releaseId }).from(releaseArtists).where(inArray(releaseArtists.artistId, [...ctx.artistScope]))) : undefined);
+
+/** Releases whose label credit matches (for /label in Discord). Respects the member's artist scope. */
+export async function releasesByLabel(ctx: ServiceContext, name: string, limit = 25) {
+  ctx.assert('catalogue:read');
+  const where = and(ilike(releases.labelName, `%${name.replace(/[%_]/g, '')}%`), scoped(ctx));
+  const [rows, [count]] = await Promise.all([
+    ctx.tx
+      .select({ id: releases.id, title: releases.title, releaseDate: releases.releaseDate, upc: releases.upc, labelName: releases.labelName, distributor: releases.distributor, distributorConfidence: releases.distributorConfidence })
+      .from(releases)
+      .where(where)
+      .orderBy(sql`${releases.releaseDate} desc nulls last`)
+      .limit(limit),
+    ctx.tx.select({ n: sql<number>`count(*)::int` }).from(releases).where(where),
+  ]);
+  return { total: count?.n ?? 0, releases: rows };
+}
+
+/**
+ * Releases whose distributor is on the label's record and was entered or
+ * confirmed by a person (not a stored guess), for /licensor. Respects the
+ * member's artist scope.
+ */
+export async function releasesByDistributor(ctx: ServiceContext, query: string, also: { ids?: string[]; upcs?: string[] } = {}, limit = 25) {
+  ctx.assert('catalogue:read');
+  const confirmed = and(ilike(releases.distributor, `%${query.replace(/[%_]/g, '')}%`), or(isNull(releases.distributorConfidence), gte(releases.distributorConfidence, '1')));
+  // Releases the label's own records prove another way (e.g. listed in that distributor's statements), by id or UPC.
+  const upcs = [...new Set((also.upcs ?? []).flatMap((u) => (u.length === 12 ? [u, `0${u}`] : [u])))];
+  const extra = [also.ids?.length ? inArray(releases.id, also.ids) : undefined, upcs.length ? inArray(releases.upc, upcs) : undefined].filter((c) => c !== undefined);
+  const where = and(extra.length ? or(confirmed, ...extra) : confirmed, scoped(ctx));
+  return ctx.tx
+    .select({ id: releases.id, title: releases.title, releaseDate: releases.releaseDate, upc: releases.upc, distributor: releases.distributor, distributorConfidence: releases.distributorConfidence })
+    .from(releases)
+    .where(where)
+    .orderBy(sql`${releases.releaseDate} desc nulls last`)
+    .limit(limit);
 }

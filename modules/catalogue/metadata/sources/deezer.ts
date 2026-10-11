@@ -8,7 +8,7 @@ const RL = { key: 'deezer', capacity: 50, refillPerSec: 10 };
 const BASE = 'https://api.deezer.com';
 
 type DzError = { error?: { type: string; message: string; code: number } };
-type DzTrack = DzError & { id: number; title: string; isrc?: string; duration: number; explicit_lyrics?: boolean; track_position?: number; release_date?: string; link?: string; artist?: { name: string }; contributors?: Array<{ name: string; role: string }>; album?: { id: number; title: string; release_date?: string; type?: string } };
+type DzTrack = DzError & { id: number; title: string; isrc?: string; duration: number; preview?: string; available_countries?: string[]; explicit_lyrics?: boolean; track_position?: number; release_date?: string; link?: string; artist?: { name: string }; contributors?: Array<{ name: string; role: string }>; album?: { id: number; title: string; release_date?: string; type?: string } };
 type DzAlbum = DzError & { id: number; title: string; upc?: string; cover_xl?: string; cover_big?: string; label?: string; release_date?: string; record_type?: string; link?: string; explicit_lyrics?: boolean; artist?: { name: string }; contributors?: Array<{ name: string; role: string }>; tracks?: { data: Array<{ id: number; title: string; duration: number; explicit_lyrics?: boolean; artist?: { name: string } }> } };
 
 async function get<T extends DzError>(path: string): Promise<T | null> {
@@ -74,6 +74,8 @@ export async function deezerLookup(q: Query & { deezerTrackId?: string; deezerAl
       durationMs: track.duration ? track.duration * 1000 : null,
       explicit: track.explicit_lyrics ?? null,
       releaseDate: result.releaseDate ?? track.release_date ?? track.album?.release_date ?? null,
+      previewUrl: track.preview || null,
+      availableCountries: track.available_countries?.length ? track.available_countries : undefined,
     });
     result.platformIds!.push({ platform: 'deezer', entity: 'track', externalId: String(track.id), url: track.link ?? `https://www.deezer.com/track/${track.id}`, source: 'deezer' });
   } else if (album) {

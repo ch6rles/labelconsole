@@ -23,6 +23,7 @@ export async function spotScraperLookup(client: SpotScraperClient, q: Query & { 
     artists: artists.map((a) => a.name),
     durationMs: track?.durationMs ?? null,
     explicit: track?.explicit ?? null,
+    playCount: track?.playCount ?? null,
     upc: album?.upc ? normalizeUpc(album.upc) : null,
     releaseTitle: album?.name ?? track?.album?.name ?? null,
     releaseDate: album?.releaseDate ?? null,

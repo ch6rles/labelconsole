@@ -50,6 +50,13 @@
       "when": 1791701902579,
       "tag": "0006_discord",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791710385517,
+      "tag": "0007_discord_lookups",
+      "breakpoints": true
     }
   ]
 }

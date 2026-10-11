@@ -1,18 +1,26 @@
 import type { ReactNode } from 'react';
 import type { PageProps } from '@labelconsole/core/web';
 import { Banner, Chip, Icon, LinkButton, Page, PageHeader, fmt } from '@labelconsole/ui';
-import { ActionButton, CopyButton } from '@labelconsole/ui/client';
+import { ActionButton, ApiToggle, CopyButton } from '@labelconsole/ui/client';
+import { CORRECTABLE_FIELDS } from '../protocol/commands';
 import * as svc from '../service';
 import { LinkCodeButton } from './client';
 
 export default async function DiscordPage({ run, session }: PageProps) {
   const canUse = session.permissions.has(svc.USE_PERMISSION);
   const isAdmin = session.permissions.has('settings:read');
-  const [link, status, links] = await Promise.all([
+  const [link, status, links, sharing, pending, reviewed, stats] = await Promise.all([
     run((ctx) => svc.myLink(ctx)),
     run((ctx) => svc.discordStatus(ctx)),
     isAdmin ? run((ctx) => svc.listLinks(ctx)) : Promise.resolve([]),
+    run((ctx) => svc.sharingSettings(ctx)),
+    canUse ? run((ctx) => svc.listCorrections(ctx, 'pending')) : Promise.resolve([]),
+    canUse ? run((ctx) => svc.listCorrections(ctx, 'reviewed')) : Promise.resolve([]),
+    isAdmin ? run((ctx) => svc.lookupStats(ctx)) : Promise.resolve(null),
   ]);
+  const canReview = session.permissions.has('catalogue:write');
+  const fieldName = (f: string) => CORRECTABLE_FIELDS.find((x) => x.value === f)?.name ?? f;
+  const pct = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : '—');
   const canManage = session.permissions.has('settings:manage');
   const canRemoveOthers = session.permissions.has('settings:members');
   const https = status.interactionsUrl.startsWith('https://');
@@ -106,7 +114,7 @@ export default async function DiscordPage({ run, session }: PageProps) {
             )}
           </Step>
           <Step n={4} done={Boolean(status.commandsRegisteredAt)} title="Register the commands">
-            Adds /song, /link, /unlink and Look Up Song to the app. Run it again after changing the bot token.
+            Adds /song, /release, /artist, /label, /licensor, /compare, /correct, /link, /unlink and Look Up Song to the app. Run it again after changing the bot token or the install types.
             {status.commandsRegisteredAt && <span className="lc-muted"> Last registered {fmt.relative(status.commandsRegisteredAt)}.</span>}
             {status.commandsError && <span style={{ color: 'var(--lc-danger)' }}> Last attempt failed: {status.commandsError}</span>}
             {canManage && status.ready && (
@@ -115,6 +123,131 @@ export default async function DiscordPage({ run, session }: PageProps) {
               </span>
             )}
           </Step>
+        </section>
+      )}
+
+      {canUse && (
+        <section className="lc-card">
+          <div className="lc-card-head">
+            <div className="lc-card-head-text">
+              <span className="lc-card-title">Corrections from Discord</span>
+              <span className="lc-card-sub">Suggested with /correct or Report / Correct. Approved values show on cards as reviewed; the sources&apos; values stay listed beside them.</span>
+            </div>
+          </div>
+          {pending.length === 0 && <div className="lc-card-body lc-muted">Nothing waiting for review.</div>}
+          {pending.map(({ row, submittedByName }) => (
+            <div key={row.id} className="lc-setting-row" style={{ alignItems: 'flex-start' }}>
+              <span className="lc-setting-icon">
+                <Icon name="edit_note" />
+              </span>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>
+                  {fieldName(row.field)} of “{row.subject}”
+                </span>
+                <span style={{ fontSize: 13, lineHeight: 1.5 }}>
+                  {row.currentValue ? (
+                    <>
+                      <span className="lc-muted">{row.currentValue}</span> → <strong>{row.proposedValue}</strong>
+                    </>
+                  ) : (
+                    <strong>{row.proposedValue}</strong>
+                  )}
+                </span>
+                {row.note && <span className="lc-muted" style={{ fontSize: 12 }}>Evidence: {row.note}</span>}
+                <span className="lc-mono lc-muted" style={{ fontSize: 11 }}>
+                  {row.ref.toUpperCase()} · {submittedByName ?? 'Former member'} · {fmt.relative(row.createdAt)}
+                </span>
+              </div>
+              {canReview && (
+                <div className="lc-row" style={{ gap: 6 }}>
+                  <ActionButton endpoint={`/discord/corrections/${row.id}/review`} body={{ decision: 'approved' }} label="Approve" size="sm" variant="primary" success="Approved" />
+                  <ActionButton endpoint={`/discord/corrections/${row.id}/review`} body={{ decision: 'rejected' }} label="Reject" size="sm" variant="ghost" success="Rejected" />
+                </div>
+              )}
+            </div>
+          ))}
+          {reviewed.length > 0 && (
+            <div className="lc-card-body lc-muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
+              Recently reviewed:{' '}
+              {reviewed
+                .slice(0, 8)
+                .map(({ row, reviewedByName }) => `${fieldName(row.field)} of “${row.subject}” ${row.status}${reviewedByName ? ` by ${reviewedByName}` : ''}`)
+                .join(' · ')}
+            </div>
+          )}
+        </section>
+      )}
+
+      {isAdmin && (
+        <section className="lc-card">
+          <div className="lc-card-head">
+            <div className="lc-card-head-text">
+              <span className="lc-card-title">Sharing</span>
+              <span className="lc-card-sub">Cards are private to whoever asks. With share:true a member can post one for everyone in the channel, including people outside the label; buttons on it still answer only linked members, privately.</span>
+            </div>
+          </div>
+          {(
+            [
+              ['allowSharing', 'Allow posting cards for everyone', 'Off: share:true is ignored and every card stays private.'],
+              ['shareDistributor', 'Show the distributor on shared cards', 'The small card with the distributor (verified or inferred).'],
+              ['shareStreams', 'Show stream counts on shared cards', 'Spotify’s public play count from the lookup, or your own latest reading.'],
+            ] as const
+          ).map(([field, title, sub]) => (
+            <div key={field} className="lc-setting-row">
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 14, fontWeight: 500 }}>{title}</span>
+                <span style={{ fontSize: 12, color: 'var(--lc-muted)' }}>{sub}</span>
+              </div>
+              <ApiToggle endpoint="/discord/sharing" field={field} on={sharing[field]} disabled={!canManage || (field !== 'allowSharing' && !sharing.allowSharing)} title={title} />
+            </div>
+          ))}
+        </section>
+      )}
+
+      {isAdmin && stats && (
+        <section className="lc-card">
+          <div className="lc-card-head">
+            <div className="lc-card-head-text">
+              <span className="lc-card-title">Last {stats.days} days</span>
+              <span className="lc-card-sub">How lookups went, for checking the app before and after launch.</span>
+            </div>
+          </div>
+          <div className="lc-card-body" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, fontSize: 13 }}>
+            {[
+              ['Commands', String(stats.total)],
+              ['Answered with a card', pct(stats.cards, stats.total)],
+              ['Asked “Which one?”', pct(stats.pickers, stats.total)],
+              ['Nothing found', pct(stats.notFound, stats.total)],
+              ['Errors', pct(stats.errors, stats.total)],
+              ['ISRC/UPC lookups resolved', pct(stats.codesFound, stats.codes)],
+              ['From the cache', pct(stats.cached, stats.total)],
+              ['Median time', stats.p50 == null ? '—' : `${(stats.p50 / 1000).toFixed(1)} s`],
+              ['95th percentile', stats.p95 == null ? '—' : `${(stats.p95 / 1000).toFixed(1)} s`],
+              ['Corrections waiting', String(stats.corrections?.pending ?? 0)],
+            ].map(([k, v]) => (
+              <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span className="lc-muted" style={{ fontSize: 12 }}>
+                  {k}
+                </span>
+                <span style={{ fontSize: 18, fontWeight: 600 }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          {stats.coverage.length > 0 && (
+            <div className="lc-card-body lc-muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
+              Field coverage on cards:{' '}
+              {['labelName', 'pLine', 'cLine', 'distributor', 'credits', 'streams']
+                .map((f) => {
+                  const rows = stats.coverage.filter((c) => c.field === f);
+                  const total = rows.reduce((n, c) => n + Number(c.n), 0);
+                  const known = rows.filter((c) => c.status !== 'unknown').reduce((n, c) => n + Number(c.n), 0);
+                  const verified = rows.filter((c) => c.status === 'verified').reduce((n, c) => n + Number(c.n), 0);
+                  return total ? `${({ labelName: 'label', pLine: '℗ line', cLine: '© line', distributor: 'distributor', credits: 'own credits', streams: 'streams' } as Record<string, string>)[f]} ${pct(known, total)} (${pct(verified, total)} verified)` : null;
+                })
+                .filter(Boolean)
+                .join(' · ')}
+            </div>
+          )}
         </section>
       )}
 

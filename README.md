@@ -11,7 +11,11 @@ A multi-tenant workspace for record labels: catalogue, roster, marketing, contra
 - **Agents:** ten agent types (Label Manager, Playlist & Editor Outreach, Creator Outreach, Trend & Social Monitor, A&R Scout, Social Scout, Stream Watch, Release Ops, Contract & Statement Watch, and a Custom agent you configure yourself). Social research on TikTok, Instagram and YouTube runs through Apify.
   - Agents run in the background with schedules, event and webhook triggers, delegation, memory, budgets and approvals for anything risky.
   - Each run is checkpointed after every step and resumes after a crash.
-- **Discord:** a private Discord app for the label. Linked members run `/song` (or "Look Up Song" on a message) in any server or DM. They get a card with identifiers, label and ℗/© lines, credits, links and play counts. Each field is marked as verified, reported by a source, conflicting, inferred or unknown, and a title search asks "Which one?" instead of guessing. See [docs/discord.md](docs/discord.md).
+- **Discord:** a private Discord app for the label, with DistroFind-style cards.
+  - Commands: `/song`, `/release`, `/artist`, `/label`, `/licensor`, `/compare` and `/correct`, plus "Look Up Song" on a message, in any server or DM.
+  - Cards show identifiers, label and ℗/© lines, the distributor with its evidence, credits, a performance chart, other links, a preview and availability. Each field is marked verified, reported, conflicting, inferred or unknown.
+  - Searches ask "Which one?" instead of guessing, and corrections are reviewed before they show.
+  - See [docs/discord.md](docs/discord.md).
 - **Inbox, Admin and Settings:** notifications, the approvals queue, an activity feed, roles and custom roles, an audit log, an integrations vault, plan and usage, and full data export.
 
 Every table belongs to a label and is isolated by Postgres row-level security; credentials are envelope-encrypted and only decrypted in the worker.

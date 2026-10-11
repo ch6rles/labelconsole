@@ -1,6 +1,7 @@
 import '../types';
 import { createHmac, randomInt } from 'node:crypto';
-import { and, desc, eq, gt, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { memberAccess } from '@labelconsole/core/auth';
 import { withOrg, withSystemOrg, type ServiceContext } from '@labelconsole/core/context';
 import { systemDb } from '@labelconsole/core/db/client';
@@ -10,7 +11,9 @@ import { ForbiddenError, NotFoundError, ValidationError } from '@labelconsole/co
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
 import { getCredentialHandle } from '@labelconsole/core/vault';
 import { isPublicKeyHex, isSnowflake } from '../protocol/verify';
-import { discordLinkCodes, discordLinks, discordState } from '../schema';
+import { notify } from '@labelconsole/inbox/service';
+import { CORRECTABLE_FIELDS } from '../protocol/commands';
+import { discordCorrections, discordLinkCodes, discordLinks, discordLookups, discordPlayReadings, discordState } from '../schema';
 
 /** The permission a member needs to link and use the app: the app shows catalogue data. */
 export const USE_PERMISSION = 'catalogue:read';
@@ -218,4 +221,173 @@ export async function requestCommandRegistration(ctx: ServiceContext) {
 export async function recordCommandRegistration(ctx: ServiceContext, applicationId: string, error: string | null) {
   const values = { applicationId, commandsRegisteredAt: error ? null : new Date(), commandsError: error };
   await ctx.tx.insert(discordState).values(values).onConflictDoUpdate({ target: discordState.orgId, set: values });
+}
+
+/* ------------------------------------------------------------- sharing -- */
+
+export type SharingSettings = { allowSharing: boolean; shareDistributor: boolean; shareStreams: boolean };
+const DEFAULT_SHARING: SharingSettings = { allowSharing: true, shareDistributor: true, shareStreams: true };
+
+/** What members may post for everyone, read before any member context exists (interactions endpoint). */
+export async function sharingFor(orgId: string): Promise<SharingSettings> {
+  const [row] = await systemDb().select({ allowSharing: discordState.allowSharing, shareDistributor: discordState.shareDistributor, shareStreams: discordState.shareStreams }).from(discordState).where(eq(discordState.orgId, orgId));
+  return row ?? DEFAULT_SHARING;
+}
+
+export const SharingPatch = z.object({ allowSharing: z.boolean().optional(), shareDistributor: z.boolean().optional(), shareStreams: z.boolean().optional() });
+
+export async function sharingSettings(ctx: ServiceContext): Promise<SharingSettings> {
+  const [row] = await ctx.tx.select().from(discordState);
+  return row ? { allowSharing: row.allowSharing, shareDistributor: row.shareDistributor, shareStreams: row.shareStreams } : DEFAULT_SHARING;
+}
+
+export async function updateSharing(ctx: ServiceContext, patch: z.infer<typeof SharingPatch>) {
+  ctx.assert('settings:manage');
+  const before = await sharingSettings(ctx);
+  const after = { ...before, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) };
+  await ctx.tx.insert(discordState).values(after).onConflictDoUpdate({ target: discordState.orgId, set: after });
+  await ctx.audit({ action: 'discord.sharing_updated', module: 'discord', targetType: 'discord_app', targetLabel: 'Discord sharing', before, after });
+  return after;
+}
+
+/* --------------------------------------------------------- corrections -- */
+
+const FIELD_VALUES = CORRECTABLE_FIELDS.map((f) => f.value) as [string, ...string[]];
+export const CorrectionInput = z.object({
+  ref: z.string().regex(/^(isrc:[A-Z]{2}[A-Z0-9]{3}\d{7}|upc:\d{12,14})$/),
+  subject: z.string().trim().min(1).max(300),
+  field: z.enum(FIELD_VALUES),
+  currentValue: z.string().max(1000).nullable().optional(),
+  proposedValue: z.string().trim().min(1).max(500),
+  note: z.string().trim().max(500).nullable().optional(),
+});
+
+/** A member suggests a correction; people who can edit the catalogue are told it is waiting. */
+export async function createCorrection(ctx: ServiceContext, input: z.input<typeof CorrectionInput>) {
+  const userId = assertPerson(ctx);
+  ctx.assert(USE_PERMISSION);
+  const data = CorrectionInput.parse(input);
+  const [row] = await ctx.tx.insert(discordCorrections).values({ ...data, currentValue: data.currentValue ?? null, note: data.note || null, submittedBy: userId }).returning();
+  const field = CORRECTABLE_FIELDS.find((f) => f.value === data.field)?.name ?? data.field;
+  await notify(ctx, {
+    permission: 'catalogue:write',
+    kind: 'system',
+    title: `Correction suggested: ${field} of "${data.subject}"`,
+    body: `${ctx.actor.name} suggests "${data.proposedValue}"${data.currentValue ? ` instead of "${data.currentValue}"` : ''}.`,
+    href: '/settings/discord',
+    entityType: 'discord_correction',
+    entityId: row.id,
+  });
+  await ctx.audit({ action: 'discord.correction_suggested', module: 'discord', targetType: 'discord_correction', targetId: row.id, targetLabel: data.subject, after: { field: data.field, proposedValue: data.proposedValue } });
+  return row;
+}
+
+export async function listCorrections(ctx: ServiceContext, status: 'pending' | 'reviewed' = 'pending') {
+  ctx.assert(USE_PERMISSION);
+  const submitter = sql<string | null>`(select name from users where users.id = ${discordCorrections.submittedBy})`;
+  const reviewer = sql<string | null>`(select name from users where users.id = ${discordCorrections.reviewedBy})`;
+  return ctx.tx
+    .select({ row: discordCorrections, submittedByName: submitter, reviewedByName: reviewer })
+    .from(discordCorrections)
+    .where(status === 'pending' ? eq(discordCorrections.status, 'pending') : inArray(discordCorrections.status, ['approved', 'rejected']))
+    .orderBy(desc(status === 'pending' ? discordCorrections.createdAt : discordCorrections.reviewedAt))
+    .limit(50);
+}
+
+export const ReviewInput = z.object({ decision: z.enum(['approved', 'rejected']), note: z.string().trim().max(500).nullable().optional() });
+
+export async function reviewCorrection(ctx: ServiceContext, id: string, input: z.infer<typeof ReviewInput>) {
+  ctx.assert('catalogue:write');
+  const userId = assertPerson(ctx);
+  const [row] = await ctx.tx
+    .update(discordCorrections)
+    .set({ status: input.decision, reviewedBy: userId, reviewedAt: new Date(), reviewNote: input.note || null })
+    .where(and(eq(discordCorrections.id, id), eq(discordCorrections.status, 'pending')))
+    .returning();
+  if (!row) throw new NotFoundError('Pending correction');
+  // An approved value replaces an earlier approved one for the same field.
+  if (input.decision === 'approved') {
+    await ctx.tx
+      .update(discordCorrections)
+      .set({ status: 'superseded' })
+      .where(and(eq(discordCorrections.ref, row.ref), eq(discordCorrections.field, row.field), eq(discordCorrections.status, 'approved'), sql`${discordCorrections.id} <> ${row.id}`));
+  }
+  await ctx.audit({ action: `discord.correction_${input.decision}`, module: 'discord', targetType: 'discord_correction', targetId: id, targetLabel: row.subject, after: { field: row.field, proposedValue: row.proposedValue, note: input.note ?? null } });
+  return row;
+}
+
+/** Approved corrections for a song or release, as cards show them. */
+export async function approvedCorrections(ctx: ServiceContext, ref: string) {
+  const rows = await ctx.tx
+    .select({ field: discordCorrections.field, value: discordCorrections.proposedValue, reviewer: sql<string | null>`(select name from users where users.id = ${discordCorrections.reviewedBy})` })
+    .from(discordCorrections)
+    .where(and(eq(discordCorrections.ref, ref), eq(discordCorrections.status, 'approved')))
+    .orderBy(desc(discordCorrections.reviewedAt));
+  const seen = new Set<string>();
+  return rows.filter((r) => (seen.has(r.field) ? false : (seen.add(r.field), true)));
+}
+
+/* ------------------------------------------------------------ readings -- */
+
+/** Keep the platform's public count from a lookup; at most one reading per song and platform per hour. */
+export async function recordReading(ctx: ServiceContext, r: { isrc: string; platform: string; source: string; count: number }) {
+  const [recent] = await ctx.tx
+    .select({ id: discordPlayReadings.id })
+    .from(discordPlayReadings)
+    .where(and(eq(discordPlayReadings.isrc, r.isrc), eq(discordPlayReadings.platform, r.platform), gte(discordPlayReadings.capturedAt, new Date(Date.now() - 3600_000))))
+    .limit(1);
+  if (recent) return;
+  await ctx.tx.insert(discordPlayReadings).values(r);
+}
+
+export async function readingsFor(ctx: ServiceContext, isrc: string, platform = 'spotify') {
+  return ctx.tx
+    .select({ count: discordPlayReadings.count, capturedAt: discordPlayReadings.capturedAt, source: discordPlayReadings.source })
+    .from(discordPlayReadings)
+    .where(and(eq(discordPlayReadings.isrc, isrc), eq(discordPlayReadings.platform, platform), gte(discordPlayReadings.capturedAt, new Date(Date.now() - 365 * 86400_000))))
+    .orderBy(discordPlayReadings.capturedAt)
+    .limit(500);
+}
+
+/* ------------------------------------------------------------- metrics -- */
+
+export type LookupLog = { userId: string | null; command: string; inputKind: string; outcome: string; ref: string | null; cached: boolean; durationMs: number; coverage?: Record<string, string> | null };
+
+export async function recordLookup(ctx: ServiceContext, log: LookupLog) {
+  await ctx.tx.insert(discordLookups).values({ ...log, durationMs: Math.max(0, Math.round(log.durationMs)), coverage: log.coverage ?? null });
+}
+
+/** Launch metrics for Settings → Discord: the last `days` of commands. */
+export async function lookupStats(ctx: ServiceContext, days = 7) {
+  ctx.assert('settings:read');
+  const since = new Date(Date.now() - days * 86400_000);
+  const [row] = await ctx.tx
+    .select({
+      total: sql<number>`count(*)::int`,
+      cards: sql<number>`count(*) filter (where ${discordLookups.outcome} = 'card')::int`,
+      pickers: sql<number>`count(*) filter (where ${discordLookups.outcome} = 'picker')::int`,
+      notFound: sql<number>`count(*) filter (where ${discordLookups.outcome} = 'not_found')::int`,
+      errors: sql<number>`count(*) filter (where ${discordLookups.outcome} = 'error')::int`,
+      cached: sql<number>`count(*) filter (where ${discordLookups.cached})::int`,
+      codes: sql<number>`count(*) filter (where ${discordLookups.inputKind} in ('isrc', 'upc'))::int`,
+      codesFound: sql<number>`count(*) filter (where ${discordLookups.inputKind} in ('isrc', 'upc') and ${discordLookups.outcome} = 'card')::int`,
+      p50: sql<number | null>`percentile_cont(0.5) within group (order by ${discordLookups.durationMs})`,
+      p95: sql<number | null>`percentile_cont(0.95) within group (order by ${discordLookups.durationMs})`,
+    })
+    .from(discordLookups)
+    .where(gte(discordLookups.createdAt, since));
+  const coverage = (await ctx.tx.execute(
+    sql`select kv.key as field, kv.value as status, count(*)::int as n from discord_lookups, jsonb_each_text(discord_lookups.coverage) as kv where discord_lookups.created_at >= ${since.toISOString()}::timestamptz and discord_lookups.outcome = 'card' group by 1, 2`,
+  )) as unknown as Array<{ field: string; status: string; n: number }>;
+  const [corrections] = await ctx.tx
+    .select({ pending: sql<number>`count(*) filter (where ${discordCorrections.status} = 'pending')::int`, recent: sql<number>`count(*) filter (where ${discordCorrections.createdAt} >= ${since.toISOString()}::timestamptz)::int` })
+    .from(discordCorrections);
+  return { days, ...row, p50: row.p50 == null ? null : Math.round(row.p50), p95: row.p95 == null ? null : Math.round(row.p95), coverage, corrections };
+}
+
+/** Daily housekeeping across labels (system pool): old lookup logs and spent link codes. */
+export async function purgeOld() {
+  const db = systemDb();
+  await db.delete(discordLookups).where(lt(discordLookups.createdAt, new Date(Date.now() - 180 * 86400_000)));
+  await db.delete(discordLinkCodes).where(or(lt(discordLinkCodes.expiresAt, new Date(Date.now() - 86400_000)), lt(discordLinkCodes.usedAt, new Date(Date.now() - 86400_000))));
 }

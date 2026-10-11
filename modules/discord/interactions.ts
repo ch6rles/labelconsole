@@ -10,10 +10,11 @@ import { enqueue } from '@labelconsole/core/queue';
 import { tryAcquire } from '@labelconsole/core/ratelimit';
 import { normalizeIsrc, normalizeUpc, parseInput } from '@labelconsole/catalogue/service';
 import { MESSAGE_COMMAND } from './protocol/commands';
-import { InteractionType, MessageFlags, ResponseType, type DiscordUser, type Interaction, type InteractionResponse, type MessagePayload } from './protocol/types';
+import { InteractionType, MessageFlags, ResponseType, type DiscordUser, type Interaction, type InteractionResponse, type MessagePayload, type ModalSubmitComponent } from './protocol/types';
 import { verifyDiscordSignature } from './protocol/verify';
-import { escapeMd, parseCustomId } from './render';
-import { appForApplicationId, findLink, redeemLinkCode, unlinkDiscordUser, USE_PERMISSION, type DiscordApp } from './service';
+import { correctionModal, escapeMd, parseCustomId } from './render';
+import type { DiscordLink } from './schema';
+import { appForApplicationId, findLink, redeemLinkCode, sharingFor, unlinkDiscordUser, USE_PERMISSION, type DiscordApp } from './service';
 import type { DiscordAction } from './types';
 
 /**
@@ -70,6 +71,8 @@ export async function handleInteraction(req: Request): Promise<Response> {
 const consoleUrl = () => `${env().APP_URL.replace(/\/$/, '')}/settings/discord`;
 const displayName = (u: DiscordUser) => u.global_name || u.username;
 
+const boolOption = (i: Interaction, name: string) => i.data?.options?.find((o) => o.name === name)?.value === true;
+
 /** A string option on one line: Discord lets string options span several lines. */
 function option(i: Interaction, name: string) {
   const v = i.data?.options?.find((o) => o.name === name)?.value;
@@ -85,50 +88,106 @@ async function dispatch(app: DiscordApp, i: Interaction): Promise<InteractionRes
   if (i.type === InteractionType.AUTOCOMPLETE) return { type: ResponseType.AUTOCOMPLETE_RESULT, data: { choices: [] } };
 
   if (i.type === InteractionType.APPLICATION_COMMAND) {
-    const name = i.data?.name;
+    const name = i.data?.name ?? '';
     if (name === 'link') return linkCommand(app, user, option(i, 'code'));
     if (name === 'unlink') {
       const removed = await unlinkDiscordUser(app.orgId, user.id);
       return ephemeral(removed ? 'Your Discord account is no longer linked to Label Console.' : "Your Discord account wasn't linked.");
     }
+    // Posting for everyone is a choice per command, and only when the label allows it.
+    const shared = boolOption(i, 'share') ? (await sharingFor(app.orgId)).allowSharing : false;
+    const query = option(i, 'query').slice(0, 300);
+    const needQuery = (what: string) => ephemeral(`Add ${what} to look up.`);
     let action: DiscordAction;
-    if (name === 'song') {
-      const input = option(i, 'query');
-      if (!input) return ephemeral('Add a link, ISRC, UPC or "Artist - Title" to look up.');
-      action = { kind: 'lookup', input: input.slice(0, 300), artist: option(i, 'artist').slice(0, 100) || null };
-    } else if (name === MESSAGE_COMMAND) {
-      const input = songInMessage(i);
-      if (!input) return ephemeral('That message has no song link, ISRC or UPC in it.');
-      action = { kind: 'lookup', input };
-    } else {
-      return ephemeral('Label Console does not know this command. An admin can refresh the commands under Settings → Discord.');
+    switch (name) {
+      case 'song':
+      case 'release':
+        if (!query) return needQuery(name === 'song' ? 'a link, ISRC or "Artist - Title"' : 'an album link, a UPC or "Artist - Title"');
+        action = { kind: 'lookup', input: query, artist: option(i, 'artist').slice(0, 100) || null, entity: name === 'song' ? 'track' : 'release', shared };
+        break;
+      case 'artist':
+      case 'label':
+        if (!query) return needQuery(`the ${name} name`);
+        action = { kind: name, input: query.slice(0, 100), shared };
+        break;
+      case 'licensor':
+        if (!query) return needQuery('the distributor or licensor name');
+        action = { kind: 'licensor', input: query.slice(0, 100) };
+        break;
+      case 'compare':
+        action = { kind: 'compare', first: option(i, 'first').slice(0, 300), second: option(i, 'second').slice(0, 300), shared };
+        break;
+      case 'correct':
+        action = { kind: 'correct', input: option(i, 'target').slice(0, 300), field: option(i, 'field'), value: option(i, 'value').slice(0, 500), note: option(i, 'note').slice(0, 500) || null };
+        break;
+      case MESSAGE_COMMAND: {
+        const input = songInMessage(i);
+        if (!input) return ephemeral('That message has no song link, ISRC or UPC in it.');
+        action = { kind: 'lookup', input, entity: 'track' };
+        break;
+      }
+      default:
+        return ephemeral('Label Console does not know this command. An admin can refresh the commands under Settings → Discord.');
     }
-    return defer(app, i, user, action, { type: ResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, data: { flags: MessageFlags.EPHEMERAL } });
+    return defer(app, i, user, action, name, { type: ResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, data: shared ? {} : { flags: MessageFlags.EPHEMERAL } });
   }
 
   if (i.type === InteractionType.MESSAGE_COMPONENT) {
     const action = parseCustomId(i.data?.custom_id ?? '', i.data?.values);
-    if (!action) return ephemeral('That button no longer works. Run /song again.');
-    // A pick replaces the list at once (no double picks); a view switch keeps the card until the new one is ready.
+    if (!action) return ephemeral('That button no longer works. Run the command again.');
+    // Report / Correct opens a form straight away (a form cannot be deferred).
+    if (action.kind === 'view' && action.view === 'correct') {
+      const who = await authorize(app, user);
+      return 'reply' in who ? who.reply : { type: ResponseType.MODAL, data: correctionModal(action.ref, 'Report / Correct') };
+    }
+    // A pick replaces the list at once (no double picks); every other button opens its own private reply.
     const ack: InteractionResponse =
-      action.kind === 'pick'
-        ? { type: ResponseType.UPDATE_MESSAGE, data: { content: 'Looking it up…', embeds: [], components: [], allowed_mentions: { parse: [] } } }
-        : { type: ResponseType.DEFERRED_UPDATE_MESSAGE };
-    return defer(app, i, user, action, ack);
+      action.kind === 'view'
+        ? { type: ResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, data: { flags: MessageFlags.EPHEMERAL } }
+        : { type: ResponseType.UPDATE_MESSAGE, data: { content: 'Looking it up…', embeds: [], components: [], allowed_mentions: { parse: [] } } };
+    return defer(app, i, user, action, action.kind === 'view' ? `button:${action.view}` : action.kind, ack);
+  }
+
+  if (i.type === InteractionType.MODAL_SUBMIT) {
+    const m = /^lc:fix:((?:isrc:[A-Z]{2}[A-Z0-9]{3}\d{7})|(?:upc:\d{12,14}))$/.exec(i.data?.custom_id ?? '');
+    if (!m) return ephemeral('That form has expired. Open it again from the card.');
+    const values = modalValues(i.data?.components ?? []);
+    const action: DiscordAction = { kind: 'correct', input: m[1], field: values.field ?? '', value: (values.value ?? '').slice(0, 500), note: (values.note ?? '').slice(0, 500) || null };
+    return defer(app, i, user, action, 'correct', { type: ResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, data: { flags: MessageFlags.EPHEMERAL } });
   }
 
   return ephemeral('Label Console cannot handle that kind of interaction.');
 }
 
-/** Check the member, rate-limit, hand the work to the worker, and acknowledge Discord. */
-async function defer(app: DiscordApp, i: Interaction, user: DiscordUser, action: DiscordAction, ack: InteractionResponse): Promise<InteractionResponse> {
+/** A submitted form's values by custom_id, in the current Label shape or the older action-row shape. */
+export function modalValues(components: ModalSubmitComponent[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (list: ModalSubmitComponent[]) => {
+    for (const c of list) {
+      if (c.custom_id) out[c.custom_id] = c.value ?? c.values?.[0] ?? '';
+      if (c.component) walk([c.component]);
+      if (c.components) walk(c.components);
+    }
+  };
+  walk(components);
+  return out;
+}
+
+/** The linked member behind a Discord user, checked live; or the reply that says why not. */
+async function authorize(app: DiscordApp, user: DiscordUser): Promise<{ link: DiscordLink } | { reply: InteractionResponse }> {
   const link = await findLink(app.orgId, user.id);
-  if (!link) {
-    return ephemeral(`Link your Discord account first: in Label Console open Settings → Discord, get a code, then run \`/link\` with it.\n${consoleUrl()}`);
-  }
+  if (!link) return { reply: ephemeral(`Link your Discord account first: in Label Console open Settings → Discord, get a code, then run \`/link\` with it.\n${consoleUrl()}`) };
   const access = await memberAccess(link.userId, app.orgId);
-  if (!access) return ephemeral('The Label Console account linked to your Discord is no longer a member of this label.');
-  if (!access.permissions.has(USE_PERMISSION)) return ephemeral("Your role in Label Console doesn't include the catalogue, so lookups aren't available to you.");
+  if (!access) return { reply: ephemeral('The Label Console account linked to your Discord is no longer a member of this label.') };
+  if (!access.permissions.has(USE_PERMISSION)) return { reply: ephemeral("Your role in Label Console doesn't include the catalogue, so lookups aren't available to you.") };
+  return { link };
+}
+
+/** Check the member, rate-limit, hand the work to the worker, and acknowledge Discord. */
+async function defer(app: DiscordApp, i: Interaction, user: DiscordUser, action: DiscordAction, command: string, ack: InteractionResponse): Promise<InteractionResponse> {
+  const who = await authorize(app, user);
+  if ('reply' in who) return who.reply;
+  const { link } = who;
 
   const deadline = Date.now() + REDIS_BUDGET_MS;
   const left = () => Math.max(50, deadline - Date.now());
@@ -141,7 +200,7 @@ async function defer(app: DiscordApp, i: Interaction, user: DiscordUser, action:
       enqueue(
         'discord.interaction',
         app.orgId,
-        { interaction: { id: i.id, applicationId: app.applicationId, token: i.token }, userId: link.userId, discordUserId: user.id, action },
+        { interaction: { id: i.id, applicationId: app.applicationId, token: i.token }, userId: link.userId, discordUserId: user.id, command, action },
         // The token expires after 15 minutes, so there is no point in retrying later; keep it out of Redis soon after.
         { jobId: `discord-${i.id}`, attempts: 1, removeOnComplete: { age: 900 }, removeOnFail: { age: 3600 } },
       ),

@@ -29,7 +29,7 @@ async function token(secret: SpotifySecret) {
   return json.access_token;
 }
 
-type SpTrack = { id: string; name: string; duration_ms: number; explicit: boolean; external_ids?: { isrc?: string }; artists: Array<{ name: string }>; album: { id: string }; external_urls?: { spotify?: string }; track_number?: number };
+type SpTrack = { id: string; name: string; duration_ms: number; explicit: boolean; available_markets?: string[]; external_ids?: { isrc?: string }; artists: Array<{ name: string }>; album: { id: string }; external_urls?: { spotify?: string }; track_number?: number };
 type SpAlbum = { id: string; name: string; album_type: string; images?: Array<{ url: string }>; release_date: string; label?: string; external_ids?: { upc?: string; ean?: string }; copyrights?: Array<{ text: string; type: 'C' | 'P' }>; artists: Array<{ name: string }>; external_urls?: { spotify?: string }; tracks?: { items: Array<{ id: string; name: string; duration_ms: number; explicit: boolean; track_number: number; artists: Array<{ name: string }> }> } };
 
 async function api<T>(secret: SpotifySecret, path: string) {
@@ -56,6 +56,7 @@ export async function spotifyLookup(secret: SpotifySecret, q: Query & { spotifyT
     artists: (track?.artists ?? album?.artists ?? []).map((a) => a.name),
     durationMs: track?.duration_ms ?? null,
     explicit: track?.explicit ?? null,
+    availableCountries: track?.available_markets?.length ? track.available_markets : undefined,
     upc: album?.external_ids?.upc ? normalizeUpc(album.external_ids.upc) : album?.external_ids?.ean ? normalizeUpc(album.external_ids.ean) : null,
     releaseTitle: album?.name ?? null,
     releaseType: normType(album?.album_type),

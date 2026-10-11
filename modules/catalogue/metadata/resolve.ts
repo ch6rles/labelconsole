@@ -5,6 +5,7 @@ import { inferDistributor, type Alias, type Hint } from './distributor';
 import { normalizeIsrc, normalizeUpc, type ParsedInput } from './input';
 import { appleLookup, itunesLookup, type AppleSecret } from './sources/apple';
 import { deezerLookup, deezerSearch } from './sources/deezer';
+import { discogsLookup, type DiscogsSecret } from './sources/discogs';
 import { licensedMetadataProvider, type LicensedSecret } from './sources/licensed';
 import { musicbrainzLookup, musicbrainzSearch } from './sources/musicbrainz';
 import { spotifyLookup, spotifyOEmbedTitle, type SpotifySecret } from './sources/spotify';
@@ -13,11 +14,11 @@ import type { Query, SourceResult } from './sources/types';
 import { splitVideoTitle, youtubeTitle } from './sources/youtube';
 import type { AudioTags } from './tags';
 
-export type ResolveCredentials = { spotify?: SpotifySecret | null; apple?: AppleSecret | null; youtubeApiKey?: string | null; licensed?: LicensedSecret | null; spotscraper?: SpotScraperClient | null };
+export type ResolveCredentials = { spotify?: SpotifySecret | null; apple?: AppleSecret | null; youtubeApiKey?: string | null; licensed?: LicensedSecret | null; spotscraper?: SpotScraperClient | null; discogs?: DiscogsSecret | null };
 export type ResolveContext = { creds: ResolveCredentials; aliases: Alias[]; hints: Hint[]; tags?: AudioTags | null };
 
 /** When sources disagree, the first in this order wins and the conflict is reported. */
-const PRIORITY = ['spotify', 'spotscraper', 'apple', 'deezer', 'musicbrainz', 'licensed', 'itunes', 'tags', 'search'];
+const PRIORITY = ['spotify', 'spotscraper', 'apple', 'deezer', 'musicbrainz', 'discogs', 'licensed', 'itunes', 'tags', 'search'];
 const rank = (s: string) => {
   const i = PRIORITY.indexOf(s);
   return i < 0 ? PRIORITY.length : i;
@@ -61,6 +62,11 @@ export function mergeResults(input: Record<string, string>, results: SourceResul
   if (artistSource) fieldSources.artists = [artistSource.source];
   const artwork = ordered.find((r) => r.artworkUrl);
   if (artwork) fieldSources.artworkUrl = [artwork.source];
+  // Spotify's markets are the most complete availability list; Deezer's is the free fallback.
+  const avail = ordered.filter((r) => r.availableCountries?.length).sort((a, b) => Number(b.source === 'spotify') - Number(a.source === 'spotify'))[0];
+  const played = ordered.find((r) => r.playCount != null);
+  const catalogNumber = ordered.find((r) => r.catalogNumber)?.catalogNumber ?? null;
+  const companies = ordered.flatMap((r) => (r.companies ?? []).map((c) => ({ source: r.source, ...c })));
 
   // Tracklist: take the longest list and fill ISRCs and Spotify IDs from any source by position or title.
   const lists = ordered.filter((r) => r.tracks?.length).sort((a, b) => b.tracks!.length - a.tracks!.length);
@@ -84,7 +90,7 @@ export function mergeResults(input: Record<string, string>, results: SourceResul
   const pLine = choose('pLine');
   const cLine = choose('cLine');
   const distributor = inferDistributor(
-    { labelName, pLine, cLine, upc, licensedDistributor: ordered.find((r) => r.distributor)?.distributor ?? null, mbLabels: ordered.flatMap((r) => r.labels ?? []) },
+    { labelName, pLine, cLine, upc, licensedDistributor: ordered.find((r) => r.distributor)?.distributor ?? null, mbLabels: ordered.flatMap((r) => r.labels ?? []), reportedDistributors: companies.filter((c) => /distributed by/i.test(c.role)).map((c) => c.name) },
     ctx.aliases,
     ctx.hints,
   );
@@ -110,6 +116,11 @@ export function mergeResults(input: Record<string, string>, results: SourceResul
     sources,
     artworkUrl: artwork?.artworkUrl ?? null,
     fieldSources,
+    previewUrl: ordered.find((r) => r.previewUrl)?.previewUrl ?? null,
+    availability: avail ? { source: avail.source, countries: [...new Set(avail.availableCountries!.map((c) => c.toUpperCase()))].sort() } : null,
+    plays: played ? { platform: 'spotify', source: played.source, count: played.playCount!, at: new Date().toISOString() } : null,
+    catalogNumber,
+    companies,
   };
 }
 
@@ -224,6 +235,7 @@ export async function resolveMetadata(parsed: ParsedInput, raw: Record<string, s
     done.has('apple') ? null : run('apple', sources, () => appleLookup(creds.apple!, { isrc: q.isrc, upc: q.upc }), creds.apple ? undefined : 'Not connected (Settings → Integrations)'),
     run('itunes', sources, () => itunesLookup({ upc: q.upc, itunesId: q.itunesId ?? undefined }), q.upc || q.itunesId ? undefined : 'Needs a UPC'),
     run('licensed', sources, () => licensed!.lookup(creds.licensed!, { isrc: q.isrc, upc: q.upc }), licensed ? undefined : 'No licensed provider configured'),
+    run('discogs', sources, () => discogsLookup(creds.discogs!, { upc: q.upc }), !creds.discogs ? 'Not connected (Settings → Integrations)' : q.upc ? undefined : 'Needs a UPC'),
   ]);
   for (const r of second) if (r) results.push(r);
 

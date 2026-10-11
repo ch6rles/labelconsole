@@ -16,9 +16,13 @@
     "@labelconsole/core": "workspace:*",
     "@labelconsole/ui": "workspace:*",
     "@labelconsole/catalogue": "workspace:*",
+    "@labelconsole/people": "workspace:*",
+    "@labelconsole/documents": "workspace:*",
+    "@labelconsole/inbox": "workspace:*",
     "@labelconsole/streams": "workspace:*",
     "drizzle-orm": "^0.45.3",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "sharp": "^0.35.4"
   },
   "peerDependencies": {
     "react": "^19.0.0",

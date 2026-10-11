@@ -7,7 +7,7 @@ import { normalizeIsrc } from './input';
  * key); MusicBrainz only when Deezer finds nothing (it allows 1 request/s).
  */
 export type SearchCandidate = {
-  /** `dz:<deezer track id>` or `isrc:<ISRC>`: what to resolve when this one is picked. */
+  /** `dz:<deezer track id>`, `isrc:<ISRC>` or (releases) `dza:<deezer album id>`: what to resolve when this one is picked. */
   key: string;
   source: 'deezer' | 'musicbrainz';
   title: string;
@@ -18,9 +18,14 @@ export type SearchCandidate = {
   explicit: boolean | null;
   /** Title and artist match what was asked for exactly (versions like "(Remix)" do not match a plain title). */
   exact: boolean;
+  isrc?: string | null;
+  /** Releases: single, EP, album or compilation, and the number of tracks. */
+  releaseType?: string | null;
+  trackCount?: number | null;
 };
 
-type DzHit = { id: number; title: string; duration?: number; explicit_lyrics?: boolean; artist?: { name: string }; album?: { title?: string } };
+type DzHit = { id: number; title: string; duration?: number; explicit_lyrics?: boolean; isrc?: string; artist?: { name: string }; album?: { title?: string } };
+type DzAlbumHit = { id: number; title: string; record_type?: string; nb_tracks?: number; explicit_lyrics?: boolean; artist?: { name: string } };
 type MbHit = { id: string; title: string; score?: number; length?: number; isrcs?: string[]; 'artist-credit'?: Array<{ name: string }>; releases?: Array<{ title?: string; date?: string; status?: string }> };
 
 const DEEZER_RL = { key: 'deezer', capacity: 50, refillPerSec: 10 };
@@ -45,10 +50,13 @@ function isExact(c: { title: string; artists: string[] }, title: string, artist:
   return Boolean(artist) && t === normText(artist) && artistMatches(title);
 }
 
-async function deezer(q: string): Promise<DzHit[]> {
-  const res = await fetchJson<{ data?: DzHit[]; error?: unknown }>(`https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=10`, { provider: 'deezer', rateLimit: DEEZER_RL });
+async function deezer<T = DzHit>(q: string, kind: 'track' | 'album' = 'track'): Promise<T[]> {
+  const path = kind === 'album' ? 'search/album' : 'search';
+  const res = await fetchJson<{ data?: T[]; error?: unknown }>(`https://api.deezer.com/${path}?q=${encodeURIComponent(q)}&limit=10`, { provider: 'deezer', rateLimit: DEEZER_RL });
   return res?.data ?? [];
 }
+
+const deezerQuery = (title: string, artist: string | null, field: 'track' | 'album') => (artist ? `artist:"${artist.replace(/"/g, '')}" ${field}:"${title.replace(/"/g, '')}"` : title);
 
 async function musicbrainz(title: string, artist: string | null): Promise<MbHit[]> {
   const query = `recording:"${title.replace(/"/g, '')}"${artist ? ` AND artist:"${artist.replace(/"/g, '')}"` : ''}`;
@@ -62,7 +70,7 @@ async function musicbrainz(title: string, artist: string | null): Promise<MbHit[
 }
 
 export async function searchCandidates(title: string, artist: string | null, limit = 5): Promise<SearchCandidate[]> {
-  let hits = await deezer(artist ? `artist:"${artist.replace(/"/g, '')}" track:"${title.replace(/"/g, '')}"` : title);
+  let hits = await deezer(deezerQuery(title, artist, 'track'));
   // The strict query finds nothing when the parts are swapped or slightly off.
   if (!hits.length && artist) hits = await deezer(`${artist} ${title}`);
   let found: SearchCandidate[] = hits.map((h) => ({
@@ -75,6 +83,7 @@ export async function searchCandidates(title: string, artist: string | null, lim
     year: null,
     explicit: h.explicit_lyrics ?? null,
     exact: false,
+    isrc: h.isrc ? normalizeIsrc(h.isrc) : null,
   }));
   if (!found.length) {
     found = (await musicbrainz(title, artist))
@@ -102,13 +111,42 @@ export async function searchCandidates(title: string, artist: string | null, lim
   const unique: SearchCandidate[] = [];
   for (const c of found) {
     const id = `${normText(c.title)}|${normText(c.artists[0])}|${c.durationMs ? Math.round(c.durationMs / 2000) : ''}`;
-    if (seen.has(id) || seen.has(c.key)) continue;
+    if (seen.has(id) || seen.has(c.key) || (c.isrc && seen.has(c.isrc))) continue;
     seen.add(id);
     seen.add(c.key);
+    if (c.isrc) seen.add(c.isrc);
     unique.push({ ...c, exact: isExact(c, title, artist) });
   }
   // Exact matches first; otherwise keep the provider's relevance order.
   return [...unique.filter((c) => c.exact), ...unique.filter((c) => !c.exact)].slice(0, limit);
+}
+
+/** Releases (albums, EPs, singles) matching a title, for /release. Same matching rules as tracks. */
+export async function searchReleaseCandidates(title: string, artist: string | null, limit = 5): Promise<SearchCandidate[]> {
+  let hits = await deezer<DzAlbumHit>(deezerQuery(title, artist, 'album'), 'album');
+  if (!hits.length && artist) hits = await deezer<DzAlbumHit>(`${artist} ${title}`, 'album');
+  const seen = new Set<string>();
+  const out: SearchCandidate[] = [];
+  for (const h of hits) {
+    const c: SearchCandidate = {
+      key: `dza:${h.id}`,
+      source: 'deezer',
+      title: h.title,
+      artists: h.artist?.name ? [h.artist.name] : [],
+      album: null,
+      durationMs: null,
+      year: null,
+      explicit: h.explicit_lyrics ?? null,
+      exact: false,
+      releaseType: h.record_type ?? null,
+      trackCount: h.nb_tracks ?? null,
+    };
+    const id = `${normText(c.title)}|${normText(c.artists[0])}|${c.releaseType}|${c.trackCount}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ ...c, exact: isExact(c, title, artist) });
+  }
+  return [...out.filter((c) => c.exact), ...out.filter((c) => !c.exact)].slice(0, limit);
 }
 
 /**

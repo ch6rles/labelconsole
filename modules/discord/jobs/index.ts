@@ -3,10 +3,15 @@ import { defineJob } from '@labelconsole/core/queue';
 import { readSecret } from '@labelconsole/core/vault';
 import { runInteraction } from '../lookup';
 import { registerCommands } from '../protocol/rest';
-import { recordCommandRegistration } from '../service';
+import { purgeOld, recordCommandRegistration } from '../service';
 
 export const jobs = [
   defineJob('discord.interaction', (job, data) => runInteraction(job, data)),
+
+  /** Daily, across labels: lookup logs older than six months and spent link codes. */
+  defineJob('discord.purge', async () => {
+    await purgeOld();
+  }),
 
   /** Overwrite the app's global commands. The bot token is only ever decrypted here. */
   defineJob('discord.register-commands', async (job) => {

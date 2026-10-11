@@ -519,33 +519,55 @@ The owner asked whether YouTube Music streams can be tracked without a YouTube D
 
 ## Discord app
 
-**What it is:** a private Discord app for looking up songs, built from the "Discord Music Metadata Lookup App" plan. Full guide: [discord.md](discord.md).
-- It covers the plan's Phase 1 (app, `/song`, link parsing, card, buttons, error states) and Phase 2 (ISRC/UPC search, choosing between candidates, cache, evidence).
-- It reuses the catalogue's existing lookup instead of building a second one.
+**What it is:** a private Discord app built from the "Discord Music Metadata Lookup App" plan. All its phases are in place; its cards look like DistroFind's. Full guide: [discord.md](discord.md).
 
-**Who can use it** (the owner's decision): only members of the label.
-- Each member links their Discord account with a one-time code from Settings → Discord.
-- Every request is checked against the member's current role, artist access and membership.
-- Replies are private to the person who asked.
+**Phases 1–2: lookup.**
+- `/song` and Look Up Song, reusing the catalogue's lookup.
+- A "Which one?" list instead of guessing, and an hour's cache per ISRC/UPC.
+- Every field labelled verified, source-reported, conflicting, inferred or unknown.
 
-**Choosing between matches** (the owner asked for "Which one?"):
-- A text search lists up to five candidates from Deezer, falling back to MusicBrainz, and lets the person pick.
-- It picks by itself only on a single exact title match: with the artist given, or when it is the only result.
-- The console's own Track Import is unchanged.
+**Phase 3: more sources.**
+- Discogs (by UPC, with a personal token): labels, catalogue numbers, company credits ("Distributed By" counts as evidence, not proof), and credits.
+- Deezer previews and availability, Spotify markets, and SpotScraper play counts.
+- Credits for any song: Spotify through SpotScraper, then MusicBrainz relationships, then Discogs.
+- A source that fails or is not connected is listed in Extended Info; the card still answers.
 
-**Catalogue changes:**
-- Lookups now carry cover art (Deezer, Spotify, Apple, iTunes) and record which sources gave each field.
-- `searchCandidates`, `resolveContext` and `recordSpotScraperRequests` are exported from the catalogue service for other modules.
+**Phase 4: label records.**
+- The label's own records verify the distributor: distributor statements that list the release's UPC/ISRC, or distributors entered or confirmed in the catalogue.
+- `/licensor` lists exactly those, plus the text patterns that only suggest a distributor.
+- Sharing settings decide what a public card may show (`share:true`). Splits, money, contracts and notes never reach Discord.
 
-**Setup:** a "Discord app" entry in Settings → Integrations (application ID, public key, bot token), with format checks on save.
-- Settings → Discord shows the endpoint URL, install links, command registration and linked members.
+**Phase 5: credits and labels.**
+- `/release`, `/artist` (Deezer, MusicBrainz, the roster) and `/label` (MusicBrainz, the catalogue).
+- Spotify-style credit groups, and other links.
+- `/compare`, and `/correct` plus the Report / Correct form, reviewed in Settings → Discord.
+
+**Phase 6: analytics.**
+- A performance chart image. Songs Label Console tracks show daily plays from Streams, with estimated days lighter and missing days left empty.
+- Any other song shows its Spotify count each time it is looked up (kept as readings, at most one an hour).
+
+**Phase 7: production.**
+- A lookup log with the launch metrics (success, "Which one?" rate, nothing found, errors, exact-identifier resolution, cache hits, p50/p95 time, field coverage).
+- The same in Settings → Discord and on `/api/metrics`.
+- A daily purge job, and a runbook in discord.md.
+
+**Who can use it:** only members of the label who linked their Discord account with a one-time code.
+- Every request uses the member's current role, artist scope and membership.
+- Replies are private unless shared.
+
+**Changes elsewhere:**
+- **Catalogue:** lookups also carry cover art, a preview, availability, the play count, the catalogue number, companies, and which sources gave each field. Discogs joins the sources. Candidate and album search, credits fetching, and release lists by label and by distributor are exported for other modules. Track Import is otherwise unchanged.
+- **Documents:** `statementDistributors` and `statementCodesFor` return distributor names and codes only, never money.
+- **Settings → Integrations:** "Discord app" and "Discogs" entries, with format checks on save.
+- **Dockerfile:** installs a font for the chart in the worker images; the worker depends on `sharp`.
 
 **Verified:**
-- 21 unit tests (`modules/discord/discord.test.ts`) and 9 integration tests (`modules/discord/discord.int.test.ts`).
-- 6 new catalogue tests (`modules/catalogue/metadata/search.test.ts`).
+- 179 unit and 130 integration tests pass.
+- The Discord ones cover every command, button and form end to end with signed requests.
+- The production build passes.
 - Not yet tried against a live Discord application. The first real install is the check.
 
-**Not built yet** (later phases of the plan): `/release`, `/label`, `/licensor`, `/artist`, `/compare`, `/correct`; Discogs; posting a card publicly to a channel.
+**Not built:** an Odesli (song.link) source: its public API now needs a key, so Other Links uses exact IDs plus search links.
 
 ## Next steps
 

@@ -254,6 +254,14 @@ export type ResolvedMetadata = {
   artworkUrl?: string | null;
   /** For each chosen field, the sources that reported that same value. Absent on older lookups. */
   fieldSources?: Partial<Record<string, string[]>>;
+  /** A short public preview (Deezer, 30 s). URLs are signed and expire within hours. */
+  previewUrl?: string | null;
+  /** Where the track can be played, according to one source. */
+  availability?: { source: string; countries: string[] } | null;
+  /** The platform's public play count at lookup time; never an estimate. */
+  plays?: { platform: string; source: string; count: number; at: string } | null;
+  catalogNumber?: string | null;
+  companies?: Array<{ source: string; role: string; name: string }>;
 };
 
 export const metadataLookups = pgTable(

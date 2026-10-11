@@ -4,6 +4,7 @@ import { recordUsage } from '@labelconsole/core/usage';
 import { readSecret } from '@labelconsole/core/vault';
 import type { ResolveContext, ResolveCredentials } from '../metadata/resolve';
 import type { AppleSecret } from '../metadata/sources/apple';
+import type { DiscogsSecret } from '../metadata/sources/discogs';
 import type { LicensedSecret } from '../metadata/sources/licensed';
 import type { SpotifySecret } from '../metadata/sources/spotify';
 import { distributorReference } from './imports';
@@ -14,13 +15,14 @@ import { distributorReference } from './imports';
  * the worker; the provider calls themselves belong outside any transaction.
  */
 export async function metadataCredentials(ctx: ServiceContext): Promise<ResolveCredentials> {
-  const [spotify, apple, youtube, licensed, spotscraper] = await Promise.all([readSecret(ctx, 'spotify'), readSecret(ctx, 'apple_music'), readSecret(ctx, 'youtube'), readSecret(ctx, 'licensed_streams'), spotScraperFor(ctx)]);
+  const [spotify, apple, youtube, licensed, spotscraper, discogs] = await Promise.all([readSecret(ctx, 'spotify'), readSecret(ctx, 'apple_music'), readSecret(ctx, 'youtube'), readSecret(ctx, 'licensed_streams'), spotScraperFor(ctx), readSecret(ctx, 'discogs')]);
   return {
     spotscraper,
     spotify: (spotify?.secret as SpotifySecret | undefined) ?? null,
     apple: (apple?.secret as AppleSecret | undefined) ?? null,
     youtubeApiKey: youtube?.secret.apiKey ?? null,
     licensed: (licensed?.secret as LicensedSecret | undefined) ?? null,
+    discogs: (discogs?.secret as DiscogsSecret | undefined) ?? null,
   };
 }
 
@@ -40,4 +42,6 @@ export async function recordSpotScraperRequests(ctx: ServiceContext, client: Spo
 
 export { normalizeIsrc, normalizeUpc, parseInput, type ParsedInput } from '../metadata/input';
 export { resolveMetadata, type ResolveContext } from '../metadata/resolve';
-export { searchCandidates, unambiguousCandidate, normText, type SearchCandidate } from '../metadata/search';
+export { searchCandidates, searchReleaseCandidates, unambiguousCandidate, normText, type SearchCandidate } from '../metadata/search';
+export { fetchCredits, type Credit } from '../metadata/credits';
+export { inferDistributor } from '../metadata/distributor';

@@ -66,6 +66,8 @@ CMD ["node", "apps/web/server.js"]
 
 FROM node:${NODE_VERSION}-bookworm-slim AS worker
 ENV NODE_ENV=production LC_PROCESS=worker LC_MIGRATIONS_DIR=/app/migrations WORKER_HEALTH_PORT=9091
+# A font for the text in the Discord performance chart (drawn by sharp).
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core fontconfig && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # Keep pnpm's layout (apps/worker/node_modules links into node_modules/.pnpm).
 COPY --from=worker-deps --chown=node:node /repo/node_modules ./node_modules
@@ -89,6 +91,8 @@ CMD ["node", "dist/index.js"]
 # the way a build argument can.
 FROM node:${NODE_VERSION}-bookworm-slim AS app
 ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 NEXT_TELEMETRY_DISABLED=1 LC_MIGRATIONS_DIR=/app/migrations WORKER_HEALTH_PORT=9091
+# A font for the text in the Discord performance chart (drawn by sharp in the worker).
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core fontconfig && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
 COPY --from=build --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
