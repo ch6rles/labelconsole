@@ -17,6 +17,9 @@ importers:
       '@labelconsole/core':
         specifier: workspace:*
         version: link:packages/core
+      '@labelconsole/discord':
+        specifier: workspace:*
+        version: link:modules/discord
       '@labelconsole/documents':
         specifier: workspace:*
         version: link:modules/documents
@@ -107,6 +110,9 @@ importers:
       '@labelconsole/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@labelconsole/discord':
+        specifier: workspace:*
+        version: link:../../modules/discord
       '@labelconsole/documents':
         specifier: workspace:*
         version: link:../../modules/documents
@@ -223,6 +229,9 @@ importers:
       '@labelconsole/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@labelconsole/discord':
+        specifier: workspace:*
+        version: link:../../modules/discord
       '@labelconsole/documents':
         specifier: workspace:*
         version: link:../../modules/documents
@@ -304,6 +313,33 @@ importers:
       papaparse:
         specifier: ^5.5.3
         version: 5.7.0
+      react:
+        specifier: ^19.0.0
+        version: 19.3.0
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
+  modules/discord:
+    dependencies:
+      '@labelconsole/catalogue':
+        specifier: workspace:*
+        version: link:../catalogue
+      '@labelconsole/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@labelconsole/streams':
+        specifier: workspace:*
+        version: link:../streams
+      '@labelconsole/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      drizzle-orm:
+        specifier: ^0.45.3
+        version: 0.45.3(postgres@3.4.9)
+      next:
+        specifier: ^16.0.0
+        version: 16.3.8(@playwright/test@1.63.0)(@types/node@22.20.4)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       react:
         specifier: ^19.0.0
         version: 19.3.0

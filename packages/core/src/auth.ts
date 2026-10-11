@@ -146,6 +146,21 @@ export async function memberPermissions(userId: string, orgId: string): Promise<
   return (await membershipFor(userId, orgId))?.permissions ?? null;
 }
 
+/**
+ * Everything needed to act as a member without a session (e.g. a Discord
+ * command from a linked account): checked live, so removal or a role change
+ * applies at once. Null unless the membership is active.
+ */
+export async function memberAccess(userId: string, orgId: string) {
+  const m = await membershipFor(userId, orgId);
+  if (!m) return null;
+  const [u] = await systemDb().select({ name: users.name }).from(users).where(eq(users.id, userId));
+  if (!u) return null;
+  return { user: { id: userId, name: u.name }, org: m.org, role: m.membership.role, permissions: m.permissions, artistScope: m.membership.artistScope };
+}
+
+export type MemberAccess = NonNullable<Awaited<ReturnType<typeof memberAccess>>>;
+
 export async function listUserOrgs(userId: string) {
   return systemDb()
     .select({ id: organizations.id, name: organizations.name, slug: organizations.slug, role: memberships.role, settings: organizations.settings })

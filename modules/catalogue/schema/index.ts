@@ -250,6 +250,10 @@ export type ResolvedMetadata = {
   distributor: { name: string | null; confidence: number; evidence: DistributorEvidence[] };
   conflicts: Array<{ field: string; values: Array<{ source: string; value: string }> }>;
   sources: Array<{ source: string; ok: boolean; error?: string; skipped?: string }>;
+  /** Cover art from the highest-priority source that has it. Absent on lookups stored before it existed. */
+  artworkUrl?: string | null;
+  /** For each chosen field, the sources that reported that same value. Absent on older lookups. */
+  fieldSources?: Partial<Record<string, string[]>>;
 };
 
 export const metadataLookups = pgTable(

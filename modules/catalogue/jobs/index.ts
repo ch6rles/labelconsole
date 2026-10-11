@@ -4,38 +4,22 @@ import { defineJob, type JobContext } from '@labelconsole/core/queue';
 import { publish } from '@labelconsole/core/realtime';
 import { organizations } from '@labelconsole/core/db/schema';
 import { pickIsrcMatch, spotScraperFor, type SpotifyRelease, type SpotScraperClient } from '@labelconsole/core/spotscraper';
-import { recordUsage } from '@labelconsole/core/usage';
-import { readSecret } from '@labelconsole/core/vault';
 import { readFileHead } from '@labelconsole/drive/service';
 import { normalizeIsrc, normalizeUpc, parseInput, type ParsedInput } from '../metadata/input';
 import { resolveMetadata, type ResolveCredentials } from '../metadata/resolve';
-import type { AppleSecret } from '../metadata/sources/apple';
-import type { LicensedSecret } from '../metadata/sources/licensed';
-import type { SpotifySecret } from '../metadata/sources/spotify';
 import { readTags, type AudioTags } from '../metadata/tags';
 import { imports, metadataLookups, platformIdentities, tracks } from '../schema';
 import { findArtistByName, getArtist, updateArtist } from '@labelconsole/people/service';
-import { addImportedCredits, artistsOnTrack, confirmLookup, createLookup, distributorReference, tracksWithoutCredits, upsertIdentity } from '../service';
+import { addImportedCredits, artistsOnTrack, confirmLookup, createLookup, distributorReference, metadataCredentials, recordSpotScraperRequests, tracksWithoutCredits, upsertIdentity } from '../service';
 
 async function credentials(job: JobContext): Promise<ResolveCredentials> {
-  return job.withOrg(async (ctx) => {
-    const [spotify, apple, youtube, licensed, spotscraper] = await Promise.all([readSecret(ctx, 'spotify'), readSecret(ctx, 'apple_music'), readSecret(ctx, 'youtube'), readSecret(ctx, 'licensed_streams'), spotScraperFor(ctx)]);
-    return {
-      spotscraper,
-      spotify: (spotify?.secret as SpotifySecret | undefined) ?? null,
-      apple: (apple?.secret as AppleSecret | undefined) ?? null,
-      youtubeApiKey: youtube?.secret.apiKey ?? null,
-      licensed: (licensed?.secret as LicensedSecret | undefined) ?? null,
-    };
-  });
+  return job.withOrg((ctx) => metadataCredentials(ctx));
 }
 
 /** Bill SpotScraper requests to the label's usage counters. */
 async function countRequests(job: JobContext, client: SpotScraperClient | null | undefined) {
   if (!client?.requests) return;
-  const n = client.requests;
-  client.requests = 0;
-  await job.withOrg((ctx) => recordUsage(ctx, 'spotscraper_requests', n));
+  await job.withOrg((ctx) => recordSpotScraperRequests(ctx, client));
 }
 
 /** Resolve one lookup; HTTP calls happen outside any database transaction. */

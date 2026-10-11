@@ -22,6 +22,7 @@
     "@labelconsole/agents": "workspace:*",
     "@labelconsole/inbox": "workspace:*",
     "@labelconsole/settings": "workspace:*",
+    "@labelconsole/discord": "workspace:*",
     "next": "^16.3.8",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

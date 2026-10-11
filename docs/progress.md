@@ -517,6 +517,36 @@ The owner asked whether YouTube Music streams can be tracked without a YouTube D
   - Every viewer was checked in Chromium at desktop and phone width (no sideways scroll).
   - The production build was also checked, including the PDF worker.
 
+## Discord app
+
+**What it is:** a private Discord app for looking up songs, built from the "Discord Music Metadata Lookup App" plan. Full guide: [discord.md](discord.md).
+- It covers the plan's Phase 1 (app, `/song`, link parsing, card, buttons, error states) and Phase 2 (ISRC/UPC search, choosing between candidates, cache, evidence).
+- It reuses the catalogue's existing lookup instead of building a second one.
+
+**Who can use it** (the owner's decision): only members of the label.
+- Each member links their Discord account with a one-time code from Settings → Discord.
+- Every request is checked against the member's current role, artist access and membership.
+- Replies are private to the person who asked.
+
+**Choosing between matches** (the owner asked for "Which one?"):
+- A text search lists up to five candidates from Deezer, falling back to MusicBrainz, and lets the person pick.
+- It picks by itself only on a single exact title match: with the artist given, or when it is the only result.
+- The console's own Track Import is unchanged.
+
+**Catalogue changes:**
+- Lookups now carry cover art (Deezer, Spotify, Apple, iTunes) and record which sources gave each field.
+- `searchCandidates`, `resolveContext` and `recordSpotScraperRequests` are exported from the catalogue service for other modules.
+
+**Setup:** a "Discord app" entry in Settings → Integrations (application ID, public key, bot token), with format checks on save.
+- Settings → Discord shows the endpoint URL, install links, command registration and linked members.
+
+**Verified:**
+- 21 unit tests (`modules/discord/discord.test.ts`) and 9 integration tests (`modules/discord/discord.int.test.ts`).
+- 6 new catalogue tests (`modules/catalogue/metadata/search.test.ts`).
+- Not yet tried against a live Discord application. The first real install is the check.
+
+**Not built yet** (later phases of the plan): `/release`, `/label`, `/licensor`, `/artist`, `/compare`, `/correct`; Discogs; posting a card publicly to a channel.
+
 ## Next steps
 
 1. Decide the open items below; each has its integration point ready.

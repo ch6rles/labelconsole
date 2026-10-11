@@ -1,5 +1,6 @@
 /** Third-party connections a label can configure. Secrets go to the vault, never back to the browser. */
-export type IntegrationField = { name: string; label: string; secret?: boolean; hint?: string; optional?: boolean };
+/** `pattern`: the value must match it (checked on save), with `hint` explaining the format. */
+export type IntegrationField = { name: string; label: string; secret?: boolean; hint?: string; optional?: boolean; pattern?: RegExp };
 /** `platformKey` names the environment variable that serves labels without their own key. */
 export type Integration = { provider: string; name: string; icon: string; description: string; fields: IntegrationField[]; usedBy: string[]; docs?: string; platformKey?: 'ANTHROPIC_API_KEY' | 'VOYAGE_API_KEY' | 'YOUTUBE_API_KEY' | 'SPOTSCRAPER_API_KEY' | 'APIFY_API_TOKEN' };
 
@@ -130,6 +131,19 @@ export const INTEGRATIONS: Integration[] = [
       { name: 'secret', label: 'Signing secret', secret: true, hint: 'Any long random string; verify the signature with it' },
     ],
     usedBy: ['Streams'],
+  },
+  {
+    provider: 'discord',
+    name: 'Discord app',
+    icon: 'forum',
+    description: 'Your own Discord application, so linked members can look up songs from any server or DM with /song. The application ID and public key identify and verify Discord’s requests; the bot token is used only to register the commands. Finish setup under Settings → Discord.',
+    fields: [
+      { name: 'applicationId', label: 'Application ID', hint: 'General Information → Application ID', pattern: /^\d{15,22}$/ },
+      { name: 'publicKey', label: 'Public key', hint: 'General Information → Public Key (64 characters)', pattern: /^[0-9a-fA-F]{64}$/ },
+      { name: 'botToken', label: 'Bot token', secret: true, hint: 'Bot → Reset Token' },
+    ],
+    usedBy: ['Discord'],
+    docs: 'https://discord.com/developers/applications',
   },
 ];
 

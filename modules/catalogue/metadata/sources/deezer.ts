@@ -9,7 +9,7 @@ const BASE = 'https://api.deezer.com';
 
 type DzError = { error?: { type: string; message: string; code: number } };
 type DzTrack = DzError & { id: number; title: string; isrc?: string; duration: number; explicit_lyrics?: boolean; track_position?: number; release_date?: string; link?: string; artist?: { name: string }; contributors?: Array<{ name: string; role: string }>; album?: { id: number; title: string; release_date?: string; type?: string } };
-type DzAlbum = DzError & { id: number; title: string; upc?: string; label?: string; release_date?: string; record_type?: string; link?: string; explicit_lyrics?: boolean; artist?: { name: string }; contributors?: Array<{ name: string; role: string }>; tracks?: { data: Array<{ id: number; title: string; duration: number; explicit_lyrics?: boolean; artist?: { name: string } }> } };
+type DzAlbum = DzError & { id: number; title: string; upc?: string; cover_xl?: string; cover_big?: string; label?: string; release_date?: string; record_type?: string; link?: string; explicit_lyrics?: boolean; artist?: { name: string }; contributors?: Array<{ name: string; role: string }>; tracks?: { data: Array<{ id: number; title: string; duration: number; explicit_lyrics?: boolean; artist?: { name: string } }> } };
 
 async function get<T extends DzError>(path: string): Promise<T | null> {
   const res = await fetchJson<T>(`${BASE}${path}`, { provider: 'deezer', rateLimit: RL, allow404: true });
@@ -38,6 +38,7 @@ function fromAlbum(album: DzAlbum, trackIsrcs: Map<number, string | null>): Part
     releaseType: normType(album.record_type),
     releaseDate: album.release_date ?? null,
     labelName: album.label ?? null,
+    artworkUrl: album.cover_xl ?? album.cover_big ?? null,
     tracks: tracks.length ? tracks : undefined,
   };
 }

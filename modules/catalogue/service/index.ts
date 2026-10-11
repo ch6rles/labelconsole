@@ -9,6 +9,7 @@ export * from './tracks';
 export * from './demos';
 export * from './identities';
 export * from './imports';
+export * from './resolve';
 export { formatIsrc } from './shared';
 export { displayUpc } from '../metadata/input';
 

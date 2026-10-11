@@ -30,7 +30,7 @@ async function token(secret: SpotifySecret) {
 }
 
 type SpTrack = { id: string; name: string; duration_ms: number; explicit: boolean; external_ids?: { isrc?: string }; artists: Array<{ name: string }>; album: { id: string }; external_urls?: { spotify?: string }; track_number?: number };
-type SpAlbum = { id: string; name: string; album_type: string; release_date: string; label?: string; external_ids?: { upc?: string; ean?: string }; copyrights?: Array<{ text: string; type: 'C' | 'P' }>; artists: Array<{ name: string }>; external_urls?: { spotify?: string }; tracks?: { items: Array<{ id: string; name: string; duration_ms: number; explicit: boolean; track_number: number; artists: Array<{ name: string }> }> } };
+type SpAlbum = { id: string; name: string; album_type: string; images?: Array<{ url: string }>; release_date: string; label?: string; external_ids?: { upc?: string; ean?: string }; copyrights?: Array<{ text: string; type: 'C' | 'P' }>; artists: Array<{ name: string }>; external_urls?: { spotify?: string }; tracks?: { items: Array<{ id: string; name: string; duration_ms: number; explicit: boolean; track_number: number; artists: Array<{ name: string }> }> } };
 
 async function api<T>(secret: SpotifySecret, path: string) {
   return fetchJson<T>(`https://api.spotify.com/v1${path}`, { provider: 'spotify', headers: { authorization: `Bearer ${await token(secret)}` }, rateLimit: RL, allow404: true });
@@ -63,6 +63,7 @@ export async function spotifyLookup(secret: SpotifySecret, q: Query & { spotifyT
     labelName: album?.label ?? null,
     pLine: copyright('P'),
     cLine: copyright('C'),
+    artworkUrl: album?.images?.[0]?.url ?? null,
     tracks: album?.tracks?.items.map((t) => ({ title: t.name, isrc: null, durationMs: t.duration_ms, position: t.track_number, explicit: t.explicit, artists: t.artists.map((a) => a.name), spotifyId: t.id })),
     platformIds: [
       ...(track ? [{ platform: 'spotify', entity: 'track' as const, externalId: track.id, url: track.external_urls?.spotify ?? `https://open.spotify.com/track/${track.id}`, source: 'spotify' }] : []),

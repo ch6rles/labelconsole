@@ -52,6 +52,7 @@
     "@labelconsole/agents": "workspace:*",
     "@labelconsole/inbox": "workspace:*",
     "@labelconsole/settings": "workspace:*",
+    "@labelconsole/discord": "workspace:*",
     "postgres": "^3.4.9",
     "drizzle-orm": "^0.45.3",
     "zod": "^4.6.5",

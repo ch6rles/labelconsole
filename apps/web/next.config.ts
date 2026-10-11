@@ -6,7 +6,7 @@ import type { NextConfig } from 'next';
 // forceReload: Next has already loaded (and cached) env for apps/web, which has no .env of its own.
 loadEnvConfig(path.join(import.meta.dirname, '../..'), process.env.NODE_ENV !== 'production', { info: () => {}, error: console.error }, true);
 
-const modules = ['people', 'drive', 'network', 'catalogue', 'documents', 'streams', 'marketing', 'agents', 'inbox', 'settings'];
+const modules = ['people', 'drive', 'network', 'catalogue', 'documents', 'streams', 'marketing', 'agents', 'inbox', 'settings', 'discord'];
 
 const config: NextConfig = {
   output: 'standalone',

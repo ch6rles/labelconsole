@@ -43,6 +43,13 @@
       "when": 1791251538445,
       "tag": "0005_stream_daily_settled",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791701902579,
+      "tag": "0006_discord",
+      "breakpoints": true
     }
   ]
 }

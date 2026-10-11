@@ -35,6 +35,7 @@
     "@labelconsole/network": "workspace:*",
     "@labelconsole/people": "workspace:*",
     "@labelconsole/settings": "workspace:*",
+    "@labelconsole/discord": "workspace:*",
     "@labelconsole/streams": "workspace:*",
     "@labelconsole/ui": "workspace:*",
     "esbuild": "^0.28.2",

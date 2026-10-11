@@ -23,6 +23,8 @@ export type SourceResult = {
   distributor?: string | null;
   /** Label names from MusicBrainz label relationships. */
   labels?: string[];
+  /** Cover art hosted by the source (an https URL on its CDN). */
+  artworkUrl?: string | null;
 };
 
 export type Query = { isrc?: string | null; upc?: string | null; title?: string | null; artist?: string | null };

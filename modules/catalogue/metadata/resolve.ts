@@ -43,10 +43,12 @@ export function mergeResults(input: Record<string, string>, results: SourceResul
     return values;
   };
   const conflicts: ResolvedMetadata['conflicts'] = [];
+  const fieldSources: NonNullable<ResolvedMetadata['fieldSources']> = {};
   const choose = <F extends Field>(field: F) => {
     const values = pick(field);
     const distinct = new Set(values.map((v) => canon(field, v.value)));
     if (distinct.size > 1 && field !== 'explicit') conflicts.push({ field, values: values.map((v) => ({ source: v.source, value: String(v.value) })) });
+    if (values.length) fieldSources[field] = values.filter((v) => canon(field, v.value) === canon(field, values[0].value)).map((v) => v.source);
     return values[0]?.value ?? null;
   };
 
@@ -54,7 +56,11 @@ export function mergeResults(input: Record<string, string>, results: SourceResul
   const upc = choose('upc');
   const releaseDate = choose('releaseDate');
   const explicit = pick('explicit').some((v) => v.value === true) ? true : pick('explicit').length ? false : null;
-  const artists = ordered.find((r) => r.artists?.length)?.artists ?? [];
+  const artistSource = ordered.find((r) => r.artists?.length);
+  const artists = artistSource?.artists ?? [];
+  if (artistSource) fieldSources.artists = [artistSource.source];
+  const artwork = ordered.find((r) => r.artworkUrl);
+  if (artwork) fieldSources.artworkUrl = [artwork.source];
 
   // Tracklist: take the longest list and fill ISRCs and Spotify IDs from any source by position or title.
   const lists = ordered.filter((r) => r.tracks?.length).sort((a, b) => b.tracks!.length - a.tracks!.length);
@@ -102,6 +108,8 @@ export function mergeResults(input: Record<string, string>, results: SourceResul
     distributor: { name: distributor.name, confidence: distributor.confidence, evidence: distributor.evidence as DistributorEvidence[] },
     conflicts,
     sources,
+    artworkUrl: artwork?.artworkUrl ?? null,
+    fieldSources,
   };
 }
 

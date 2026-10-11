@@ -309,6 +309,7 @@ export async function saveCredential(ctx: ServiceContext, input: z.infer<typeof 
     const raw = (input as Record<string, unknown>)[f.name];
     const v = typeof raw === 'string' ? raw.trim() : '';
     if (!v && !f.optional) throw new ValidationError(`${f.label} is required`, { fieldErrors: { [f.name]: [`${f.label} is required`] } });
+    if (v && f.pattern && !f.pattern.test(v)) throw new ValidationError(`${f.label} doesn't look right${f.hint ? ` (${f.hint})` : ''}`, { fieldErrors: { [f.name]: [`Doesn't look right${f.hint ? `: ${f.hint}` : ''}`] } });
     if (v) secret[f.name] = v;
   }
   // Non-secret fields are kept as display metadata too (e.g. SMTP host, vendor name).

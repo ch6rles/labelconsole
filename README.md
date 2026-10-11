@@ -11,6 +11,7 @@ A multi-tenant workspace for record labels: catalogue, roster, marketing, contra
 - **Agents:** ten agent types (Label Manager, Playlist & Editor Outreach, Creator Outreach, Trend & Social Monitor, A&R Scout, Social Scout, Stream Watch, Release Ops, Contract & Statement Watch, and a Custom agent you configure yourself). Social research on TikTok, Instagram and YouTube runs through Apify.
   - Agents run in the background with schedules, event and webhook triggers, delegation, memory, budgets and approvals for anything risky.
   - Each run is checkpointed after every step and resumes after a crash.
+- **Discord:** a private Discord app for the label. Linked members run `/song` (or "Look Up Song" on a message) in any server or DM. They get a card with identifiers, label and ℗/© lines, credits, links and play counts. Each field is marked as verified, reported by a source, conflicting, inferred or unknown, and a title search asks "Which one?" instead of guessing. See [docs/discord.md](docs/discord.md).
 - **Inbox, Admin and Settings:** notifications, the approvals queue, an activity feed, roles and custom roles, an audit log, an integrations vault, plan and usage, and full data export.
 
 Every table belongs to a label and is isolated by Postgres row-level security; credentials are envelope-encrypted and only decrypted in the worker.
@@ -60,7 +61,7 @@ apps/web        Next.js app: console pages, API router, auth, realtime, webhooks
 apps/worker     Background worker: jobs, schedules, event listeners, agent runs
 packages/core   Tenancy and RLS, auth, permissions, vault, events, queues, tools, LLM, storage, metrics
 packages/ui     Design tokens, console shell and components
-modules/*       catalogue, people, documents, drive, streams, network, marketing, agents, inbox, settings
+modules/*       catalogue, people, documents, drive, streams, network, marketing, agents, inbox, settings, discord
 infra/          Prometheus and Grafana config
 docs/           Spec, architecture, operations, progress
 ```
@@ -73,3 +74,4 @@ Each module owns its schema, services, API routes, jobs, listeners, agent tools 
 - [docs/architecture-findings.md](docs/architecture-findings.md): architecture, how modules plug in, where the build departs from the spec
 - [docs/operations.md](docs/operations.md): deploying, configuration, scaling, backups, monitoring, runbook
 - [docs/progress.md](docs/progress.md): what each phase delivered and how to verify it, plus open decisions
+- [docs/discord.md](docs/discord.md): setting up and using the Discord app
