@@ -59,8 +59,10 @@ export async function runInteraction(job: JobContext, data: Data) {
         ? err.message
         : err instanceof RateLimitedError
           ? 'The music databases are busy right now. Try again in a minute.'
-          : err instanceof ProviderError
-            ? `A music database didn't answer (${err.provider}). Try again in a minute.`
+          : err instanceof ProviderError && err.provider === 'discord'
+            ? "Discord didn't accept Label Console's reply. Try again, and tell an admin if it keeps happening."
+            : err instanceof ProviderError
+              ? `A music database didn't answer (${err.provider}). Try again in a minute.`
             : 'Something went wrong in Label Console. Try again in a moment.';
     if (!(err instanceof Notice)) job.log.warn({ err }, 'discord lookup failed');
     await reply(renderNotice(message)).catch((e) => job.log.warn({ err: e }, 'could not edit the Discord reply'));

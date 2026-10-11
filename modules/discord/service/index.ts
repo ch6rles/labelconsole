@@ -147,6 +147,8 @@ const appCache = new Map<string, { at: number; app: DiscordApp | null }>();
 const APP_CACHE_MS = 30_000;
 /** Short, so saving the integration and then the endpoint URL in Discord works straight away. */
 const UNKNOWN_APP_CACHE_MS = 5_000;
+/** Application IDs arrive before any check, so the cache must not grow with whatever strangers send. */
+const APP_CACHE_MAX = 200;
 
 /**
  * The label whose Discord app this is, from the non-secret fields of its
@@ -165,6 +167,7 @@ export async function appForApplicationId(applicationId: string): Promise<Discor
     .limit(1);
   const publicKey = typeof row?.metadata.publicKey === 'string' ? row.metadata.publicKey.toLowerCase() : '';
   const app = row && isPublicKeyHex(publicKey) ? { orgId: row.orgId, applicationId, publicKey } : null;
+  if (appCache.size >= APP_CACHE_MAX) appCache.clear();
   appCache.set(applicationId, { at: Date.now(), app });
   return app;
 }

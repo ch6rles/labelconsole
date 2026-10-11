@@ -12,7 +12,7 @@ import { normalizeIsrc, normalizeUpc, parseInput } from '@labelconsole/catalogue
 import { MESSAGE_COMMAND } from './protocol/commands';
 import { InteractionType, MessageFlags, ResponseType, type DiscordUser, type Interaction, type InteractionResponse, type MessagePayload } from './protocol/types';
 import { verifyDiscordSignature } from './protocol/verify';
-import { parseCustomId } from './render';
+import { escapeMd, parseCustomId } from './render';
 import { appForApplicationId, findLink, redeemLinkCode, unlinkDiscordUser, USE_PERMISSION, type DiscordApp } from './service';
 import type { DiscordAction } from './types';
 
@@ -24,7 +24,7 @@ import type { DiscordAction } from './types';
 const MAX_BODY = 512 * 1024;
 /** Signed requests older than this are refused, so a captured request cannot be replayed later. */
 const MAX_AGE_MS = 5 * 60_000;
-/** Budget for each Redis call, well inside Discord's 3 second limit. */
+/** Time the Redis calls (rate limit, then queue) may take together, well inside Discord's 3 second limit. */
 const REDIS_BUDGET_MS = 1500;
 
 const unauthorized = () => new Response('invalid request signature', { status: 401 });
@@ -44,6 +44,7 @@ export async function handleInteraction(req: Request): Promise<Response> {
   const signature = req.headers.get('x-signature-ed25519') ?? '';
   const timestamp = req.headers.get('x-signature-timestamp') ?? '';
   if (!signature || !timestamp) return unauthorized();
+  if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY) return unauthorized();
   const body = Buffer.from(await req.arrayBuffer());
   if (body.length > MAX_BODY) return unauthorized();
   let interaction: Interaction;
@@ -129,7 +130,9 @@ async function defer(app: DiscordApp, i: Interaction, user: DiscordUser, action:
   if (!access) return ephemeral('The Label Console account linked to your Discord is no longer a member of this label.');
   if (!access.permissions.has(USE_PERMISSION)) return ephemeral("Your role in Label Console doesn't include the catalogue, so lookups aren't available to you.");
 
-  const rl = await withTimeout(tryAcquire(`discord:user:${user.id}`, { capacity: 8, refillPerSec: 1 / 5 }), REDIS_BUDGET_MS).catch(() => null);
+  const deadline = Date.now() + REDIS_BUDGET_MS;
+  const left = () => Math.max(50, deadline - Date.now());
+  const rl = await withTimeout(tryAcquire(`discord:user:${user.id}`, { capacity: 8, refillPerSec: 1 / 5 }), left()).catch(() => null);
   if (!rl) return ephemeral('Label Console is busy right now. Try again in a moment.');
   if (!rl.allowed) return ephemeral(`That's a lot of lookups at once. Try again in ${Math.ceil(rl.waitMs / 1000)} seconds.`);
 
@@ -142,7 +145,7 @@ async function defer(app: DiscordApp, i: Interaction, user: DiscordUser, action:
         // The token expires after 15 minutes, so there is no point in retrying later; keep it out of Redis soon after.
         { jobId: `discord-${i.id}`, attempts: 1, removeOnComplete: { age: 900 }, removeOnFail: { age: 3600 } },
       ),
-      REDIS_BUDGET_MS,
+      left(),
     );
   } catch (err) {
     logger.warn({ err }, 'could not queue a Discord lookup');
@@ -157,7 +160,7 @@ async function linkCommand(app: DiscordApp, user: DiscordUser, code: string): Pr
   if (!rl.allowed) return ephemeral('Too many link attempts. Wait a few minutes, then get a new code.');
   const result = await redeemLinkCode(app.orgId, code, { id: user.id, username: displayName(user) });
   if (!result.ok) return ephemeral(result.message);
-  return ephemeral(`Linked. Your Discord account now acts as **${result.userName}** in ${result.orgName}. Try \`/song\` with a link, ISRC, UPC or "Artist - Title".`);
+  return ephemeral(`Linked. Your Discord account now acts as **${escapeMd(result.userName)}** in ${escapeMd(result.orgName)}. Try \`/song\` with a link, ISRC, UPC or "Artist - Title".`);
 }
 
 /**

@@ -122,7 +122,7 @@ export function platformLinks(card: Card) {
   const want: Array<'track' | 'release'> = card.kind === 'track' ? ['track', 'release'] : ['release'];
   const out: Array<{ platform: string; url: string }> = [];
   for (const entity of want) {
-    for (const p of [...card.md.platformIds].filter((x) => x.entity === entity && x.url && /^https:\/\//.test(x.url)).sort((a, b) => rank(a.platform) - rank(b.platform))) {
+    for (const p of [...card.md.platformIds].filter((x) => x.entity === entity && x.url && /^https:\/\//.test(x.url) && x.url.length <= 512).sort((a, b) => rank(a.platform) - rank(b.platform))) {
       if (!out.some((o) => o.platform === p.platform)) out.push({ platform: p.platform, url: p.url! });
     }
   }
