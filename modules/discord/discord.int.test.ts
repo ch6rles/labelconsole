@@ -2,12 +2,14 @@ import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '../../test/modules';
-import { withSystemOrg } from '@labelconsole/core/context';
+import { withOrg, withSystemOrg } from '@labelconsole/core/context';
+import { PermissionSet } from '@labelconsole/core/permissions';
 import { closeDb, systemDb } from '@labelconsole/core/db/client';
 import { auditLog, memberships } from '@labelconsole/core/db/schema';
 import { setModuleEnabled } from '@labelconsole/core/modules';
 import { closeQueues, queue } from '@labelconsole/core/queue';
-import { closeRedis } from '@labelconsole/core/redis';
+import { ProviderError } from '@labelconsole/core/errors';
+import { closeRedis, redis } from '@labelconsole/core/redis';
 import { setSpotScraperFactory } from '@labelconsole/core/spotscraper';
 import * as catalogue from '@labelconsole/catalogue/service';
 import { documents, statementLines } from '@labelconsole/documents/schema';
@@ -16,10 +18,11 @@ import { createArtist } from '@labelconsole/people/service';
 import { saveCredential } from '@labelconsole/settings/service';
 import { FakeSpotScraper } from '../../test/fake-spotscraper';
 import { addMember, makeOrg, runJob } from '../../test/helpers';
+import { recordFailure } from '@labelconsole/catalogue/metadata/breaker';
 import { handleInteraction } from './interactions';
 import { jobs } from './jobs';
 import type { Button, MessagePayload } from './protocol/types';
-import { discordCorrections, discordLinks, discordLookups, discordPlayReadings } from './schema';
+import { discordCorrections, discordEvidence, discordLinks, discordLookups, discordPlayReadings } from './schema';
 import * as svc from './service';
 
 afterAll(async () => {
@@ -38,6 +41,8 @@ let searchResults: unknown[] = [];
 let artistResults: unknown[] = [];
 let labelResults: unknown[] = [];
 let appIdRef = '';
+/** When set, MusicBrainz knows GBDUW0000059 and credits its release to this label. */
+let mbLabel: string | null = null;
 
 const HBFS = { id: 3135556, title: 'Harder, Better, Faster, Stronger', isrc: 'GBDUW0000059', duration: 224, link: 'https://www.deezer.com/track/3135556', preview: 'https://cdnt-preview.dzcdn.net/api/1/1/x.mp3?hdnea=1', available_countries: ['DE', 'FR', 'GB', 'US'], artist: { name: 'Daft Punk' }, album: { id: 302127, title: 'Discovery' } };
 const DISCOVERY = { id: 302127, title: 'Discovery', upc: '724384960650', artist: { name: 'Daft Punk' }, label: 'Parlophone (France)', release_date: '2001-03-07', record_type: 'album', cover_xl: 'https://cdn-images.dzcdn.net/images/cover/discovery/1000x1000.jpg', tracks: { data: [{ id: 3135556, title: 'Harder, Better, Faster, Stronger', duration: 224 }] } };
@@ -45,6 +50,7 @@ const DISCOVERY = { id: 302127, title: 'Discovery', upc: '724384960650', artist:
 function stubApis() {
   sent = [];
   calls = [];
+  mbLabel = null;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
@@ -75,6 +81,8 @@ function stubApis() {
       if (u.startsWith('https://musicbrainz.org/ws/2/artist/')) return json({ artists: [{ id: '056e4f3e-d505-4dad-8ec1-d04f521cbb56', name: 'Daft Punk', score: 100, type: 'Group', country: 'FR', area: { name: 'France' }, 'life-span': { begin: '1993' } }] });
       if (u.startsWith('https://musicbrainz.org/ws/2/label/?')) return json({ labels: labelResults });
       if (u.startsWith('https://musicbrainz.org/ws/2/release?label=')) return json({ 'release-count': 1234 });
+      if (mbLabel && u.startsWith('https://musicbrainz.org/ws/2/isrc/GBDUW0000059')) return json({ recordings: [{ id: 'rec-1', releases: [{ id: 'rel-1', status: 'Official', date: '2001-03-12' }] }] });
+      if (mbLabel && u.startsWith('https://musicbrainz.org/ws/2/release/rel-1')) return json({ id: 'rel-1', title: 'Discovery', date: '2001-03-12', barcode: '724384960650', 'label-info': [{ label: { name: mbLabel } }], 'release-group': { 'primary-type': 'Album' }, media: [{ position: 1, tracks: [{ position: 1, title: 'Harder, Better, Faster, Stronger', recording: { id: 'rec-1', title: 'Harder, Better, Faster, Stronger', isrcs: ['GBDUW0000059'] } }] }] });
       if (u.startsWith('https://musicbrainz.org')) return json({ releases: [], recordings: [] });
       if (u.startsWith('https://itunes.apple.com')) return json({ resultCount: 0, results: [] });
       return json({ error: 'not found' }, 404);
@@ -230,10 +238,15 @@ describe('discord interactions endpoint', () => {
     expect(lastEdit().embeds![0].title).toBe('📈 Performance');
     expect(lastEdit().embeds![0].fields?.[0]).toMatchObject({ name: '📈 Latest count' });
 
+    // Deezer's terms forbid storing preview audio or making it downloadable: the preview is linked, played from Deezer.
     const audio = await a.click('lc:v:audio:isrc:GBDUW0000059');
     await a.work(audio.id);
-    expect(edits().at(-1)!.files).toEqual([{ name: 'preview.mp3', type: 'audio/mpeg', size: 11 }]);
-    expect(lastEdit().attachments).toEqual([{ id: 0, filename: 'preview.mp3', description: '30-second preview of Harder, Better, Faster, Stronger' }]);
+    expect(edits().at(-1)!.files).toEqual([]);
+    expect(buttons(lastEdit()).map((b) => [b.label, b.url])).toEqual([
+      ['Play the 30-second preview', HBFS.preview],
+      ['Listen on Deezer', HBFS.link],
+    ]);
+    expect(calls.some((c) => c.startsWith('https://cdnt-preview.dzcdn.net/'))).toBe(false);
 
     for (const [view, title] of [['details', 'ℹ️ Extended Info'], ['avail', '🌍 Availability'], ['links', '🔗 Other Links']] as const) {
       const r = await a.click(`lc:v:${view}:isrc:GBDUW0000059`);
@@ -272,12 +285,12 @@ describe('discord interactions endpoint', () => {
     expect(main.description).not.toContain('In your catalogue');
     expect(buttons(lastEdit()).some((b) => b.label === 'Open in Label Console')).toBe(false);
 
-    await a.as((ctx) => svc.updateSharing(ctx, { shareDistributor: false }));
+    await a.as((ctx) => svc.updateDiscordSettings(ctx, { shareDistributor: false }));
     const res2 = await a.command('song', { query: 'GBDUW0000059', share: true });
     await a.work(res2.id);
     expect(lastEdit().embeds).toHaveLength(1);
 
-    await a.as((ctx) => svc.updateSharing(ctx, { allowSharing: false }));
+    await a.as((ctx) => svc.updateDiscordSettings(ctx, { allowSharing: false }));
     const res3 = await a.command('song', { query: 'GBDUW0000059', share: true });
     expect(res3.body).toEqual({ type: 5, data: { flags: 64 } });
     await queue('jobs').getJob(`discord-${res3.id}`).then((j) => j?.remove());
@@ -485,6 +498,130 @@ describe('discord interactions endpoint', () => {
     expect(stats).toMatchObject({ total: 2, cards: 1, notFound: 1, codes: 2, codesFound: 1 }); // an unknown ISRC is an exact lookup that found nothing
     expect(stats.coverage.find((c) => c.field === 'labelName')).toMatchObject({ status: 'reported', n: 1 });
     await runJob(jobs, 'discord.purge', null, {});
+  });
+
+  it('keeps evidence only from sources whose terms allow it, and shows what a source changed', async () => {
+    const a = await label();
+    await a.link(a.as);
+    mbLabel = 'Virgin';
+    await a.work((await a.song('GBDUW0000059')).id);
+    const rows = await systemDb().select().from(discordEvidence).where(eq(discordEvidence.orgId, a.org.id));
+    // Deezer answered too, but its terms don't allow keeping its data: only MusicBrainz (CC0) is kept.
+    expect([...new Set(rows.map((r) => r.source))]).toEqual(['musicbrainz']);
+    expect(rows.find((r) => r.field === 'labelName')).toMatchObject({ ref: 'upc:0724384960650', value: 'Virgin' });
+    expect(rows.find((r) => r.field === 'title')).toMatchObject({ ref: 'isrc:GBDUW0000059' });
+
+    // Later MusicBrainz credits another label: both values are kept, and Extended Info shows the change.
+    mbLabel = 'Parlophone';
+    await redis().del(`lc:discord:md:${a.org.id}:isrc:GBDUW0000059`);
+    await new Promise((r) => setTimeout(r, 15));
+    await a.work((await a.song('GBDUW0000059')).id);
+    const labels = (await systemDb().select().from(discordEvidence).where(and(eq(discordEvidence.orgId, a.org.id), eq(discordEvidence.field, 'labelName')))).map((r) => r.value).sort();
+    expect(labels).toEqual(['Parlophone', 'Virgin']);
+    await a.work((await a.click('lc:v:details:isrc:GBDUW0000059')).id);
+    const history = lastEdit().embeds![0].fields!.find((f) => f.name === '🕓 History')!;
+    expect(history.value).toContain('**Label** on MusicBrainz: "Virgin" → "Parlophone"');
+
+    // Past its retention, a value goes.
+    await systemDb().update(discordEvidence).set({ lastSeenAt: new Date(Date.now() - 800 * 86400_000) }).where(and(eq(discordEvidence.orgId, a.org.id), eq(discordEvidence.value, 'Virgin')));
+    await runJob(jobs, 'discord.purge', null, {});
+    const left = (await systemDb().select().from(discordEvidence).where(and(eq(discordEvidence.orgId, a.org.id), eq(discordEvidence.field, 'labelName')))).map((r) => r.value);
+    expect(left).toEqual(['Parlophone']);
+  });
+
+  it('pauses a failing source, answers from the others, and reports source health', async () => {
+    const a = await label();
+    // Discogs uses the label's own token, so its pause is this label's alone (shared sources stay untouched for other tests).
+    await a.as((ctx) => saveCredential(ctx, { provider: 'discogs', token: 'discogs-token-for-tests' }));
+    await a.link(a.as);
+    for (let i = 0; i < catalogue.BREAKER.failures; i++) await recordFailure('discogs', a.org.id, new ProviderError('discogs', 'HTTP 503', { status: 503 }));
+    await a.work((await a.song('GBDUW0000059')).id);
+    expect(lastEdit().embeds!.at(-1)!.title).toBe('Harder, Better, Faster, Stronger');
+    await a.work((await a.click('lc:v:details:isrc:GBDUW0000059')).id);
+    expect(JSON.stringify(lastEdit().embeds![0])).toContain('Discogs ⏸ paused (repeated errors)');
+    expect(calls.some((c) => c.startsWith('https://api.discogs.com'))).toBe(false);
+
+    const [log] = await systemDb().select().from(discordLookups).where(and(eq(discordLookups.orgId, a.org.id), eq(discordLookups.command, 'song')));
+    expect(log.sources).toEqual(expect.arrayContaining([expect.objectContaining({ source: 'discogs', outcome: 'paused' }), expect.objectContaining({ source: 'deezer', outcome: 'answered' })]));
+    const stats = await a.as((ctx) => svc.lookupStats(ctx));
+    expect(stats.paused).toEqual(expect.arrayContaining([expect.objectContaining({ source: 'discogs', own: true })]));
+    expect(stats.sources.find((x) => x.source === 'discogs')).toMatchObject({ calls: 0, outcomes: { paused: 1 } });
+    expect(stats.sources.find((x) => x.source === 'deezer')).toMatchObject({ calls: 1, outcomes: { answered: 1 } });
+    expect(stats).toMatchObject({ fresh: 1, partial: 1 });
+
+    // An admin can try it again at once.
+    await a.as((ctx) => svc.resumePausedSource(ctx, 'discogs'));
+    expect((await a.as((ctx) => svc.lookupStats(ctx))).paused.some((p) => p.source === 'discogs')).toBe(false);
+  });
+
+  it('benchmarks every source against the label’s own catalogue', async () => {
+    const a = await label();
+    await a.as(async (ctx) => {
+      const artist = await createArtist(ctx, { name: 'Daft Punk', status: 'active' });
+      const release = await catalogue.createRelease(ctx, { title: 'Discovery', type: 'album', upc: '724384960650', labelName: 'Parlophone (France)', releaseDate: '2001-03-07', distributor: 'Believe', artistIds: [artist.id] });
+      await catalogue.createTrack(ctx, { title: 'Harder, Better, Faster, Stronger', isrc: 'GBDUW0000059', releaseId: release.id, artistIds: [artist.id] });
+    });
+    mbLabel = 'Virgin';
+    const run = await a.as((ctx) => svc.startBenchmark(ctx, { sample: 10 }));
+    await expect(a.as((ctx) => svc.startBenchmark(ctx, { sample: 10 }))).rejects.toThrow(/already running/);
+    await queue('jobs').getJob(`discord-benchmark-${run.id}`).then((j) => j?.remove());
+    await runJob(jobs, 'discord.benchmark', a.org.id, { benchmarkId: run.id });
+
+    const done = await a.as((ctx) => svc.getBenchmark(ctx, run.id));
+    expect(done).toMatchObject({ status: 'done', progress: 1 });
+    const r = done.results!;
+    expect(r.items).toBe(1);
+    const deezer = r.sources.find((x) => x.source === 'deezer')!;
+    expect(deezer.outcomes.answered).toBe(1);
+    expect(deezer.fields.labelName).toEqual({ reported: 1, checked: 1, agreed: 1 });
+    expect(deezer.fields.upc).toEqual({ reported: 1, checked: 1, agreed: 1 });
+    expect(r.sources.find((x) => x.source === 'musicbrainz')!.fields.labelName).toEqual({ reported: 1, checked: 1, agreed: 0 });
+    expect(r.misses).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'labelName', source: 'musicbrainz', ours: 'Parlophone (France)', theirs: 'Virgin' }),
+        expect.objectContaining({ field: 'releaseDate', source: 'musicbrainz', ours: '2001-03-07', theirs: '2001-03-12' }),
+      ]),
+    );
+    expect(r.merged.labelName).toEqual({ reported: 1, checked: 1, agreed: 1 });
+    expect(r.distributor.checked).toBe(1);
+    expect(r.billed.spotscraper).toBe(0); // SpotScraper is left out unless asked for
+
+    // A member limited to some artists doesn't get the per-song list.
+    const scoped = await withOrg({ orgId: a.org.id, actor: { type: 'user', id: a.user.id, name: 'Scoped Admin' }, permissions: PermissionSet.forRole('admin'), artistScope: [] }, (ctx) => svc.getBenchmark(ctx, run.id));
+    expect(scoped.results!.misses).toEqual([]);
+  });
+
+  it('keeps daily readings for recently looked-up songs when switched on, and forgets an unlinked member', async () => {
+    const a = await label();
+    const fake = new FakeSpotScraper();
+    fake.tracks.set('one-more-time', { id: 'one-more-time', name: 'One More Time', isrc: 'GBDUW0000060', durationMs: 320000, explicit: false, popularity: 80, playCount: 900_000_000, artists: [{ id: 'dp', name: 'Daft Punk' }], album: null });
+    setSpotScraperFactory(async () => fake);
+    await a.link(a.as);
+    await a.work((await a.song('GBDUW0000060')).id);
+    await systemDb().delete(discordPlayReadings).where(eq(discordPlayReadings.orgId, a.org.id));
+
+    // Off by default: nothing is read.
+    await runJob(jobs, 'discord.readings', a.org.id, { limit: 0 });
+    expect(await systemDb().select().from(discordPlayReadings).where(eq(discordPlayReadings.orgId, a.org.id))).toEqual([]);
+
+    await a.as((ctx) => svc.updateDiscordSettings(ctx, { dailyReadings: 5 }));
+    expect((await svc.labelsWithDailyReadings()).find((l) => l.orgId === a.org.id)).toMatchObject({ limit: 5 });
+    const before = fake.searches.length;
+    expect(await runJob(jobs, 'discord.readings', a.org.id, { limit: 5 })).toEqual({ read: 1, songs: 1 });
+    expect(fake.searches.length - before).toBe(1); // one billed request a song
+    expect(await systemDb().select().from(discordPlayReadings).where(eq(discordPlayReadings.orgId, a.org.id))).toMatchObject([{ isrc: 'GBDUW0000060', count: 900_000_000 }]);
+    await runJob(jobs, 'discord.readings-all', null, {});
+    await queue('jobs').getJob(`discord-readings-${a.org.id}-${new Date().toISOString().slice(0, 10)}`).then((j) => {
+      expect(j?.data.data).toEqual({ limit: 5 });
+      return j?.remove();
+    });
+
+    // Unlinking takes the member out of the lookup log; the counts stay.
+    const link = await a.as((ctx) => svc.myLink(ctx));
+    await a.as((ctx) => svc.removeLink(ctx, link!.id));
+    const log = await systemDb().select().from(discordLookups).where(eq(discordLookups.orgId, a.org.id));
+    expect(log.length).toBeGreaterThan(0);
+    expect(log.every((l) => l.userId === null)).toBe(true);
   });
 
   it('registers the commands for the install types the app has on', async () => {

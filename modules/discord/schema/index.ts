@@ -45,6 +45,8 @@ export const discordState = pgTable(
     shareDistributor: boolean('share_distributor').notNull().default(true),
     /** On shared cards: show the stream count. */
     shareStreams: boolean('share_streams').notNull().default(true),
+    /** How many songs looked up in Discord get a daily play-count reading (0 = off). Each is one billed SpotScraper request a day. */
+    dailyReadings: integer('daily_readings').notNull().default(0),
   },
   (t) => [uniqueIndex('discord_state_org_idx').on(t.orgId)],
 );
@@ -114,9 +116,69 @@ export const discordLookups = pgTable(
     durationMs: integer('duration_ms').notNull(),
     /** Which fields the card had, and how they were known. */
     coverage: jsonb('coverage').$type<Record<string, string>>(),
+    /** For fresh lookups: how each source call ended and how long it took. */
+    sources: jsonb('sources').$type<SourceCall[]>(),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [index('discord_lookups_org_time_idx').on(t.orgId, t.createdAt)],
+);
+
+export type SourceCall = { source: string; outcome: string; ms: number | null };
+
+/**
+ * What each source has said about a song or release, field by field, as
+ * published. Append-only in spirit: a new value is a new row, and seeing the
+ * same value again only moves `last_seen_at`, so changes over time (a new
+ * label, a re-delivered release) stay visible. Corrections never touch it.
+ */
+export const discordEvidence = pgTable(
+  'discord_evidence',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: orgIdColumn(),
+    /** `isrc:<ISRC>` for recording fields, `upc:<UPC>` for release fields. */
+    ref: text('ref').notNull(),
+    field: text('field').notNull(),
+    source: text('source').notNull(),
+    value: text('value').notNull(),
+    /** The source's own page for the record, when it has one. */
+    sourceUrl: text('source_url'),
+    firstSeenAt: ts('first_seen_at').notNull().defaultNow(),
+    lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('discord_evidence_claim_idx').on(t.orgId, t.ref, t.field, t.source, t.value), index('discord_evidence_seen_idx').on(t.orgId, t.lastSeenAt)],
+);
+
+export type BenchmarkCounts = { reported: number; checked: number; agreed: number };
+export type BenchmarkResult = {
+  items: number;
+  sources: Array<{ source: string; outcomes: Record<string, number>; p50: number | null; p95: number | null; fields: Record<string, BenchmarkCounts> }>;
+  /** The merged card, as Discord shows it. */
+  merged: Record<string, BenchmarkCounts>;
+  /** The inferred distributor against distributors your catalogue records as confirmed. */
+  distributor: { checked: number; agreed: number; unknown: number };
+  billed: { spotscraper: number };
+  /** The first disagreements, to look at by hand. */
+  misses: Array<{ isrc: string; title: string; field: string; source: string; ours: string; theirs: string }>;
+};
+
+/** A source benchmark: the label's own songs looked up through every source and checked against its catalogue. */
+export const discordBenchmarks = pgTable(
+  'discord_benchmarks',
+  {
+    ...tenantColumns(),
+    requestedBy: uuid('requested_by'),
+    /** queued | running | done | failed */
+    status: text('status').notNull().default('queued'),
+    sample: integer('sample').notNull(),
+    /** Whether billed sources (SpotScraper) were included. */
+    includeBilled: boolean('include_billed').notNull().default(false),
+    progress: integer('progress').notNull().default(0),
+    results: jsonb('results').$type<BenchmarkResult>(),
+    error: text('error'),
+    finishedAt: ts('finished_at'),
+  },
+  (t) => [index('discord_benchmarks_org_idx').on(t.orgId, t.createdAt)],
 );
 
 export type DiscordCorrection = typeof discordCorrections.$inferSelect;

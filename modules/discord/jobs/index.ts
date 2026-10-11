@@ -1,17 +1,29 @@
 import '../types';
-import { defineJob } from '@labelconsole/core/queue';
+import { defineJob, enqueue } from '@labelconsole/core/queue';
 import { readSecret } from '@labelconsole/core/vault';
+import { runBenchmark } from '../benchmark';
 import { runInteraction } from '../lookup';
 import { registerCommands } from '../protocol/rest';
-import { purgeOld, recordCommandRegistration } from '../service';
+import { runDailyReadings } from '../readings';
+import { labelsWithDailyReadings, purgeOld, recordCommandRegistration } from '../service';
 
 export const jobs = [
   defineJob('discord.interaction', (job, data) => runInteraction(job, data)),
 
-  /** Daily, across labels: lookup logs older than six months and spent link codes. */
+  /** Daily, across labels: lookup logs older than six months, spent link codes and evidence past its retention. */
   defineJob('discord.purge', async () => {
     await purgeOld();
   }),
+
+  defineJob('discord.benchmark', (job, data) => runBenchmark(job, data.benchmarkId)),
+
+  /** Daily, across labels: queue each label's readings (one job per label, so one label's failure stays its own). */
+  defineJob('discord.readings-all', async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    for (const l of await labelsWithDailyReadings()) await enqueue('discord.readings', l.orgId, { limit: l.limit }, { jobId: `discord-readings-${l.orgId}-${day}` });
+  }),
+
+  defineJob('discord.readings', (job, data) => runDailyReadings(job, data.limit)),
 
   /** Overwrite the app's global commands. The bot token is only ever decrypted here. */
   defineJob('discord.register-commands', async (job) => {

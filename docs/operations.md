@@ -93,6 +93,26 @@ Also read directly: `DB_POOL_MAX` / `DB_SYSTEM_POOL_MAX` (connection pools), `DB
 
   Every run completed with exactly three model calls and no repeated tool side effects. Real runs are bound by model latency and budgets, not the platform; add worker processes when `lc_queue_jobs{queue="agents",state="waiting"}` stays high.
 
+- **Discord app, measured** (`test/load/discord.load.test.ts` in `pnpm test:load`). The setup:
+  - one worker process at the default `WORKER_CONCURRENCY` of 8;
+  - Discord and Deezer stubbed at 40–220 ms per call;
+  - MusicBrainz and iTunes keep their real rate limits;
+  - 6 labels × 5 linked members × 6 `/song` commands, all at once, on 12 songs per label.
+
+  | | Endpoint answer (p95 / max) | Reply edited (p50 / p95 / max) | Cards |
+  |---|---|---|---|
+  | Before per-source budgets | 157 / 161 ms | 98 / 137 / 155 s | 180 of 180 |
+  | With budgets (current) | 117 / 121 ms | 10.8 / 15.5 / 15.6 s | 180 of 180 |
+  | Current, `WORKER_CONCURRENCY=32` | 276 / 281 ms | 15.4 / 39.6 / 42.9 s | 180 of 180 |
+
+  - **The endpoint** answers far inside Discord's 3 seconds, and every reply was edited exactly once.
+  - **The limit is upstream:** MusicBrainz allows one request a second for the whole platform, and iTunes about 20 a minute.
+    - Before budgets, every lookup queued for MusicBrainz.
+    - Now a source with no free slot within 1.5 s is skipped as "busy", and the card answers from the others. In this run, 62 of 78 fresh lookups skipped MusicBrainz.
+    - A lookup that finds nothing while sources were busy tries again with a long wait, so it is never reported as "not found".
+  - **More worker slots don't help.** At 32, Deezer's own limit fills too, and more lookups take the slow second try.
+  - **For heavier use,** run a MusicBrainz mirror, or take its paid tier (see [discord-providers.md](discord-providers.md)).
+
 ## Backups and restore
 
 ```sh
@@ -119,7 +139,10 @@ Run backups on a schedule (cron, a Kubernetes CronJob) with a `pg_dump` that mat
 
 - **Health:** `GET /api/health` (Postgres and Redis; use for load-balancer probes) and `GET /api/health?deep=1` (also a live worker heartbeat and outbox lag under 5 minutes; use for uptime monitors). The worker serves `GET /healthz` on `WORKER_HEALTH_PORT`.
 - **Metrics:** `GET /api/metrics` with `Authorization: Bearer $METRICS_TOKEN`. One scrape covers every process: queue depths, workers alive, outbox lag, job throughput, failures and durations, agent runs by status, tokens, spend, pending approvals, stalled runs, stream registry and overdue polls, document extraction. Aggregates only, no label data.
-- **Dashboard and alerts:** `infra/grafana/label-console.json` (import, pick the Prometheus data source), `infra/prometheus/prometheus.yml` and `alerts.yml` (no worker, outbox backlog, job failure rate, queue backlog, stalled agent runs, overdue stream polls, high agent spend).
+- **Dashboard and alerts:** `infra/grafana/label-console.json` (import, pick the Prometheus data source), `infra/prometheus/prometheus.yml` and `alerts.yml`. The alerts cover:
+  - no worker, outbox backlog, job failure rate, queue backlog;
+  - stalled agent runs, overdue stream polls, high agent spend;
+  - Discord: lookup errors, slow lookups, a failing metadata source, a source paused by the circuit breaker. See [discord.md](discord.md) for the runbook.
 - **Logs:** JSON (pino) on stdout from both processes; job failures log the job name, id, attempt and error.
 
 ## Runbook

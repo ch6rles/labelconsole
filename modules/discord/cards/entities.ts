@@ -1,7 +1,7 @@
 import type { ResolvedMetadata } from '@labelconsole/catalogue/schema';
 import { CORRECTABLE_FIELDS } from '../protocol/commands';
 import { ButtonStyle, ComponentType, type ActionRow, type Button, type Embed, type MessagePayload, type Modal } from '../protocol/types';
-import { COLOR, countryName, displayUpc, escapeMd, fitEmbeds, flag, formatDate, formatDuration, formatElapsed, formatNumber, listValue, platformName, RELEASE_TYPES, truncate } from './format';
+import { COLOR, countryName, displayUpc, escapeMd, fitEmbeds, flag, formatDate, formatDuration, formatElapsed, formatNumber, listValue, platformName, RELEASE_TYPES, sourceName, truncate } from './format';
 import { distributorLogo } from './logos';
 
 /** Cards for /artist, /label, /licensor and /compare, the "Which one?" lists, and the correction form. */
@@ -32,6 +32,8 @@ export type ArtistCard = Meta & {
   roster: { url: string | null; releases: number } | null;
   latest: Array<{ title: string; type: string | null; date: string | null; url: string | null }>;
   links: Array<{ platform: string; url: string }>;
+  /** Writing credits on MusicBrainz, and credits under this name in the label's catalogue (private cards only). */
+  credits?: { works: Array<{ title: string; roles: string[] }>; worksTotal: number | null; own: { total: number; roles: Array<[string, number]>; songs: string[] } | null };
   shared?: boolean;
 };
 
@@ -44,6 +46,14 @@ export function renderArtist(a: ArtistCard): MessagePayload {
   if (a.mb?.begin) fields.push({ name: '📅 Active since', value: formatDate(a.mb.begin) ?? a.mb.begin, inline: true });
   if (a.mb?.area && a.mb.area !== countryName(a.mb.country ?? '')) fields.push({ name: '📍 From', value: escapeMd(a.mb.area), inline: true });
   if (a.latest.length) fields.push({ name: '🆕 Latest releases', value: listValue(a.latest.map((r) => `• ${r.url ? `[${escapeMd(r.title)}](${r.url})` : escapeMd(r.title)}${[r.type ? RELEASE_TYPES[r.type] ?? r.type : null, r.date ? r.date.slice(0, 4) : null].filter(Boolean).length ? ` — ${[r.type ? RELEASE_TYPES[r.type] ?? r.type : null, r.date ? r.date.slice(0, 4) : null].filter(Boolean).join(', ')}` : ''}`)) });
+  if (a.credits?.works.length) {
+    const more = a.credits.worksTotal && a.credits.worksTotal > a.credits.works.length ? `\n*…${formatNumber(a.credits.worksTotal - a.credits.works.length)} more on MusicBrainz*` : '';
+    fields.push({ name: `✍️ Writing credits${a.credits.worksTotal ? ` (${formatNumber(a.credits.worksTotal)})` : ''}`, value: truncate(`${listValue(a.credits.works.map((w) => `• ${escapeMd(w.title)}${w.roles.length ? ` — ${w.roles.map(escapeMd).join(', ')}` : ''}`), 900)}${more}`, 1024) });
+  }
+  if (a.credits?.own && !a.shared) {
+    const o = a.credits.own;
+    fields.push({ name: '📁 Credits in your catalogue', value: truncate(`${o.roles.map(([role, n]) => `${escapeMd(role)} on ${n} song${n === 1 ? '' : 's'}`).join(' · ')}\n${o.songs.map(escapeMd).join(', ')}${o.total > o.songs.length ? '…' : ''}`, 1024) });
+  }
   const lines = [a.mb?.disambiguation ? `*${escapeMd(a.mb.disambiguation)}*` : null, a.roster && !a.shared ? `📁 On your roster${a.roster.releases ? ` · ${a.roster.releases} release${a.roster.releases === 1 ? '' : 's'} in your catalogue` : ''}` : null].filter(Boolean);
   const embed: Embed = { title: truncate(a.name, 256), ...(a.url ? { url: a.url } : {}), ...(a.pictureUrl ? { thumbnail: { url: a.pictureUrl } } : {}), color: COLOR, ...(lines.length ? { description: lines.join('\n') } : {}), fields, ...foot(a) };
   const buttons = [...(a.roster?.url && !a.shared ? [linkButton('Open in Label Console', a.roster.url, '📁')] : []), ...a.links.map((l) => linkButton(platformName(l.platform), l.url, '🔗'))];
@@ -114,7 +124,7 @@ export function renderLicensor(c: LicensorCard): MessagePayload {
 
 /* ------------------------------------------------------------- compare -- */
 
-export type CompareSide = { input: string; md: ResolvedMetadata; distributor: string | null };
+export type CompareSide = { input: string; md: ResolvedMetadata; distributor: string | null; credits?: { source: string; credits: Array<{ name: string; role: string }> } | null };
 
 const COMPARE_FIELDS: Array<[string, (m: ResolvedMetadata, d: string | null) => string | null]> = [
   ['Title', (m) => m.title ?? m.releaseTitle],
@@ -147,11 +157,33 @@ export function renderCompare(a: CompareSide, b: CompareSide, meta: Meta): Messa
       fields.push({ name: `≠ ${name}`, value: truncate(`**1:** ${x ? escapeMd(x) : '—'}\n**2:** ${y ? escapeMd(y) : '—'}`, 1024) });
     }
   }
+  const credits = compareCredits(a.credits, b.credits);
+  if (credits) {
+    if (credits.same) matches.push(`**Credits:** ${credits.count} the same`);
+    else {
+      differs.push('Credits');
+      fields.push({ name: '≠ Credits', value: credits.value });
+    }
+  }
   if (matches.length) fields.push({ name: '✓ The same', value: listValue(matches) });
   const t = (m: ResolvedMetadata) => escapeMd(truncate(m.title ?? m.releaseTitle ?? 'Untitled', 80));
   const description = [`**1:** ${t(a.md)} · ${escapeMd(truncate(a.md.artists.join(', '), 60))}`, `**2:** ${t(b.md)} · ${escapeMd(truncate(b.md.artists.join(', '), 60))}`, '', differs.length ? `**${differs.length} difference${differs.length === 1 ? '' : 's'}:** ${differs.join(', ')}` : '**No differences in the fields compared.**'].join('\n');
   const embed: Embed = { title: '⚖️ Compare', color: COLOR, description, fields: fields.slice(0, 25), ...foot(meta, 'Values as the sources report them') };
   return { content: '', embeds: fitEmbeds([embed]), components: [] };
+}
+
+/** Credits on one side only, by name and role (as the sources write them). Null when neither side has any. */
+export function compareCredits(a: CompareSide['credits'], b: CompareSide['credits']): { same: true; count: number } | { same: false; value: string } | null {
+  if (!a?.credits.length && !b?.credits.length) return null;
+  const key = (c: { name: string; role: string }) => `${c.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}|${c.role.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}`;
+  const ka = new Set((a?.credits ?? []).map(key));
+  const kb = new Set((b?.credits ?? []).map(key));
+  const onlyA = (a?.credits ?? []).filter((c) => !kb.has(key(c)));
+  const onlyB = (b?.credits ?? []).filter((c) => !ka.has(key(c)));
+  if (!onlyA.length && !onlyB.length) return { same: true, count: ka.size };
+  const list = (xs: Array<{ name: string; role: string }>, side: CompareSide['credits']) => (side?.credits.length ? (xs.length ? xs.slice(0, 8).map((c) => `${escapeMd(c.name)} (${escapeMd(c.role)})`).join(', ') + (xs.length > 8 ? '…' : '') : 'nothing else') : 'no credits found');
+  const from = (side: CompareSide['credits']) => (side?.source ? ` *(${sourceName(side.source)})*` : '');
+  return { same: false, value: truncate(`**Only 1${from(a)}:** ${list(onlyA, a)}\n**Only 2${from(b)}:** ${list(onlyB, b)}`, 1024) };
 }
 
 /* ------------------------------------------------------------- pickers -- */

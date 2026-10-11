@@ -1,6 +1,6 @@
 import { ButtonStyle, ComponentType, type ActionRow, type Button, type Embed, type MessagePayload } from '../protocol/types';
-import { COUNTRIES, countryName, displayUpc, escapeMd, fitEmbeds, flag, formatDate, formatDuration, formatNumber, listValue, platformName, RELEASE_TYPES, sourceName, truncate } from './format';
-import { cardArtists, cardTitle, distributorEvidence, FIELD_NAMES, fieldEvidence, fieldValue, footer, heading, platformLinks, streamsCount, WORLDWIDE, type Card, type FieldKey } from './song';
+import { COUNTRIES, countryName, displayUpc, escapeMd, fitEmbeds, flag, formatDate, formatDuration, formatMoment, formatNumber, listValue, platformName, RELEASE_TYPES, sourceName, truncate } from './format';
+import { cardArtists, cardTitle, discogsCredit, distributorEvidence, FIELD_NAMES, fieldEvidence, fieldValue, footer, heading, platformLinks, streamsCount, WORLDWIDE, type Card, type FieldKey, type HistoryRow } from './song';
 
 /**
  * The message each card button opens: its own private reply, so the card
@@ -29,7 +29,8 @@ export function detailsView(card: Card): Embed {
   };
   const fields: NonNullable<Embed['fields']> = [];
   const ids = [line('isrc', (v) => `\`${v}\``), line('upc', (v) => `\`${displayUpc(v) ?? v}\``)];
-  if (md.catalogNumber) ids.push(`**Cat. No.:** ${escapeMd(md.catalogNumber)} — *Reported by Discogs*`);
+  const discogs = discogsCredit(md);
+  if (md.catalogNumber) ids.push(`**Cat. No.:** ${escapeMd(md.catalogNumber)} — *Reported by Discogs*${discogs ? ` · ${discogs}` : ''}`);
   for (const p of md.platformIds) ids.push(`**${platformName(p.platform)} ${p.entity}:** \`${escapeMd(p.externalId)}\``);
   fields.push({ name: '🔖 Identifiers', value: listValue(ids) });
 
@@ -47,16 +48,72 @@ export function detailsView(card: Card): Embed {
   const d = distributorEvidence(card);
   const dist = [`**Distributor:** ${d.value ? escapeMd(d.value) : 'Unknown'} — *${d.evidence.label}*`];
   if (d.evidence.status === 'inferred') for (const e of md.distributor.evidence.slice(0, 3)) dist.push(`↳ ${escapeMd(e.source)}: ${escapeMd(e.signal)} "${escapeMd(truncate(e.value, 60))}" suggests ${escapeMd(e.distributor)}`);
-  for (const c of (md.companies ?? []).filter((x) => /distributed|licensed|marketed|phonographic|copyright/i.test(x.role)).slice(0, 6)) dist.push(`${sourceName(c.source)}: ${escapeMd(c.role)} ${escapeMd(c.name)}`);
+  const companies = (md.companies ?? []).filter((x) => /distributed|licensed|marketed|phonographic|copyright/i.test(x.role)).slice(0, 6);
+  for (const c of companies) dist.push(`${sourceName(c.source)}: ${escapeMd(c.role)} ${escapeMd(c.name)}`);
+  if (discogs && companies.some((c) => c.source === 'discogs')) dist.push(discogs);
   fields.push({ name: '🏢 Distributor and licensor', value: listValue(dist) });
 
   const streams = card.shared && !card.shared.streams ? null : streamsCount(card);
   if (streams) fields.push({ name: '📈 Streams', value: `${formatNumber(streams.count)} — *${streams.label}*` });
   if (md.conflicts.length) fields.push({ name: '⚠ Where sources disagree', value: listValue(md.conflicts.map((c) => `**${FIELD_NAMES[c.field] ?? c.field}:** ${c.values.map((v) => `${sourceName(v.source)} "${escapeMd(truncate(v.value, 60))}"`).join(' · ')}`)) });
   if (card.corrections?.length) fields.push({ name: '✓ Reviewed corrections', value: listValue(card.corrections.map((c) => `**${FIELD_NAMES[c.field] ?? c.field}:** ${escapeMd(c.value)}${c.reviewer ? ` (approved by ${escapeMd(c.reviewer)})` : ''}`)) });
-  const status = md.sources.map((s) => `${sourceName(s.source)} ${s.ok ? '✓' : s.skipped ? '– not used' : '✗ no answer'}`);
+  if (card.history?.length) fields.push({ name: '🕓 History', value: listValue(historyLines(card.history, card.lookedUpAt)) });
+  const status = md.sources.map((s) => `${sourceName(s.source)} ${sourceStatus(s)}`);
   if (status.length) fields.push({ name: '🔎 Sources checked', value: listValue([status.join(' · ')]) });
   return view(card, 'ℹ️ Extended Info', { description: '*Catalogue metadata is not proof of who owns or licenses a recording.*', fields });
+}
+
+function sourceStatus(s: Card['md']['sources'][number]) {
+  if (s.ok) return '✓';
+  switch (s.outcome) {
+    case 'no_match':
+      return '– no match';
+    case 'paused':
+      return '⏸ paused (repeated errors)';
+    case 'timeout':
+      return '✗ timed out';
+    case 'rate_limited':
+      return '✗ refused (rate limit)';
+    case 'busy':
+      return '– busy, skipped';
+    case 'skipped':
+      return '– not used';
+    default:
+      return s.skipped ? '– not used' : s.error === 'no match' ? '– no match' : '✗ no answer';
+  }
+}
+
+export type HistoryChange = { field: string; source: string; from: string; to: string; lastSeenOld: Date; firstSeenNew: Date };
+
+/**
+ * Values a source has changed: for each field and source, the latest value
+ * against the one it reported before. Nothing is inferred between sightings.
+ */
+export function historyChanges(rows: HistoryRow[]): HistoryChange[] {
+  const groups = new Map<string, HistoryRow[]>();
+  for (const r of rows) groups.set(`${r.ref}|${r.field}|${r.source}`, [...(groups.get(`${r.ref}|${r.field}|${r.source}`) ?? []), r]);
+  const out: HistoryChange[] = [];
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    const sorted = [...g].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime());
+    const current = sorted[0];
+    const previous = sorted.find((r) => r.value !== current.value && r.lastSeenAt.getTime() < current.lastSeenAt.getTime());
+    if (previous) out.push({ field: current.field, source: current.source, from: previous.value, to: current.value, lastSeenOld: previous.lastSeenAt, firstSeenNew: current.firstSeenAt });
+  }
+  return out.sort((a, b) => b.firstSeenNew.getTime() - a.firstSeenNew.getTime());
+}
+
+function historyLines(rows: HistoryRow[], checkedAt: Date): string[] {
+  const first = rows.reduce((min, r) => (r.firstSeenAt < min ? r.firstSeenAt : min), rows[0].firstSeenAt);
+  const lines = [`Checked ${formatMoment(checkedAt, 'R')}. Values kept since ${formatMoment(first, 'd')}.`];
+  const changes = historyChanges(rows);
+  for (const c of changes.slice(0, 6)) {
+    const show = (v: string) => escapeMd(truncate(c.field === 'durationMs' ? (formatDuration(Number(v)) ?? v) : c.field === 'upc' ? (displayUpc(v) ?? v) : v, 50));
+    lines.push(`**${FIELD_NAMES[c.field] ?? c.field}** on ${sourceName(c.source)}: "${show(c.from)}" → "${show(c.to)}" (between ${formatMoment(c.lastSeenOld, 'd')} and ${formatMoment(c.firstSeenNew, 'd')})`);
+  }
+  if (changes.length > 6) lines.push(`…and ${changes.length - 6} more changes.`);
+  if (!changes.length) lines.push('No source has changed a value since then.');
+  return lines;
 }
 
 /* ------------------------------------------------------------- Credits -- */
@@ -84,7 +141,8 @@ export function creditsView(card: Card, fetched: { source: string; credits: Arra
     return view(card, '👥 Credits', { description: `No credits were found for this song.${card.credits ? ' It is in your catalogue, but no credits have been added there yet.' : ''}${artists}` });
   }
   const fields = creditGroups(list.credits).map((g) => ({ name: g.name, value: listValue(g.credits.map((c) => `• **${escapeMd(c.name)}** — ${escapeMd(c.role)}`)) }));
-  return view(card, '👥 Credits', { fields: fields.slice(0, 25) }, `Credits from ${sourceName(list.source)}`);
+  const credit = list.source === 'discogs' ? discogsCredit(card.md) : null;
+  return view(card, '👥 Credits', { ...(credit ? { description: credit } : {}), fields: fields.slice(0, 25) }, `Credits from ${sourceName(list.source)}`);
 }
 
 /* --------------------------------------------------------- Performance -- */
@@ -166,9 +224,19 @@ export function tracklistView(card: Card): Embed {
 
 /* --------------------------------------------------------------- Audio -- */
 
-export function audioView(card: Card, attached: boolean): MessagePayload {
-  if (!attached) return { content: 'No preview is available for this song.', embeds: [], components: [] };
-  return { content: '', embeds: [view(card, '🎧 Audio File', { description: '30-second preview from Deezer.' })], components: [] };
+/**
+ * Deezer's 30-second preview, played from Deezer: its terms forbid storing
+ * preview audio or making it downloadable, so it is linked, never attached.
+ * The link is signed by Deezer and stops working after about 15 minutes.
+ */
+export function audioView(card: Card, previewUrl: string | null): MessagePayload {
+  const page = card.md.platformIds.find((p) => p.platform === 'deezer' && p.entity === 'track' && p.url && /^https:\/\//.test(p.url))?.url ?? null;
+  if (!previewUrl && !page) return { content: 'No preview is available for this song.', embeds: [], components: [] };
+  const btns: Button[] = [];
+  if (previewUrl && previewUrl.length <= 512) btns.push({ type: ComponentType.BUTTON, style: ButtonStyle.LINK, label: 'Play the 30-second preview', emoji: { name: '▶️' }, url: previewUrl });
+  if (page && page.length <= 512) btns.push({ type: ComponentType.BUTTON, style: ButtonStyle.LINK, label: 'Listen on Deezer', emoji: { name: '🎧' }, url: page });
+  const description = btns.length > 1 || (previewUrl && btns.length) ? '30-second preview, played from Deezer. The preview link works for about 15 minutes; press the button again for a new one.' : 'No preview link right now. The song is on Deezer.';
+  return { content: '', embeds: [view(card, '🎧 Audio File', { description })], components: btns.length ? [{ type: ComponentType.ACTION_ROW, components: btns }] : [] };
 }
 
 export function renderView(card: Card, kind: 'details' | 'tracks' | 'avail'): MessagePayload {

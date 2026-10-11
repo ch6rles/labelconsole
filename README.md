@@ -15,6 +15,9 @@ A multi-tenant workspace for record labels: catalogue, roster, marketing, contra
   - Commands: `/song`, `/release`, `/artist`, `/label`, `/licensor`, `/compare` and `/correct`, plus "Look Up Song" on a message, in any server or DM.
   - Cards show identifiers, label and ℗/© lines, the distributor with its evidence, credits, a performance chart, other links, a preview and availability. Each field is marked verified, reported, conflicting, inferred or unknown.
   - Searches ask "Which one?" instead of guessing, and corrections are reviewed before they show.
+  - Each source's values are kept as evidence (as far as its terms allow), so changes show over time.
+  - A failing source is paused, and a slow or rate-limited one is skipped rather than waited on.
+  - A benchmark scores each source against your own catalogue.
   - See [docs/discord.md](docs/discord.md).
 - **Inbox, Admin and Settings:** notifications, the approvals queue, an activity feed, roles and custom roles, an audit log, an integrations vault, plan and usage, and full data export.
 
@@ -79,3 +82,4 @@ Each module owns its schema, services, API routes, jobs, listeners, agent tools 
 - [docs/operations.md](docs/operations.md): deploying, configuration, scaling, backups, monitoring, runbook
 - [docs/progress.md](docs/progress.md): what each phase delivered and how to verify it, plus open decisions
 - [docs/discord.md](docs/discord.md): setting up and using the Discord app
+- [docs/discord-providers.md](docs/discord-providers.md): the Discord app's data providers, their terms, and the decisions they leave

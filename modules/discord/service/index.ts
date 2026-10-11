@@ -1,19 +1,21 @@
 import '../types';
 import { createHmac, randomInt } from 'node:crypto';
-import { and, desc, eq, gt, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { memberAccess } from '@labelconsole/core/auth';
 import { withOrg, withSystemOrg, type ServiceContext } from '@labelconsole/core/context';
 import { systemDb } from '@labelconsole/core/db/client';
 import { credentials, users } from '@labelconsole/core/db/schema';
 import { env } from '@labelconsole/core/env';
-import { ForbiddenError, NotFoundError, ValidationError } from '@labelconsole/core/errors';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '@labelconsole/core/errors';
 import { enqueueAfterCommit } from '@labelconsole/core/queue';
 import { getCredentialHandle } from '@labelconsole/core/vault';
 import { isPublicKeyHex, isSnowflake } from '../protocol/verify';
 import { notify } from '@labelconsole/inbox/service';
 import { CORRECTABLE_FIELDS } from '../protocol/commands';
-import { discordCorrections, discordLinkCodes, discordLinks, discordLookups, discordPlayReadings, discordState } from '../schema';
+import { RECORDING_FIELDS, type ClaimField, type ResolvedMetadata } from '@labelconsole/catalogue/schema';
+import { pausedSources, resumeSource } from '@labelconsole/catalogue/service';
+import { discordBenchmarks, discordCorrections, discordEvidence, discordLinkCodes, discordLinks, discordLookups, discordPlayReadings, discordState, type SourceCall } from '../schema';
 
 /** The permission a member needs to link and use the app: the app shows catalogue data. */
 export const USE_PERMISSION = 'catalogue:read';
@@ -110,6 +112,7 @@ export async function unlinkDiscordUser(orgId: string, discordUserId: string) {
     orgId,
     async (ctx) => {
       await ctx.tx.delete(discordLinks).where(eq(discordLinks.id, link.id));
+      await forgetLookups(ctx, link.userId);
       await ctx.audit({ action: 'discord.unlinked', module: 'discord', targetType: 'user', targetId: link.userId, targetLabel: link.discordUsername, before: { discordUsername: link.discordUsername }, after: { via: 'discord' } });
     },
     'discord /unlink',
@@ -132,12 +135,18 @@ export async function listLinks(ctx: ServiceContext) {
     .orderBy(desc(discordLinks.createdAt));
 }
 
+/** Unlinking also removes the person from the lookup log; the counts stay for the label's metrics. */
+async function forgetLookups(ctx: ServiceContext, userId: string) {
+  await ctx.tx.update(discordLookups).set({ userId: null }).where(eq(discordLookups.userId, userId));
+}
+
 /** Anyone may remove their own link; removing someone else's needs member management rights. */
 export async function removeLink(ctx: ServiceContext, id: string) {
   const [link] = await ctx.tx.select().from(discordLinks).where(eq(discordLinks.id, id));
   if (!link) throw new NotFoundError('Discord link');
   if (!(ctx.actor.type === 'user' && ctx.actor.id === link.userId)) ctx.assert('settings:members');
   await ctx.tx.delete(discordLinks).where(eq(discordLinks.id, id));
+  await forgetLookups(ctx, link.userId);
   await ctx.audit({ action: 'discord.unlinked', module: 'discord', targetType: 'user', targetId: link.userId, targetLabel: link.discordUsername, before: { discordUsername: link.discordUsername } });
   return { ok: true };
 }
@@ -223,30 +232,38 @@ export async function recordCommandRegistration(ctx: ServiceContext, application
   await ctx.tx.insert(discordState).values(values).onConflictDoUpdate({ target: discordState.orgId, set: values });
 }
 
-/* ------------------------------------------------------------- sharing -- */
+/* ------------------------------------------------------------ settings -- */
 
 export type SharingSettings = { allowSharing: boolean; shareDistributor: boolean; shareStreams: boolean };
-const DEFAULT_SHARING: SharingSettings = { allowSharing: true, shareDistributor: true, shareStreams: true };
+export type DiscordSettings = SharingSettings & { dailyReadings: number };
+const DEFAULT_SETTINGS: DiscordSettings = { allowSharing: true, shareDistributor: true, shareStreams: true, dailyReadings: 0 };
+/** Daily readings cost one SpotScraper request per song per day, so the cap is kept modest. */
+export const MAX_DAILY_READINGS = 200;
 
 /** What members may post for everyone, read before any member context exists (interactions endpoint). */
 export async function sharingFor(orgId: string): Promise<SharingSettings> {
   const [row] = await systemDb().select({ allowSharing: discordState.allowSharing, shareDistributor: discordState.shareDistributor, shareStreams: discordState.shareStreams }).from(discordState).where(eq(discordState.orgId, orgId));
-  return row ?? DEFAULT_SHARING;
+  return row ?? DEFAULT_SETTINGS;
 }
 
-export const SharingPatch = z.object({ allowSharing: z.boolean().optional(), shareDistributor: z.boolean().optional(), shareStreams: z.boolean().optional() });
+export const SettingsPatch = z.object({
+  allowSharing: z.boolean().optional(),
+  shareDistributor: z.boolean().optional(),
+  shareStreams: z.boolean().optional(),
+  dailyReadings: z.number().int().min(0).max(MAX_DAILY_READINGS).optional(),
+});
 
-export async function sharingSettings(ctx: ServiceContext): Promise<SharingSettings> {
+export async function discordSettings(ctx: ServiceContext): Promise<DiscordSettings> {
   const [row] = await ctx.tx.select().from(discordState);
-  return row ? { allowSharing: row.allowSharing, shareDistributor: row.shareDistributor, shareStreams: row.shareStreams } : DEFAULT_SHARING;
+  return row ? { allowSharing: row.allowSharing, shareDistributor: row.shareDistributor, shareStreams: row.shareStreams, dailyReadings: row.dailyReadings } : DEFAULT_SETTINGS;
 }
 
-export async function updateSharing(ctx: ServiceContext, patch: z.infer<typeof SharingPatch>) {
+export async function updateDiscordSettings(ctx: ServiceContext, patch: z.infer<typeof SettingsPatch>) {
   ctx.assert('settings:manage');
-  const before = await sharingSettings(ctx);
+  const before = await discordSettings(ctx);
   const after = { ...before, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) };
   await ctx.tx.insert(discordState).values(after).onConflictDoUpdate({ target: discordState.orgId, set: after });
-  await ctx.audit({ action: 'discord.sharing_updated', module: 'discord', targetType: 'discord_app', targetLabel: 'Discord sharing', before, after });
+  await ctx.audit({ action: 'discord.settings_updated', module: 'discord', targetType: 'discord_app', targetLabel: 'Discord settings', before, after });
   return after;
 }
 
@@ -351,16 +368,21 @@ export async function readingsFor(ctx: ServiceContext, isrc: string, platform = 
 
 /* ------------------------------------------------------------- metrics -- */
 
-export type LookupLog = { userId: string | null; command: string; inputKind: string; outcome: string; ref: string | null; cached: boolean; durationMs: number; coverage?: Record<string, string> | null };
+export type LookupLog = { userId: string | null; command: string; inputKind: string; outcome: string; ref: string | null; cached: boolean; durationMs: number; coverage?: Record<string, string> | null; sources?: SourceCall[] | null };
 
 export async function recordLookup(ctx: ServiceContext, log: LookupLog) {
-  await ctx.tx.insert(discordLookups).values({ ...log, durationMs: Math.max(0, Math.round(log.durationMs)), coverage: log.coverage ?? null });
+  await ctx.tx.insert(discordLookups).values({ ...log, durationMs: Math.max(0, Math.round(log.durationMs)), coverage: log.coverage ?? null, sources: log.sources?.length ? log.sources : null });
 }
+
+/** Source outcomes that mean the answer may be missing something. */
+export const DEGRADED = ['error', 'timeout', 'rate_limited', 'busy', 'paused'];
 
 /** Launch metrics for Settings → Discord: the last `days` of commands. */
 export async function lookupStats(ctx: ServiceContext, days = 7) {
   ctx.assert('settings:read');
   const since = new Date(Date.now() - days * 86400_000);
+  const sinceSql = sql`${since.toISOString()}::timestamptz`;
+  const degraded = sql.raw(DEGRADED.map((d) => `'${d}'`).join(', '));
   const [row] = await ctx.tx
     .select({
       total: sql<number>`count(*)::int`,
@@ -371,23 +393,193 @@ export async function lookupStats(ctx: ServiceContext, days = 7) {
       cached: sql<number>`count(*) filter (where ${discordLookups.cached})::int`,
       codes: sql<number>`count(*) filter (where ${discordLookups.inputKind} in ('isrc', 'upc'))::int`,
       codesFound: sql<number>`count(*) filter (where ${discordLookups.inputKind} in ('isrc', 'upc') and ${discordLookups.outcome} = 'card')::int`,
+      fresh: sql<number>`count(*) filter (where ${discordLookups.sources} is not null)::int`,
+      partial: sql<number>`count(*) filter (where exists (select 1 from jsonb_array_elements(${discordLookups.sources}) as e where e->>'outcome' in (${degraded})))::int`,
       p50: sql<number | null>`percentile_cont(0.5) within group (order by ${discordLookups.durationMs})`,
       p95: sql<number | null>`percentile_cont(0.95) within group (order by ${discordLookups.durationMs})`,
     })
     .from(discordLookups)
     .where(gte(discordLookups.createdAt, since));
   const coverage = (await ctx.tx.execute(
-    sql`select kv.key as field, kv.value as status, count(*)::int as n from discord_lookups, jsonb_each_text(discord_lookups.coverage) as kv where discord_lookups.created_at >= ${since.toISOString()}::timestamptz and discord_lookups.outcome = 'card' group by 1, 2`,
+    sql`select kv.key as field, kv.value as status, count(*)::int as n from discord_lookups, jsonb_each_text(discord_lookups.coverage) as kv where discord_lookups.created_at >= ${sinceSql} and discord_lookups.outcome = 'card' group by 1, 2`,
   )) as unknown as Array<{ field: string; status: string; n: number }>;
+  const sources = (await ctx.tx.execute(
+    sql`select e->>'source' as source, e->>'outcome' as outcome, count(*)::int as n,
+          percentile_cont(0.5) within group (order by (e->>'ms')::int) as p50,
+          percentile_cont(0.95) within group (order by (e->>'ms')::int) as p95
+        from discord_lookups, jsonb_array_elements(discord_lookups.sources) as e
+        where discord_lookups.created_at >= ${sinceSql} and discord_lookups.sources is not null
+        group by 1, 2`,
+  )) as unknown as Array<{ source: string; outcome: string; n: number; p50: number | null; p95: number | null }>;
   const [corrections] = await ctx.tx
-    .select({ pending: sql<number>`count(*) filter (where ${discordCorrections.status} = 'pending')::int`, recent: sql<number>`count(*) filter (where ${discordCorrections.createdAt} >= ${since.toISOString()}::timestamptz)::int` })
+    .select({ pending: sql<number>`count(*) filter (where ${discordCorrections.status} = 'pending')::int`, recent: sql<number>`count(*) filter (where ${discordCorrections.createdAt} >= ${sinceSql})::int` })
     .from(discordCorrections);
-  return { days, ...row, p50: row.p50 == null ? null : Math.round(row.p50), p95: row.p95 == null ? null : Math.round(row.p95), coverage, corrections };
+  return { days, ...row, p50: row.p50 == null ? null : Math.round(row.p50), p95: row.p95 == null ? null : Math.round(row.p95), coverage, sources: sourceHealth(sources), paused: await pausedForLabel(ctx.orgId), corrections };
 }
 
-/** Daily housekeeping across labels (system pool): old lookup logs and spent link codes. */
+/** Outcomes where the source was never asked. */
+const NOT_CALLED = ['skipped', 'paused', 'busy'];
+
+export type SourceHealth = { source: string; calls: number; outcomes: Record<string, number>; p50: number | null; p95: number | null };
+
+/** One row per source: outcome counts, and timing over the calls that reached it. */
+export function sourceHealth(rows: Array<{ source: string; outcome: string; n: number; p50: number | null; p95: number | null }>): SourceHealth[] {
+  const by = new Map<string, SourceHealth & { timed: number }>();
+  for (const r of rows) {
+    const h = by.get(r.source) ?? { source: r.source, calls: 0, outcomes: {}, p50: null, p95: null, timed: 0 };
+    h.outcomes[r.outcome] = (h.outcomes[r.outcome] ?? 0) + r.n;
+    if (!NOT_CALLED.includes(r.outcome)) h.calls += r.n;
+    // Timing: the answered calls' figures are the useful ones; else whatever was timed.
+    if (r.p50 != null && (r.outcome === 'answered' || h.p50 == null)) {
+      h.p50 = Math.round(Number(r.p50));
+      h.p95 = r.p95 == null ? null : Math.round(Number(r.p95));
+    }
+    by.set(r.source, h);
+  }
+  return [...by.values()].map(({ timed: _, ...h }) => h).sort((a, b) => b.calls - a.calls || a.source.localeCompare(b.source));
+}
+
+/** Sources paused right now that affect this label: shared ones, and the label's own keyed ones. */
+async function pausedForLabel(orgId: string) {
+  return (await pausedSources()).filter((p) => p.scope === null || p.scope === orgId).map((p) => ({ source: p.source, secondsLeft: p.secondsLeft, own: p.scope !== null }));
+}
+
+/** Clear a pause by hand, after fixing a key or when the outage is over. Shared pauses clear for everyone. */
+export async function resumePausedSource(ctx: ServiceContext, source: string) {
+  ctx.assert('settings:manage');
+  if (!/^[a-z]{2,20}$/.test(source)) throw new ValidationError('Unknown source');
+  await resumeSource(source, null);
+  await resumeSource(source, ctx.orgId);
+  await ctx.audit({ action: 'discord.source_resumed', module: 'discord', targetType: 'metadata_source', targetLabel: source });
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------ evidence -- */
+
+export type EvidenceRow = { ref: string; field: string; source: string; value: string; sourceUrl: string | null; firstSeenAt: Date; lastSeenAt: Date };
+
+/**
+ * How long each source's values stay in the history, in days, following
+ * each provider's terms (docs/discord-providers.md). 0 means never kept:
+ * the value is shown at lookup time (and cached for an hour) only.
+ * - MusicBrainz core data is CC0: kept two years.
+ * - iTunes Search encourages caching its text metadata: kept 30 days.
+ * - Spotify forbids storing its content beyond temporary caching; Discogs
+ *   forbids keeping API data longer than needed (and older than 6 hours on
+ *   screen); Deezer and Apple Music limit use; SpotScraper is scraped
+ *   Spotify data; licensed vendors depend on the contract: none are kept.
+ */
+export const EVIDENCE_RETENTION_DAYS: Record<string, number> = { default: 0, musicbrainz: 730, itunes: 30 };
+export const retentionDays = (source: string) => EVIDENCE_RETENTION_DAYS[source] ?? EVIDENCE_RETENTION_DAYS.default;
+
+/** The rows a lookup adds to the history: recording fields under the ISRC, release fields under each source's own UPC. */
+export function evidenceRows(md: ResolvedMetadata): Array<Pick<EvidenceRow, 'ref' | 'field' | 'source' | 'value' | 'sourceUrl'>> {
+  const isrcRef = md.isrc ? `isrc:${md.isrc}` : null;
+  const out = new Map<string, Pick<EvidenceRow, 'ref' | 'field' | 'source' | 'value' | 'sourceUrl'>>();
+  for (const c of md.claims ?? []) {
+    if (retentionDays(c.source) <= 0) continue;
+    const releaseRef = c.upc ? `upc:${c.upc}` : md.upc ? `upc:${md.upc}` : null;
+    for (const [field, value] of Object.entries(c.values)) {
+      if (!value || field === 'isrc') continue;
+      const ref = RECORDING_FIELDS.includes(field as ClaimField) ? isrcRef : releaseRef;
+      if (!ref) continue;
+      const row = { ref, field, source: c.source, value: value.slice(0, 500), sourceUrl: c.url };
+      out.set(`${row.ref}|${row.field}|${row.source}|${row.value}`, row);
+    }
+  }
+  return [...out.values()];
+}
+
+/** Keep what each source said. A new value is a new row; a value seen again only moves `last_seen_at`. */
+export async function recordEvidence(ctx: ServiceContext, md: ResolvedMetadata, seenAt = new Date()) {
+  const rows = evidenceRows(md);
+  if (!rows.length) return 0;
+  await ctx.tx
+    .insert(discordEvidence)
+    .values(rows.map((r) => ({ ...r, firstSeenAt: seenAt, lastSeenAt: seenAt })))
+    .onConflictDoUpdate({ target: [discordEvidence.orgId, discordEvidence.ref, discordEvidence.field, discordEvidence.source, discordEvidence.value], set: { lastSeenAt: seenAt, sourceUrl: sql`coalesce(excluded.source_url, ${discordEvidence.sourceUrl})` } });
+  return rows.length;
+}
+
+/** The history for a song or release (its ISRC and UPC refs). */
+export async function evidenceFor(ctx: ServiceContext, refs: string[]): Promise<EvidenceRow[]> {
+  if (!refs.length) return [];
+  return ctx.tx
+    .select({ ref: discordEvidence.ref, field: discordEvidence.field, source: discordEvidence.source, value: discordEvidence.value, sourceUrl: discordEvidence.sourceUrl, firstSeenAt: discordEvidence.firstSeenAt, lastSeenAt: discordEvidence.lastSeenAt })
+    .from(discordEvidence)
+    .where(inArray(discordEvidence.ref, refs))
+    .orderBy(discordEvidence.field, discordEvidence.source, discordEvidence.firstSeenAt)
+    .limit(500);
+}
+
+/* ---------------------------------------------------------- benchmarks -- */
+
+export const BenchmarkInput = z.object({ sample: z.coerce.number().int().min(5).max(50).default(20), includeBilled: z.boolean().default(false) });
+
+/** Look up a sample of the label's own songs through every source and score them against the catalogue. One at a time per label. */
+export async function startBenchmark(ctx: ServiceContext, input: z.input<typeof BenchmarkInput>) {
+  ctx.assert('settings:manage');
+  const userId = assertPerson(ctx);
+  const data = BenchmarkInput.parse(input);
+  const [running] = await ctx.tx
+    .select({ id: discordBenchmarks.id })
+    .from(discordBenchmarks)
+    .where(and(inArray(discordBenchmarks.status, ['queued', 'running']), gte(discordBenchmarks.createdAt, new Date(Date.now() - 3600_000))))
+    .limit(1);
+  if (running) throw new ConflictError('A benchmark is already running. It takes a few minutes.');
+  const [row] = await ctx.tx.insert(discordBenchmarks).values({ requestedBy: userId, sample: data.sample, includeBilled: data.includeBilled }).returning();
+  enqueueAfterCommit(ctx, 'discord.benchmark', { benchmarkId: row.id }, { attempts: 1, jobId: `discord-benchmark-${row.id}` });
+  await ctx.audit({ action: 'discord.benchmark_started', module: 'discord', targetType: 'discord_benchmark', targetId: row.id, targetLabel: `Source benchmark (${data.sample} songs)`, after: data });
+  return row;
+}
+
+/** Members limited to some artists don't see the per-song disagreements: the sample may include other artists' songs. */
+const forViewer = (ctx: ServiceContext, row: typeof discordBenchmarks.$inferSelect) => (ctx.artistScope && row.results ? { ...row, results: { ...row.results, misses: [] } } : row);
+
+export async function listBenchmarks(ctx: ServiceContext) {
+  ctx.assert('settings:read');
+  const rows = await ctx.tx.select().from(discordBenchmarks).orderBy(desc(discordBenchmarks.createdAt)).limit(5);
+  return rows.map((r) => forViewer(ctx, r));
+}
+
+export async function getBenchmark(ctx: ServiceContext, id: string) {
+  ctx.assert('settings:read');
+  const [row] = await ctx.tx.select().from(discordBenchmarks).where(eq(discordBenchmarks.id, id));
+  if (!row) throw new NotFoundError('Benchmark');
+  return forViewer(ctx, row);
+}
+
+/* ------------------------------------------------------ daily readings -- */
+
+/** Labels that keep daily readings, across labels (system pool). */
+export async function labelsWithDailyReadings() {
+  return systemDb().select({ orgId: discordState.orgId, limit: discordState.dailyReadings }).from(discordState).where(gt(discordState.dailyReadings, 0));
+}
+
+/**
+ * The songs to read today: the most recently looked-up ISRCs of the last 30
+ * days, newest first. Songs in the label's catalogue are left out: Streams
+ * tracks those daily already.
+ */
+export async function songsToFollow(ctx: ServiceContext, limit: number) {
+  const rows = (await ctx.tx.execute(
+    sql`select substr(ref, 6) as isrc, max(created_at) as last from discord_lookups
+        where ref like 'isrc:%' and created_at >= now() - interval '30 days'
+          and substr(ref, 6) not in (select isrc from tracks where isrc is not null)
+        group by 1 order by 2 desc limit ${Math.max(0, Math.min(MAX_DAILY_READINGS, limit))}`,
+  )) as unknown as Array<{ isrc: string }>;
+  return rows.map((r) => r.isrc);
+}
+
+/** Daily housekeeping across labels (system pool): old lookup logs, spent link codes, evidence past its retention. */
 export async function purgeOld() {
   const db = systemDb();
   await db.delete(discordLookups).where(lt(discordLookups.createdAt, new Date(Date.now() - 180 * 86400_000)));
   await db.delete(discordLinkCodes).where(or(lt(discordLinkCodes.expiresAt, new Date(Date.now() - 86400_000)), lt(discordLinkCodes.usedAt, new Date(Date.now() - 86400_000))));
+  for (const [source, days] of Object.entries(EVIDENCE_RETENTION_DAYS)) {
+    const old = lt(discordEvidence.lastSeenAt, new Date(Date.now() - days * 86400_000));
+    const others = Object.keys(EVIDENCE_RETENTION_DAYS).filter((s) => s !== 'default');
+    await db.delete(discordEvidence).where(source === 'default' ? (others.length ? and(old, notInArray(discordEvidence.source, others)) : old) : and(old, eq(discordEvidence.source, source)));
+  }
+  await db.delete(discordBenchmarks).where(lt(discordBenchmarks.createdAt, new Date(Date.now() - 365 * 86400_000)));
 }

@@ -519,18 +519,25 @@ The owner asked whether YouTube Music streams can be tracked without a YouTube D
 
 ## Discord app
 
-**What it is:** a private Discord app built from the "Discord Music Metadata Lookup App" plan. All its phases are in place; its cards look like DistroFind's. Full guide: [discord.md](discord.md).
+**What it is:** a private Discord app built from the "Discord Music Metadata Lookup App" plan. All its phases are in place, including the provider review, evidence storage, reliability, benchmark and launch work; its cards look like DistroFind's. Full guide: [discord.md](discord.md). Provider terms: [discord-providers.md](discord-providers.md).
+
+**Phase 0: feasibility.**
+- A provider matrix from each provider's current terms (coverage, access, cost, caching, attribution, commercial use), and the decisions it leaves for the owner (below).
+- A source benchmark in Settings → Discord: the label's own songs looked up through every source and scored against the catalogue.
 
 **Phases 1–2: lookup.**
 - `/song` and Look Up Song, reusing the catalogue's lookup.
 - A "Which one?" list instead of guessing, and an hour's cache per ISRC/UPC.
 - Every field labelled verified, source-reported, conflicting, inferred or unknown.
+- Evidence storage: each source's value per field, with first and last seen and a record link, kept only as long as that provider's terms allow. Extended Info shows what a source changed, and when.
 
 **Phase 3: more sources.**
 - Discogs (by UPC, with a personal token): labels, catalogue numbers, company credits ("Distributed By" counts as evidence, not proof), and credits.
 - Deezer previews and availability, Spotify markets, and SpotScraper play counts.
 - Credits for any song: Spotify through SpotScraper, then MusicBrainz relationships, then Discogs.
 - A source that fails or is not connected is listed in Extended Info; the card still answers.
+- A circuit breaker pauses a failing source for two minutes, across workers. A label's own bad key pauses it only for that label.
+- Replies give each source a time budget, so a rate-limited source (MusicBrainz: one request a second for everyone) is skipped instead of waited on. A lookup that finds nothing while sources were busy tries again before saying "not found".
 
 **Phase 4: label records.**
 - The label's own records verify the distributor: distributor statements that list the release's UPC/ISRC, or distributors entered or confirmed in the catalogue.
@@ -540,26 +547,43 @@ The owner asked whether YouTube Music streams can be tracked without a YouTube D
 **Phase 5: credits and labels.**
 - `/release`, `/artist` (Deezer, MusicBrainz, the roster) and `/label` (MusicBrainz, the catalogue).
 - Spotify-style credit groups, and other links.
-- `/compare`, and `/correct` plus the Report / Correct form, reviewed in Settings → Discord.
+- `/compare` (with credits for two songs), and `/correct` plus the Report / Correct form, reviewed in Settings → Discord.
+- `/artist` shows writing credits from MusicBrainz, and the artist's credits in your catalogue.
 
 **Phase 6: analytics.**
 - A performance chart image. Songs Label Console tracks show daily plays from Streams, with estimated days lighter and missing days left empty.
 - Any other song shows its Spotify count each time it is looked up (kept as readings, at most one an hour).
+- Optional daily readings for recently looked-up songs (one billed SpotScraper request a song a day; off by default).
+- Each count says who reported it and when; changes are labelled as calculated.
 
 **Phase 7: production.**
 - A lookup log with the launch metrics (success, "Which one?" rate, nothing found, errors, exact-identifier resolution, cache hits, p50/p95 time, field coverage).
 - The same in Settings → Discord and on `/api/metrics`.
 - A daily purge job, and a runbook in discord.md.
+- Per-source health (outcomes and timing), partial-result rate, correction rate, and the verified / source-reported / conflicting / inferred / unknown split per field.
+- Alerts (errors, slow lookups, a failing source, a paused source) and a "Discord app" row on the Grafana dashboard.
+- A load test (`pnpm test:load`); numbers in operations.md. Writing it found replies taking up to 2½ minutes under a burst, which led to the time budgets above (now 16 s).
+- A permission review and a launch checklist in discord.md.
+- Provider terms applied:
+  - Deezer previews are linked, never attached.
+  - Discogs data carries its notice.
+  - Evidence from Spotify, Deezer, Discogs and others isn't kept.
+  - Unlinking removes a member from the lookup log.
 
 **Who can use it:** only members of the label who linked their Discord account with a one-time code.
 - Every request uses the member's current role, artist scope and membership.
 - Replies are private unless shared.
 
 **Changes elsewhere:**
-- **Catalogue:** lookups also carry cover art, a preview, availability, the play count, the catalogue number, companies, and which sources gave each field. Discogs joins the sources. Candidate and album search, credits fetching, and release lists by label and by distributor are exported for other modules. Track Import is otherwise unchanged.
+- **Catalogue:**
+  - Lookups also carry cover art, a preview, availability, the play count, the catalogue number, companies, which sources gave each field, each source's own values (`claims`), and how long each source took and how it ended.
+  - Discogs joins the sources.
+  - Candidate and album search, credits fetching, credits by name, a benchmark sample, and release lists by label and by distributor are exported for other modules.
+  - The circuit breaker also protects Track Import. Time budgets apply only when a caller asks for them, so Track Import still waits for every source.
 - **Documents:** `statementDistributors` and `statementCodesFor` return distributor names and codes only, never money.
 - **Settings → Integrations:** "Discord app" and "Discogs" entries, with format checks on save.
 - **Dockerfile:** installs a font for the chart in the worker images; the worker depends on `sharp`.
+- **Core:** `withBudget` and `DeadlineError` in `packages/core/src/http.ts` and `errors.ts`, for callers that should answer with what they have.
 
 **Verified:**
 - 179 unit and 130 integration tests pass.
@@ -567,7 +591,9 @@ The owner asked whether YouTube Music streams can be tracked without a YouTube D
 - The production build passes.
 - Not yet tried against a live Discord application. The first real install is the check.
 
-**Not built:** an Odesli (song.link) source: its public API now needs a key, so Other Links uses exact IDs plus search links.
+**Not built:**
+- An Odesli (song.link) source: its public API now needs a key, so Other Links uses exact IDs plus search links.
+- A Deezer logo on cards, as Deezer's guidelines require: it waits on the Deezer decision below.
 
 ## Next steps
 
@@ -586,6 +612,11 @@ These need the owner. Nothing paid was added without asking.
 - **Spotify Web API extended access**, or rely on Deezer, MusicBrainz and Apple for metadata (current default).
 - **Outreach channels for agents** beyond email; most social platforms restrict automated DMs.
 - **Artist portal** logins (a later phase in the spec).
+- **Discord app data providers** (details in [discord-providers.md](discord-providers.md)):
+  - **Deezer:** its terms allow non-commercial, private use only. Ask for approval, accept the risk, or move text search off Deezer.
+  - **MusicBrainz:** commercial use is expected to pay (from $100/month), or run a mirror.
+  - **Spotify Web API:** its policy rules out business tools.
+  - **Apple Music API:** not permitted for catalogue lookups.
 
 ## Running locally
 

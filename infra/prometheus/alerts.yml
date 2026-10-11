@@ -54,3 +54,35 @@ groups:
         labels: { severity: info }
         annotations:
           summary: Agent model spend today is over $500 across all labels
+
+      - alert: DiscordLookupErrors
+        expr: sum(lc_discord_lookups_24h{outcome="error"}) / clamp_min(sum(lc_discord_lookups_24h), 1) > 0.1 and sum(lc_discord_lookups_24h) >= 20
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: More than 10% of Discord commands failed in the last day
+          description: Check the worker log for "discord lookup failed" and lc_metadata_source_calls_24h for a failing source. Runbook in docs/discord.md.
+
+      - alert: DiscordLookupsSlow
+        expr: lc_discord_lookup_ms_24h{quantile="0.95"} > 15000
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: Discord lookups are slow (95th percentile over 15 s)
+          description: Usually one slow source. Compare lc_metadata_source_ms_24h by source; a paused or failing source shows in lc_metadata_source_paused.
+
+      - alert: MetadataSourceFailing
+        expr: sum by (source) (lc_metadata_source_calls_24h{outcome=~"error|timeout|rate_limited"}) / clamp_min(sum by (source) (lc_metadata_source_calls_24h{outcome!~"skipped|paused|busy"}), 1) > 0.5 and sum by (source) (lc_metadata_source_calls_24h{outcome!~"skipped|paused|busy"}) >= 10
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: '{{ $labels.source }} failed more than half its calls in the last day'
+          description: Cards still answer from the other sources. Check the provider's status and the key under Settings → Integrations.
+
+      - alert: MetadataSourcePaused
+        expr: lc_metadata_source_paused > 0
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: '{{ $labels.source }} has been paused by the circuit breaker for 30 minutes'
+          description: It keeps failing after each two-minute pause. Settings → Discord → Sources shows it, with a button to try again.

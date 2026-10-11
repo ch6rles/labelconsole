@@ -27,7 +27,13 @@ declare module '@labelconsole/core/queue' {
      */
     'discord.interaction': { interaction: { id: string; applicationId: string; token: string }; userId: string; discordUserId: string; command?: string; action: DiscordAction };
     'discord.register-commands': { requestedBy: string };
-    /** Daily: drop old lookup logs and used link codes in every label. */
+    /** Daily: drop old lookup logs, used link codes and evidence past its retention in every label. */
     'discord.purge': Record<string, never>;
+    /** Look up a sample of the label's own songs through every source and score each source. */
+    'discord.benchmark': { benchmarkId: string };
+    /** Daily: queue `discord.readings` for every label that keeps daily readings. */
+    'discord.readings-all': Record<string, never>;
+    /** One label's daily play-count readings for recently looked-up songs. */
+    'discord.readings': { limit: number };
   }
 }

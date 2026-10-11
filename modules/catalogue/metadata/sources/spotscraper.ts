@@ -37,3 +37,9 @@ export async function spotScraperLookup(client: SpotScraperClient, q: Query & { 
     ],
   };
 }
+
+/** Only the public play count: one request (the track by Spotify ID, else an ISRC search). */
+export async function spotifyPlayCount(client: SpotScraperClient, q: { isrc?: string | null; spotifyTrackId?: string | null }): Promise<number | null> {
+  const track = q.spotifyTrackId ? await client.track(q.spotifyTrackId) : q.isrc ? ((await client.searchIsrc(q.isrc))[0] ?? null) : null;
+  return track?.playCount ?? null;
+}

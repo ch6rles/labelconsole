@@ -29,7 +29,7 @@ export async function metadataCredentials(ctx: ServiceContext): Promise<ResolveC
 /** Everything `resolveMetadata` needs from the label: provider keys and distributor reference data. */
 export async function resolveContext(ctx: ServiceContext): Promise<ResolveContext> {
   const [ref, creds] = await Promise.all([distributorReference(ctx), metadataCredentials(ctx)]);
-  return { creds, ...ref };
+  return { creds, ...ref, scope: ctx.orgId };
 }
 
 /** Bill the SpotScraper requests a lookup made to the label's usage counters. */
@@ -45,3 +45,5 @@ export { resolveMetadata, type ResolveContext } from '../metadata/resolve';
 export { searchCandidates, searchReleaseCandidates, unambiguousCandidate, normText, type SearchCandidate } from '../metadata/search';
 export { fetchCredits, type Credit } from '../metadata/credits';
 export { inferDistributor } from '../metadata/distributor';
+export { BREAKER, pausedSources, resumeSource, type SourceOutcome } from '../metadata/breaker';
+export { spotifyPlayCount } from '../metadata/sources/spotscraper';

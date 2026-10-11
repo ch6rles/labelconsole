@@ -3,12 +3,13 @@ import { memberAccess, type MemberAccess } from '@labelconsole/core/auth';
 import { withOrg, type ServiceContext } from '@labelconsole/core/context';
 import { env } from '@labelconsole/core/env';
 import { ProviderError, RateLimitedError } from '@labelconsole/core/errors';
-import { fetchBinary, fetchJson } from '@labelconsole/core/http';
+import { fetchJson } from '@labelconsole/core/http';
 import { enabledModuleIds } from '@labelconsole/core/modules';
 import type { JobContext } from '@labelconsole/core/queue';
 import { redis } from '@labelconsole/core/redis';
 import type { ResolvedMetadata } from '@labelconsole/catalogue/schema';
 import {
+  creditsForName,
   distributorReference,
   fetchCredits,
   getReleaseRow,
@@ -59,11 +60,19 @@ import {
   type ChartSeries,
   type OwnedRelease,
 } from './render';
-import { approvedCorrections, createCorrection, findLink, readingsFor, recordLookup, recordReading, sharingFor, touchLink, USE_PERMISSION, type LookupLog } from './service';
-import { deezerArtist, deezerArtistReleases, labelReleaseCount, musicbrainzArtist, musicbrainzLabel, pickArtist, pickLabel, searchArtists, searchLabels, type DeezerArtist, type MbLabel } from './sources';
+import { approvedCorrections, createCorrection, DEGRADED, evidenceFor, findLink, readingsFor, recordEvidence, recordLookup, recordReading, sharingFor, touchLink, USE_PERMISSION, type LookupLog } from './service';
+import { deezerArtist, deezerArtistReleases, labelReleaseCount, musicbrainzArtist, musicbrainzLabel, musicbrainzWorks, pickArtist, pickLabel, searchArtists, searchLabels, type DeezerArtist, type MbLabel } from './sources';
 import type { DiscordAction } from './types';
 
 type Data = { interaction: { id: string; applicationId: string; token: string }; userId: string; discordUserId: string; command?: string; action: DiscordAction };
+
+/**
+ * Per source, per reply: wait at most 1.5 s for a rate-limit slot (MusicBrainz
+ * allows one request a second for the whole platform) and 8 s in all.
+ */
+export const LOOKUP_BUDGET = { queueMs: 1500, totalMs: 8000 };
+/** The second try, when the first found nothing because every source was busy. */
+const PATIENT_BUDGET = { queueMs: 20_000, totalMs: 30_000 };
 
 /** A resolved lookup is reused for an hour, so the buttons don't query every source again. */
 const CACHE_TTL_S = 3600;
@@ -215,18 +224,31 @@ async function resolved(run: Run, t: Target): Promise<{ kind: CardKind; md: Reso
     }
   }
   // Keys are decrypted here, in the worker, with the label's system context; provider calls run outside any transaction.
-  const rctx = await job.withOrg((ctx) => resolveContext(ctx));
+  // A reply answers with what it has: a source with no free request slot within a moment, or slower than the budget, is left out.
+  const rctx = { ...(await job.withOrg((ctx) => resolveContext(ctx))), budget: LOOKUP_BUDGET };
   let md: ResolvedMetadata;
+  const empty = (m: ResolvedMetadata) => !m.isrc && !m.upc && !m.title && !m.releaseTitle;
   try {
     md = await resolveMetadata(t.parsed, { input: t.raw, via: 'discord' }, rctx);
+    // Nothing found while sources were too busy to ask is not "not found": ask again, waiting longer this time.
+    if (empty(md) && md.sources.some((x) => x.outcome === 'busy')) md = await resolveMetadata(t.parsed, { input: t.raw, via: 'discord' }, { ...rctx, budget: PATIENT_BUDGET });
   } finally {
     await job.withOrg((ctx) => recordSpotScraperRequests(ctx, rctx.creds.spotscraper)).catch(() => undefined);
   }
-  if (!md.isrc && !md.upc && !md.title && !md.releaseTitle) throw new Notice("None of the music databases recognised that. Check the link or code, or try \"Artist - Title\".", true);
+  if (empty(md)) {
+    if (md.sources.some((x) => x.outcome && DEGRADED.includes(x.outcome))) throw new RateLimitedError(60_000, 'Music databases busy or failing');
+    throw new Notice("None of the music databases recognised that. Check the link or code, or try \"Artist - Title\".", true);
+  }
   const ref = refOf(t.kind, md);
   const lookedUpAt = new Date();
+  run.log.sources = [...(run.log.sources ?? []), ...md.sources.map((x) => ({ source: x.source, outcome: x.outcome ?? (x.ok ? 'answered' : x.skipped ? 'skipped' : x.error === 'no match' ? 'no_match' : 'error'), ms: x.ms ?? null }))];
   if (ref) await redis().set(cacheKey(orgId, ref), JSON.stringify({ kind: t.kind, md, lookedUpAt: lookedUpAt.toISOString() } satisfies Cached), 'EX', CACHE_TTL_S).catch(() => undefined);
-  if (md.plays && md.isrc) await job.withOrg((ctx) => recordReading(ctx, { isrc: md.isrc!, platform: md.plays!.platform, source: md.plays!.source, count: md.plays!.count })).catch(() => undefined);
+  await job
+    .withOrg(async (ctx) => {
+      await recordEvidence(ctx, md, lookedUpAt);
+      if (md.plays && md.isrc) await recordReading(ctx, { isrc: md.isrc, platform: md.plays.platform, source: md.plays.source, count: md.plays.count });
+    })
+    .catch((err) => job.log.warn({ err }, 'could not keep the lookup evidence'));
   return { kind: t.kind, md, lookedUpAt, cached: false };
 }
 
@@ -347,14 +369,23 @@ async function viewMessage(run: Run, view: string, ref: string) {
   } else if (view === 'links') {
     await run.reply(linksView(card));
   } else if (view === 'audio') {
-    const audio = await preview(card.md);
-    await run.reply(audioView(card, Boolean(audio)), audio ? [{ name: 'preview.mp3', contentType: 'audio/mpeg', data: audio, description: `30-second preview of ${cardTitle(card)}` }] : []);
-  } else if (view === 'details' || view === 'tracks' || view === 'avail') {
+    await run.reply(audioView(card, await previewLink(card.md)));
+  } else if (view === 'details') {
+    const refs = historyRefs(card.kind, card.md);
+    card.history = await run.asMember((ctx) => evidenceFor(ctx, refs));
+    await run.reply(renderView(card, view));
+  } else if (view === 'tracks' || view === 'avail') {
     await run.reply(renderView(card, view));
   } else {
     await run.reply(renderCard(card));
   }
   run.log.outcome = 'card';
+}
+
+/** The history rows behind a card: the recording, its release, and each UPC a source put it on. */
+function historyRefs(kind: CardKind, md: ResolvedMetadata): string[] {
+  const upcs = new Set([md.upc, ...(kind === 'track' ? (md.claims ?? []).map((c) => c.upc) : [])].filter((u): u is string => Boolean(u)));
+  return [...(kind === 'track' && md.isrc ? [`isrc:${md.isrc}`] : []), ...[...upcs].map((u) => `upc:${u}`)];
 }
 
 /** Play history: the label's own daily tracking for its songs, else the readings kept at each lookup. */
@@ -381,19 +412,13 @@ async function chartSeries(run: Run, card: Card): Promise<{ series: ChartSeries 
 
 const platformLabel = (p: string) => ({ spotify: 'Spotify', youtube: 'YouTube', youtube_music: 'YouTube Music' })[p] ?? p;
 
-/** Deezer's 30-second preview. Its links are signed and expire, so a stale one is fetched again. */
-async function preview(md: ResolvedMetadata): Promise<Buffer | null> {
-  const get = async (url: string | null | undefined) => {
-    if (!url || !/^https:\/\/[a-z0-9-]+\.dzcdn\.net\//.test(url)) return null;
-    const res = await fetchBinary(url, { provider: 'deezer', maxBytes: 3 * 1024 * 1024, timeoutMs: 20_000 }).catch(() => null);
-    return res && /audio|mpeg|octet/.test(res.contentType) ? res.body : null;
-  };
-  const first = await get(md.previewUrl);
-  if (first) return first;
+/** A fresh link to Deezer's 30-second preview: its links are signed and expire within about 15 minutes, so the cached one isn't reused. */
+async function previewLink(md: ResolvedMetadata): Promise<string | null> {
   const id = md.platformIds.find((p) => p.platform === 'deezer' && p.entity === 'track')?.externalId;
   if (!id || !/^\d+$/.test(id)) return null;
-  const fresh = await fetchJson<{ preview?: string }>(`https://api.deezer.com/track/${id}`, { provider: 'deezer', rateLimit: { key: 'deezer', capacity: 50, refillPerSec: 10 }, allow404: true }).catch(() => null);
-  return get(fresh?.preview);
+  const fresh = await fetchJson<{ preview?: string }>(`https://api.deezer.com/track/${id}`, { provider: 'deezer', rateLimit: { key: 'deezer', capacity: 50, refillPerSec: 10 }, allow404: true, retries: 1 }).catch(() => null);
+  const url = fresh?.preview;
+  return url && /^https:\/\/[a-z0-9-]+\.dzcdn\.net\//.test(url) ? url : null;
 }
 
 /* -------------------------------------------------------------- artist -- */
@@ -420,12 +445,17 @@ async function artistCard(run: Run, a: Extract<DiscordAction, { kind: 'artist' |
   if (!artist) throw new Notice(`No artist matches "${(query ?? 'that').slice(0, 80)}".`, true);
   const [full, latest, mb] = await Promise.all([deezerArtist(String(artist.id)), deezerArtistReleases(artist.id), musicbrainzArtist(artist.name).catch(() => null)]);
   const found = full ?? artist;
-  const roster = await run.asMember(async (ctx) => {
-    if (!ctx.can('people:read')) return null;
-    const own = await findArtistByName(ctx, found.name);
-    if (!own) return null;
-    const releases = ctx.can('catalogue:read') ? (await listReleases(ctx, { artistId: own.id })).length : 0;
-    return { url: `${appUrl()}/people/artists/${own.id}`, releases };
+  const works = mb ? await musicbrainzWorks(mb.id).catch(() => ({ total: null, works: [] })) : { total: null, works: [] };
+  const { roster, own } = await run.asMember(async (ctx) => {
+    const credited = ctx.can('catalogue:read') ? await creditsForName(ctx, found.name) : [];
+    const roles = new Map<string, Set<string>>();
+    for (const c of credited) roles.set(c.role, (roles.get(c.role) ?? new Set()).add(c.trackId));
+    const own = credited.length ? { total: new Set(credited.map((c) => c.trackId)).size, roles: [...roles.entries()].map(([r, ids]): [string, number] => [r, ids.size]).sort((x, y) => y[1] - x[1]).slice(0, 6), songs: [...new Set(credited.map((c) => c.title))].slice(0, 6) } : null;
+    if (!ctx.can('people:read')) return { roster: null, own };
+    const person = await findArtistByName(ctx, found.name);
+    if (!person) return { roster: null, own };
+    const releases = ctx.can('catalogue:read') ? (await listReleases(ctx, { artistId: person.id })).length : 0;
+    return { roster: { url: `${appUrl()}/people/artists/${person.id}`, releases }, own };
   });
   const links = [found.link ? { platform: 'deezer', url: found.link } : null, mb ? { platform: 'musicbrainz', url: `https://musicbrainz.org/artist/${mb.id}` } : null].filter((x): x is { platform: string; url: string } => x !== null);
   await run.reply(
@@ -439,6 +469,7 @@ async function artistCard(run: Run, a: Extract<DiscordAction, { kind: 'artist' |
       roster,
       latest: latest.map((r) => ({ title: r.title, type: r.record_type ?? null, date: r.release_date ?? null, url: r.link ?? null })),
       links,
+      credits: { works: works.works, worksTotal: works.total, own },
       shared: Boolean(a.shared),
       labelName: run.access.org.name,
       lookedUpAt: new Date(),
@@ -529,7 +560,19 @@ async function compareCard(run: Run, a: Extract<DiscordAction, { kind: 'compare'
   const left = await resolved(run, exactTarget(a.first));
   const right = await resolved(run, exactTarget(a.second));
   const dist = (md: ResolvedMetadata) => (md.distributor.name && md.distributor.confidence > 0 ? `${md.distributor.name} (${Math.round(md.distributor.confidence * 100)}%)` : null);
-  await run.reply(renderCompare({ input: a.first, md: left.md, distributor: dist(left.md) }, { input: a.second, md: right.md, distributor: dist(right.md) }, { labelName: run.access.org.name, lookedUpAt: new Date(), elapsedMs: Date.now() - run.started }));
+  // Credits belong to recordings: compared for two songs only.
+  let credits: [Awaited<ReturnType<typeof fetchCredits>>, Awaited<ReturnType<typeof fetchCredits>>] = [null, null];
+  if (left.kind === 'track' && right.kind === 'track') {
+    const rctx = await run.job.withOrg((ctx) => resolveContext(ctx));
+    try {
+      credits = await Promise.all([fetchCredits(rctx.creds, left.md).catch(() => null), fetchCredits(rctx.creds, right.md).catch(() => null)]);
+    } finally {
+      await run.job.withOrg((ctx) => recordSpotScraperRequests(ctx, rctx.creds.spotscraper)).catch(() => undefined);
+    }
+  }
+  await run.reply(
+    renderCompare({ input: a.first, md: left.md, distributor: dist(left.md), credits: credits[0] }, { input: a.second, md: right.md, distributor: dist(right.md), credits: credits[1] }, { labelName: run.access.org.name, lookedUpAt: new Date(), elapsedMs: Date.now() - run.started }),
+  );
   run.log.outcome = 'card';
 }
 

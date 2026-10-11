@@ -1,22 +1,26 @@
 import type { ReactNode } from 'react';
 import type { PageProps } from '@labelconsole/core/web';
+import { spotScraperConfigured } from '@labelconsole/core/spotscraper';
 import { Banner, Chip, Icon, LinkButton, Page, PageHeader, fmt } from '@labelconsole/ui';
 import { ActionButton, ApiToggle, CopyButton } from '@labelconsole/ui/client';
 import { CORRECTABLE_FIELDS } from '../protocol/commands';
 import * as svc from '../service';
 import { LinkCodeButton } from './client';
+import { BenchmarkCard, ReadingsCard, SourcesCard } from './sources';
 
 export default async function DiscordPage({ run, session }: PageProps) {
   const canUse = session.permissions.has(svc.USE_PERMISSION);
   const isAdmin = session.permissions.has('settings:read');
-  const [link, status, links, sharing, pending, reviewed, stats] = await Promise.all([
+  const [link, status, links, sharing, pending, reviewed, stats, benchmarks, spotScraper] = await Promise.all([
     run((ctx) => svc.myLink(ctx)),
     run((ctx) => svc.discordStatus(ctx)),
     isAdmin ? run((ctx) => svc.listLinks(ctx)) : Promise.resolve([]),
-    run((ctx) => svc.sharingSettings(ctx)),
+    run((ctx) => svc.discordSettings(ctx)),
     canUse ? run((ctx) => svc.listCorrections(ctx, 'pending')) : Promise.resolve([]),
     canUse ? run((ctx) => svc.listCorrections(ctx, 'reviewed')) : Promise.resolve([]),
     isAdmin ? run((ctx) => svc.lookupStats(ctx)) : Promise.resolve(null),
+    isAdmin ? run((ctx) => svc.listBenchmarks(ctx)) : Promise.resolve([]),
+    isAdmin ? run((ctx) => spotScraperConfigured(ctx)) : Promise.resolve(false),
   ]);
   const canReview = session.permissions.has('catalogue:write');
   const fieldName = (f: string) => CORRECTABLE_FIELDS.find((x) => x.value === f)?.name ?? f;
@@ -198,7 +202,7 @@ export default async function DiscordPage({ run, session }: PageProps) {
                 <span style={{ fontSize: 14, fontWeight: 500 }}>{title}</span>
                 <span style={{ fontSize: 12, color: 'var(--lc-muted)' }}>{sub}</span>
               </div>
-              <ApiToggle endpoint="/discord/sharing" field={field} on={sharing[field]} disabled={!canManage || (field !== 'allowSharing' && !sharing.allowSharing)} title={title} />
+              <ApiToggle endpoint="/discord/settings" field={field} on={sharing[field]} disabled={!canManage || (field !== 'allowSharing' && !sharing.allowSharing)} title={title} />
             </div>
           ))}
         </section>
@@ -223,6 +227,8 @@ export default async function DiscordPage({ run, session }: PageProps) {
               ['From the cache', pct(stats.cached, stats.total)],
               ['Median time', stats.p50 == null ? '—' : `${(stats.p50 / 1000).toFixed(1)} s`],
               ['95th percentile', stats.p95 == null ? '—' : `${(stats.p95 / 1000).toFixed(1)} s`],
+              ['Missing a source', pct(stats.partial, stats.fresh)],
+              ['Corrections suggested', `${stats.corrections?.recent ?? 0} (${pct(stats.corrections?.recent ?? 0, stats.cards)} of cards)`],
               ['Corrections waiting', String(stats.corrections?.pending ?? 0)],
             ].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -233,23 +239,13 @@ export default async function DiscordPage({ run, session }: PageProps) {
               </div>
             ))}
           </div>
-          {stats.coverage.length > 0 && (
-            <div className="lc-card-body lc-muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
-              Field coverage on cards:{' '}
-              {['labelName', 'pLine', 'cLine', 'distributor', 'credits', 'streams']
-                .map((f) => {
-                  const rows = stats.coverage.filter((c) => c.field === f);
-                  const total = rows.reduce((n, c) => n + Number(c.n), 0);
-                  const known = rows.filter((c) => c.status !== 'unknown').reduce((n, c) => n + Number(c.n), 0);
-                  const verified = rows.filter((c) => c.status === 'verified').reduce((n, c) => n + Number(c.n), 0);
-                  return total ? `${({ labelName: 'label', pLine: '℗ line', cLine: '© line', distributor: 'distributor', credits: 'own credits', streams: 'streams' } as Record<string, string>)[f]} ${pct(known, total)} (${pct(verified, total)} verified)` : null;
-                })
-                .filter(Boolean)
-                .join(' · ')}
-            </div>
-          )}
+          {stats.coverage.length > 0 && <CoverageTable coverage={stats.coverage} />}
         </section>
       )}
+
+      {isAdmin && stats && <SourcesCard sources={stats.sources} paused={stats.paused} days={stats.days} canManage={canManage} />}
+      {isAdmin && <BenchmarkCard runs={benchmarks} canManage={canManage} />}
+      {isAdmin && <ReadingsCard settings={sharing} canManage={canManage} spotScraperConnected={spotScraper} />}
 
       {isAdmin && (
         <section className="lc-card">
@@ -277,7 +273,67 @@ export default async function DiscordPage({ run, session }: PageProps) {
           ))}
         </section>
       )}
+      <p className="lc-muted" style={{ fontSize: 11, lineHeight: 1.6, margin: '4px 2px' }}>
+        Card data comes from MusicBrainz, Deezer, iTunes, and Spotify, Discogs and Apple when connected. This application uses Discogs’ API but is not affiliated with, sponsored or endorsed by Discogs. ‘Discogs’ is a trademark of Zink Media, LLC. Catalogue metadata is not proof of who owns or licenses a recording.
+      </p>
     </Page>
+  );
+}
+
+const COVERAGE_FIELDS: Array<[string, string]> = [
+  ['isrc', 'ISRC'],
+  ['upc', 'UPC'],
+  ['labelName', 'Label'],
+  ['pLine', '℗ line'],
+  ['cLine', '© line'],
+  ['distributor', 'Distributor'],
+  ['credits', 'Own credits'],
+  ['streams', 'Streams'],
+];
+const STATUSES: Array<[string, string]> = [
+  ['verified', 'Verified'],
+  ['reported', 'Source-reported'],
+  ['conflicting', 'Conflicting'],
+  ['inferred', 'Inferred'],
+  ['unknown', 'Unknown'],
+];
+
+/** How each field was known on the cards shown: the plan's verified / source-reported / conflicting / inferred / unknown split. */
+function CoverageTable({ coverage }: { coverage: Array<{ field: string; status: string; n: number }> }) {
+  const cell = { padding: '6px 8px', borderBottom: '1px solid var(--lc-border)', textAlign: 'left' as const, whiteSpace: 'nowrap' as const };
+  const pct = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : '—');
+  return (
+    <div className="lc-card-body" style={{ overflowX: 'auto' }}>
+      <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%' }}>
+        <thead>
+          <tr className="lc-muted">
+            <th style={{ ...cell, fontWeight: 500 }}>Field on cards</th>
+            {STATUSES.map(([, label]) => (
+              <th key={label} style={{ ...cell, fontWeight: 500 }}>
+                {label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {COVERAGE_FIELDS.map(([field, name]) => {
+            const rows = coverage.filter((c) => c.field === field);
+            const total = rows.reduce((n, c) => n + Number(c.n), 0);
+            if (!total) return null;
+            return (
+              <tr key={field}>
+                <td style={cell}>{name}</td>
+                {STATUSES.map(([status]) => (
+                  <td key={status} style={cell}>
+                    {pct(rows.filter((c) => c.status === status).reduce((n, c) => n + Number(c.n), 0), total)}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

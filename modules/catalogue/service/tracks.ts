@@ -331,3 +331,58 @@ export async function listSplitSheets(ctx: ServiceContext) {
   ]);
   return sheets.map((s) => ({ ...s.sheet, trackTitle: s.trackTitle, releaseTitle: rel.find((r) => r.trackId === s.trackId)?.title ?? null, parties: parties.filter((p) => p.sheetId === s.sheet.id).sort((a, b) => Number(b.sharePct) - Number(a.sharePct)) }));
 }
+
+export type BenchmarkRelease = { upc: string | null; title: string; releaseDate: string | null; labelName: string | null; pLine: string | null; cLine: string | null; distributor: string | null; distributorConfidence: number | null };
+export type BenchmarkItem = { isrc: string; title: string; artists: string[]; durationMs: number | null; releases: BenchmarkRelease[] };
+
+/**
+ * A random sample of the label's own songs that have an ISRC, with every
+ * release they are on (earliest first): the ground truth for a source
+ * benchmark. Identity fields only. Respects the member's artist scope.
+ */
+export async function benchmarkSample(ctx: ServiceContext, n: number): Promise<BenchmarkItem[]> {
+  ctx.assert('catalogue:read');
+  const conds = [sql`${tracks.isrc} is not null`];
+  if (ctx.artistScope) conds.push(inArray(tracks.id, ctx.tx.select({ id: trackArtists.trackId }).from(trackArtists).where(inArray(trackArtists.artistId, [...ctx.artistScope]))));
+  const rows = await ctx.tx
+    .select({ id: tracks.id, isrc: tracks.isrc, title: tracks.title, durationMs: tracks.durationMs })
+    .from(tracks)
+    .where(and(...conds))
+    .orderBy(sql`random()`)
+    .limit(Math.max(1, Math.min(200, n)));
+  if (!rows.length) return [];
+  const ids = rows.map((r) => r.id);
+  const [rel, art] = await Promise.all([
+    ctx.tx
+      .select({ trackId: releaseTracks.trackId, upc: releases.upc, title: releases.title, releaseDate: releases.releaseDate, labelName: releases.labelName, pLine: releases.pLine, cLine: releases.cLine, distributor: releases.distributor, distributorConfidence: releases.distributorConfidence })
+      .from(releaseTracks)
+      .innerJoin(releases, eq(releases.id, releaseTracks.releaseId))
+      .where(inArray(releaseTracks.trackId, ids))
+      .orderBy(sql`${releases.releaseDate} asc nulls last`),
+    ctx.tx.select({ trackId: trackArtists.trackId, name: artists.name, role: trackArtists.role }).from(trackArtists).innerJoin(artists, eq(artists.id, trackArtists.artistId)).where(inArray(trackArtists.trackId, ids)),
+  ]);
+  return rows.map((t) => ({
+    isrc: t.isrc!,
+    title: t.title,
+    durationMs: t.durationMs,
+    artists: art
+      .filter((a) => a.trackId === t.id)
+      .sort((a, b) => Number(b.role === 'primary') - Number(a.role === 'primary'))
+      .map((a) => a.name),
+    releases: rel.filter((r) => r.trackId === t.id).map(({ trackId: _, distributorConfidence, ...r }) => ({ ...r, distributorConfidence: distributorConfidence == null ? null : Number(distributorConfidence) })),
+  }));
+}
+
+/** Credits in the label's catalogue under a name (for /artist in Discord): role and song only. Respects the member's artist scope. */
+export async function creditsForName(ctx: ServiceContext, name: string, limit = 200) {
+  ctx.assert('catalogue:read');
+  const conds = [sql`lower(${credits.name}) = lower(${name.trim()})`];
+  if (ctx.artistScope) conds.push(inArray(credits.trackId, ctx.tx.select({ id: trackArtists.trackId }).from(trackArtists).where(inArray(trackArtists.artistId, [...ctx.artistScope]))));
+  return ctx.tx
+    .select({ role: credits.role, trackId: credits.trackId, title: tracks.title })
+    .from(credits)
+    .innerJoin(tracks, eq(tracks.id, credits.trackId))
+    .where(and(...conds))
+    .orderBy(desc(tracks.createdAt))
+    .limit(limit);
+}

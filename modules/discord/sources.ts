@@ -69,3 +69,16 @@ export function pickLabel(results: MbLabel[], q: string): MbLabel | 'ambiguous' 
   if (exact.length > 1) return 'ambiguous';
   return results.length ? 'ambiguous' : null;
 }
+
+export type MbWork = { id: string; title: string; relations?: Array<{ type: string; 'target-type'?: string; artist?: { id: string; name: string } }> };
+
+/** Works MusicBrainz credits to an artist (writing roles), newest data first as MusicBrainz returns them. */
+export async function musicbrainzWorks(artistId: string, limit = 8): Promise<{ total: number | null; works: Array<{ title: string; roles: string[] }> }> {
+  if (!/^[0-9a-f-]{36}$/.test(artistId)) return { total: null, works: [] };
+  const res = await mb<{ 'work-count'?: number; works?: MbWork[] }>(`/work?artist=${artistId}&inc=artist-rels&limit=${limit}`);
+  const works = (res?.works ?? []).map((w) => ({
+    title: w.title,
+    roles: [...new Set((w.relations ?? []).filter((r) => r.artist?.id === artistId).map((r) => r.type))],
+  }));
+  return { total: res?.['work-count'] ?? null, works };
+}

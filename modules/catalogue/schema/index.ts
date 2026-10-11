@@ -249,7 +249,8 @@ export type ResolvedMetadata = {
   platformIds: Array<{ platform: string; entity: 'track' | 'release'; externalId: string; url: string | null; source: string }>;
   distributor: { name: string | null; confidence: number; evidence: DistributorEvidence[] };
   conflicts: Array<{ field: string; values: Array<{ source: string; value: string }> }>;
-  sources: Array<{ source: string; ok: boolean; error?: string; skipped?: string }>;
+  /** How each source call ended; `ms` and `outcome` are absent on older lookups. */
+  sources: Array<{ source: string; ok: boolean; error?: string; skipped?: string; ms?: number; outcome?: 'answered' | 'no_match' | 'error' | 'rate_limited' | 'timeout' | 'busy' | 'paused' | 'skipped' }>;
   /** Cover art from the highest-priority source that has it. Absent on lookups stored before it existed. */
   artworkUrl?: string | null;
   /** For each chosen field, the sources that reported that same value. Absent on older lookups. */
@@ -262,7 +263,14 @@ export type ResolvedMetadata = {
   plays?: { platform: string; source: string; count: number; at: string } | null;
   catalogNumber?: string | null;
   companies?: Array<{ source: string; role: string; name: string }>;
+  /** What each source said, as published, with its own UPC and record link: the raw evidence behind the merged fields. */
+  claims?: Array<{ source: string; upc: string | null; url: string | null; values: Partial<Record<ClaimField, string>> }>;
 };
+
+/** Fields kept per source as evidence. Recording fields (and which UPC a source puts the recording on) belong to the ISRC; the rest to the release. */
+export const CLAIM_FIELDS = ['isrc', 'title', 'artists', 'durationMs', 'upc', 'releaseTitle', 'releaseType', 'releaseDate', 'labelName', 'pLine', 'cLine', 'catalogNumber', 'distributor'] as const;
+export type ClaimField = (typeof CLAIM_FIELDS)[number];
+export const RECORDING_FIELDS: readonly ClaimField[] = ['title', 'artists', 'durationMs', 'upc'];
 
 export const metadataLookups = pgTable(
   'metadata_lookups',

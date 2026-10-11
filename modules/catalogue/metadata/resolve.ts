@@ -1,6 +1,8 @@
+import { withBudget } from '@labelconsole/core/http';
 import { logger } from '@labelconsole/core/logger';
 import type { SpotScraperClient } from '@labelconsole/core/spotscraper';
 import type { DistributorEvidence, ResolvedMetadata } from '../schema';
+import { classify, pausedFor, recordFailure, recordSuccess } from './breaker';
 import { inferDistributor, type Alias, type Hint } from './distributor';
 import { normalizeIsrc, normalizeUpc, type ParsedInput } from './input';
 import { appleLookup, itunesLookup, type AppleSecret } from './sources/apple';
@@ -15,7 +17,12 @@ import { splitVideoTitle, youtubeTitle } from './sources/youtube';
 import type { AudioTags } from './tags';
 
 export type ResolveCredentials = { spotify?: SpotifySecret | null; apple?: AppleSecret | null; youtubeApiKey?: string | null; licensed?: LicensedSecret | null; spotscraper?: SpotScraperClient | null; discogs?: DiscogsSecret | null };
-export type ResolveContext = { creds: ResolveCredentials; aliases: Alias[]; hints: Hint[]; tags?: AudioTags | null };
+/**
+ * `scope` (the label) keys the circuit breaker for sources that use the
+ * label's own credentials. `budget` bounds each source call, for replies
+ * that should answer with what they have (see withBudget).
+ */
+export type ResolveContext = { creds: ResolveCredentials; aliases: Alias[]; hints: Hint[]; tags?: AudioTags | null; scope?: string | null; budget?: { queueMs: number; totalMs: number } | null };
 
 /** When sources disagree, the first in this order wins and the conflict is reported. */
 const PRIORITY = ['spotify', 'spotscraper', 'apple', 'deezer', 'musicbrainz', 'discogs', 'licensed', 'itunes', 'tags', 'search'];
@@ -121,23 +128,71 @@ export function mergeResults(input: Record<string, string>, results: SourceResul
     plays: played ? { platform: 'spotify', source: played.source, count: played.playCount!, at: new Date().toISOString() } : null,
     catalogNumber,
     companies,
+    claims: claimsOf(ordered),
   };
 }
 
-async function run(name: string, sources: ResolvedMetadata['sources'], fn: () => Promise<SourceResult | null>, skipped?: string): Promise<SourceResult | null> {
-  if (skipped) {
-    sources.push({ source: name, ok: false, skipped });
-    return null;
-  }
-  try {
-    const r = await fn();
-    sources.push({ source: name, ok: Boolean(r), ...(r ? {} : { error: 'no match' }) });
-    return r;
-  } catch (err) {
-    logger.warn({ err, source: name }, 'metadata source failed');
-    sources.push({ source: name, ok: false, error: (err as Error).message.slice(0, 200) });
-    return null;
-  }
+const PLATFORM_OF: Record<string, string> = { spotscraper: 'spotify', itunes: 'apple' };
+
+/** Each source's own values, as published (only trimmed and length-capped), for the evidence history. */
+function claimsOf(results: SourceResult[]): NonNullable<ResolvedMetadata['claims']> {
+  const text = (v: unknown) => (v == null || v === '' ? undefined : String(v).trim().slice(0, 500) || undefined);
+  return results
+    .filter((r) => r.source !== 'search')
+    .map((r) => {
+      const platform = PLATFORM_OF[r.source] ?? r.source;
+      const own = (r.platformIds ?? []).filter((p) => p.platform === platform && p.url);
+      const reported = (r.companies ?? []).filter((c) => /distributed by/i.test(c.role)).map((c) => c.name);
+      const values: NonNullable<ResolvedMetadata['claims']>[number]['values'] = {
+        isrc: text(r.isrc ? normalizeIsrc(r.isrc) ?? r.isrc : null),
+        title: text(r.title),
+        artists: text(r.artists?.join(', ')),
+        durationMs: text(r.durationMs),
+        upc: text(r.upc ? normalizeUpc(r.upc) ?? r.upc : null),
+        releaseTitle: text(r.releaseTitle),
+        releaseType: text(r.releaseType),
+        releaseDate: text(r.releaseDate ? String(r.releaseDate).slice(0, 10) : null),
+        labelName: text(r.labelName),
+        pLine: text(r.pLine),
+        cLine: text(r.cLine),
+        catalogNumber: text(r.catalogNumber),
+        distributor: text(r.distributor ?? (reported.length ? reported.join(', ') : null)),
+      };
+      for (const k of Object.keys(values) as Array<keyof typeof values>) if (values[k] === undefined) delete values[k];
+      return { source: r.source, upc: values.upc ?? null, url: (own.find((p) => p.entity === 'track') ?? own[0])?.url ?? null, values };
+    })
+    .filter((c) => Object.keys(c.values).length > 0);
+}
+
+type Runner = (name: string, fn: () => Promise<SourceResult | null>, skipped?: string) => Promise<SourceResult | null>;
+
+/** Call one source: skip it when it isn't set up or is paused, time it, and record how it ended. */
+function runner(sources: ResolvedMetadata['sources'], scope: string | null | undefined, budget: ResolveContext['budget']): Runner {
+  return async (name, call, skipped) => {
+    const fn = budget ? () => withBudget(budget, call) : call;
+    if (skipped) {
+      sources.push({ source: name, ok: false, skipped, outcome: 'skipped' });
+      return null;
+    }
+    const paused = await pausedFor(name, scope);
+    if (paused) {
+      sources.push({ source: name, ok: false, skipped: `Paused after repeated errors; tried again in ${paused}s`, outcome: 'paused' });
+      return null;
+    }
+    const started = Date.now();
+    try {
+      const r = await fn();
+      await recordSuccess(name, scope);
+      sources.push({ source: name, ok: Boolean(r), ms: Date.now() - started, outcome: r ? 'answered' : 'no_match', ...(r ? {} : { error: 'no match' }) });
+      return r;
+    } catch (err) {
+      const ms = Date.now() - started;
+      const pausedNow = await recordFailure(name, scope, err);
+      logger.warn({ err, source: name, paused: pausedNow }, 'metadata source failed');
+      sources.push({ source: name, ok: false, ms, outcome: classify(err), error: (err as Error).message.slice(0, 200) });
+      return null;
+    }
+  };
 }
 
 /**
@@ -149,6 +204,7 @@ export async function resolveMetadata(parsed: ParsedInput, raw: Record<string, s
   const results: SourceResult[] = [];
   const q: Query & Record<string, string | null | undefined> = {};
   const { creds } = ctx;
+  const run = runner(sources, ctx.scope, ctx.budget);
 
   switch (parsed.kind) {
     case 'isrc':
@@ -213,9 +269,9 @@ export async function resolveMetadata(parsed: ParsedInput, raw: Record<string, s
 
   // Pass 1b: id-based lookups give us ISRC/UPC for pass 2.
   const first = await Promise.all([
-    q.deezerTrackId || q.deezerAlbumId ? run('deezer', sources, () => deezerLookup({ ...q, withTracklist: Boolean(q.deezerAlbumId) })) : null,
-    q.spotifyTrackId || q.spotifyAlbumId ? (creds.spotify ? run('spotify', sources, () => spotifyLookup(creds.spotify!, q)) : run('spotscraper', sources, () => spotScraperLookup(creds.spotscraper!, q))) : null,
-    q.appleSongId || q.appleAlbumId ? run('apple', sources, () => appleLookup(creds.apple!, q)) : null,
+    q.deezerTrackId || q.deezerAlbumId ? run('deezer', () => deezerLookup({ ...q, withTracklist: Boolean(q.deezerAlbumId) })) : null,
+    q.spotifyTrackId || q.spotifyAlbumId ? (creds.spotify ? run('spotify', () => spotifyLookup(creds.spotify!, q)) : run('spotscraper', () => spotScraperLookup(creds.spotscraper!, q))) : null,
+    q.appleSongId || q.appleAlbumId ? run('apple', () => appleLookup(creds.apple!, q)) : null,
   ]);
   for (const r of first) if (r) results.push(r);
   q.isrc ??= results.map((r) => r.isrc).find(Boolean) ?? null;
@@ -228,24 +284,29 @@ export async function resolveMetadata(parsed: ParsedInput, raw: Record<string, s
   const done = new Set(results.map((r) => r.source));
   const licensed = creds.licensed ? licensedMetadataProvider(creds.licensed.vendor) : null;
   const second = await Promise.all([
-    done.has('deezer') ? null : run('deezer', sources, () => deezerLookup({ isrc: q.isrc, upc: q.upc, withTracklist: parsed.kind === 'upc' })),
-    run('musicbrainz', sources, () => musicbrainzLookup({ isrc: q.isrc, upc: q.upc })),
-    done.has('spotify') ? null : run('spotify', sources, () => spotifyLookup(creds.spotify!, { isrc: q.isrc, upc: q.upc }), creds.spotify ? undefined : 'Not connected (Settings → Integrations)'),
-    done.has('spotscraper') ? null : run('spotscraper', sources, () => spotScraperLookup(creds.spotscraper!, { isrc: q.isrc }), !creds.spotscraper ? 'Not connected (Settings → Integrations)' : q.isrc ? undefined : 'Needs an ISRC'),
-    done.has('apple') ? null : run('apple', sources, () => appleLookup(creds.apple!, { isrc: q.isrc, upc: q.upc }), creds.apple ? undefined : 'Not connected (Settings → Integrations)'),
-    run('itunes', sources, () => itunesLookup({ upc: q.upc, itunesId: q.itunesId ?? undefined }), q.upc || q.itunesId ? undefined : 'Needs a UPC'),
-    run('licensed', sources, () => licensed!.lookup(creds.licensed!, { isrc: q.isrc, upc: q.upc }), licensed ? undefined : 'No licensed provider configured'),
-    run('discogs', sources, () => discogsLookup(creds.discogs!, { upc: q.upc }), !creds.discogs ? 'Not connected (Settings → Integrations)' : q.upc ? undefined : 'Needs a UPC'),
+    done.has('deezer') ? null : run('deezer', () => deezerLookup({ isrc: q.isrc, upc: q.upc, withTracklist: parsed.kind === 'upc' })),
+    run('musicbrainz', () => musicbrainzLookup({ isrc: q.isrc, upc: q.upc })),
+    done.has('spotify') ? null : run('spotify', () => spotifyLookup(creds.spotify!, { isrc: q.isrc, upc: q.upc }), creds.spotify ? undefined : 'Not connected (Settings → Integrations)'),
+    done.has('spotscraper') ? null : run('spotscraper', () => spotScraperLookup(creds.spotscraper!, { isrc: q.isrc }), !creds.spotscraper ? 'Not connected (Settings → Integrations)' : q.isrc ? undefined : 'Needs an ISRC'),
+    done.has('apple') ? null : run('apple', () => appleLookup(creds.apple!, { isrc: q.isrc, upc: q.upc }), creds.apple ? undefined : 'Not connected (Settings → Integrations)'),
+    run('itunes', () => itunesLookup({ upc: q.upc, itunesId: q.itunesId ?? undefined }), q.upc || q.itunesId ? undefined : 'Needs a UPC'),
+    run('licensed', () => licensed!.lookup(creds.licensed!, { isrc: q.isrc, upc: q.upc }), licensed ? undefined : 'No licensed provider configured'),
+    run('discogs', () => discogsLookup(creds.discogs!, { upc: q.upc }), !creds.discogs ? 'Not connected (Settings → Integrations)' : q.upc ? undefined : 'Needs a UPC'),
   ]);
   for (const r of second) if (r) results.push(r);
 
-  // A UPC learned in pass 2 (e.g. from MusicBrainz) can unlock iTunes.
+  // A UPC learned in pass 2 (from Deezer or MusicBrainz, on an ISRC lookup) unlocks the sources that only search by UPC.
   const upc = q.upc ?? results.map((r) => r.upc).find(Boolean);
-  if (upc && !q.upc && !results.some((r) => r.source === 'itunes')) {
-    const idx = sources.findIndex((s) => s.source === 'itunes');
-    if (idx >= 0) sources.splice(idx, 1);
-    const r = await run('itunes', sources, () => itunesLookup({ upc }));
-    if (r) results.push(r);
+  if (upc && !q.upc) {
+    const again = (name: string) => {
+      const idx = sources.findIndex((s) => s.source === name);
+      if (idx >= 0) sources.splice(idx, 1);
+    };
+    const third = await Promise.all([
+      results.some((r) => r.source === 'itunes') ? null : (again('itunes'), run('itunes', () => itunesLookup({ upc }))),
+      !creds.discogs || results.some((r) => r.source === 'discogs') ? null : (again('discogs'), run('discogs', () => discogsLookup(creds.discogs!, { upc }))),
+    ]);
+    for (const r of third) if (r) results.push(r);
   }
 
   return mergeResults(raw, results, ctx, sources);

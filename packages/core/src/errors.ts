@@ -71,6 +71,19 @@ export class ProviderError extends AppError {
   }
 }
 
+/**
+ * A provider call given up because the caller's time budget ran out (see
+ * `withBudget`): `queue` while waiting for a rate-limit slot (the provider
+ * is fine, we are busy), `response` while waiting for the provider.
+ */
+export class DeadlineError extends ProviderError {
+  readonly waiting: 'queue' | 'response';
+  constructor(provider: string, waiting: 'queue' | 'response') {
+    super(provider, waiting === 'queue' ? 'busy: no request slot within the time budget' : 'timed out within the time budget', { transient: false });
+    this.waiting = waiting;
+  }
+}
+
 export function isTransient(err: unknown): boolean {
   if (err instanceof ProviderError) return err.transient;
   if (err instanceof RateLimitedError) return true;

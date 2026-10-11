@@ -39,7 +39,7 @@ async function resolveLookup(job: JobContext, lookupId: string, creds?: ResolveC
     } else parsed = parseInput(lookup.input.input ?? '');
     if (!parsed) throw new Error('Unrecognised input');
     const [ref, c] = await Promise.all([job.withOrg((ctx) => distributorReference(ctx)), creds ? Promise.resolve(creds) : credentials(job)]);
-    const result = await resolveMetadata(parsed, lookup.input, { creds: c, ...ref, tags }).finally(() => countRequests(job, c.spotscraper));
+    const result = await resolveMetadata(parsed, lookup.input, { creds: c, ...ref, tags, scope: job.orgId }).finally(() => countRequests(job, c.spotscraper));
     await job.withOrg((ctx) => ctx.tx.update(metadataLookups).set({ status: 'done', result }).where(eq(metadataLookups.id, lookupId)));
     await publish(job.orgId!, { type: 'catalogue.lookup.updated', data: { lookupId, status: 'done' }, permission: 'catalogue:read' });
     return result;

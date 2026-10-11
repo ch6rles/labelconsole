@@ -47,6 +47,11 @@ export function formatDuration(ms: number | null | undefined) {
 }
 
 export const formatNumber = (n: number) => n.toLocaleString('en-US');
+/** A moment as Discord timestamp markup: each viewer sees it in their own time zone and language. */
+export const formatMoment = (at: Date | string, style: 'f' | 'd' | 'R' = 'f') => {
+  const t = typeof at === 'string' ? Date.parse(at) : at.getTime();
+  return Number.isNaN(t) ? String(at) : `<t:${Math.floor(t / 1000)}:${style}>`;
+};
 export const formatElapsed = (ms: number) => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
 export const displayUpc = (upc: string | null | undefined) => (upc ? (upc.length === 13 && upc.startsWith('0') ? upc.slice(1) : upc) : null);
 export const RELEASE_TYPES: Record<string, string> = { single: 'Single', ep: 'EP', album: 'Album', compilation: 'Compilation' };

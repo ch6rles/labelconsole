@@ -1,6 +1,6 @@
 import type { ResolvedMetadata } from '@labelconsole/catalogue/schema';
 import { ButtonStyle, ComponentType, type ActionRow, type Button, type Embed, type MessagePayload } from '../protocol/types';
-import { COLOR, displayUpc, escapeMd, fitEmbeds, formatElapsed, formatNumber, platformName, RELEASE_TYPES, sourceName, truncate } from './format';
+import { COLOR, displayUpc, escapeMd, fitEmbeds, formatDate, formatElapsed, formatMoment, formatNumber, platformName, RELEASE_TYPES, sourceName, truncate } from './format';
 import { distributorLogo } from './logos';
 
 /**
@@ -39,7 +39,12 @@ export type Card = {
   cached?: boolean;
   /** Set when the card is posted for everyone: what the label allows on shared cards. */
   shared?: { distributor: boolean; streams: boolean } | null;
+  /** What each source has said over time (Extended Info only). */
+  history?: HistoryRow[];
 };
+
+/** One value a source reported, and when Label Console first and last saw it. */
+export type HistoryRow = { ref: string; field: string; source: string; value: string; firstSeenAt: Date; lastSeenAt: Date };
 
 const canon = (v: unknown) =>
   String(v ?? '')
@@ -50,7 +55,7 @@ const canon = (v: unknown) =>
 /* ------------------------------------------------------------ evidence -- */
 
 export type FieldKey = 'isrc' | 'upc' | 'title' | 'releaseTitle' | 'releaseDate' | 'labelName' | 'pLine' | 'cLine' | 'durationMs';
-export const FIELD_NAMES: Record<string, string> = { isrc: 'ISRC', upc: 'UPC', title: 'Title', releaseTitle: 'Release', releaseDate: 'Release date', labelName: 'Label', pLine: '℗ line', cLine: '© line', durationMs: 'Duration', artists: 'Artists', distributor: 'Distributor', credits: 'Credits' };
+export const FIELD_NAMES: Record<string, string> = { isrc: 'ISRC', upc: 'UPC', title: 'Title', releaseTitle: 'Release', releaseType: 'Release type', releaseDate: 'Release date', labelName: 'Label', pLine: '℗ line', cLine: '© line', durationMs: 'Duration', artists: 'Artists', catalogNumber: 'Cat. No.', distributor: 'Distributor', credits: 'Credits' };
 
 export type Evidence = { status: 'verified' | 'reported' | 'conflicting' | 'inferred' | 'unknown'; label: string };
 
@@ -115,6 +120,15 @@ const rank = (p: string) => {
   return i < 0 ? LINK_ORDER.length : i;
 };
 
+/**
+ * Discogs' API terms ask for this notice, linked to the page the data came
+ * from, next to any of its data. Null when nothing shown came from Discogs.
+ */
+export function discogsCredit(md: ResolvedMetadata): string | null {
+  const page = md.platformIds.find((p) => p.platform === 'discogs' && p.url && /^https:\/\/www\.discogs\.com\//.test(p.url))?.url;
+  return page ? `[Data provided by Discogs.](${page})` : null;
+}
+
 /* ---------------------------------------------------------------- card -- */
 
 export function cardTitle(card: Card) {
@@ -144,9 +158,9 @@ export function footer(card: Card, extra?: string): Pick<Embed, 'footer' | 'time
 
 /** Streams to show: Spotify's count from this lookup, else the label's own latest Spotify reading. */
 export function streamsCount(card: Card): { count: number; label: string } | null {
-  if (card.md.plays) return { count: card.md.plays.count, label: `Spotify plays reported by ${sourceName(card.md.plays.source)} at lookup` };
+  if (card.md.plays) return { count: card.md.plays.count, label: `Spotify plays reported by ${sourceName(card.md.plays.source)}, ${formatMoment(card.md.plays.at)}` };
   const own = 'rows' in card.stats ? card.stats.rows.find((r) => r.platform === 'spotify') : null;
-  return own ? { count: own.total, label: `Spotify plays as of ${own.asOf} (tracked by Label Console)` } : null;
+  return own ? { count: own.total, label: `Spotify plays as of ${formatDate(own.asOf) ?? own.asOf} (tracked by Label Console)` } : null;
 }
 
 function distributorEmbed(card: Card): Embed | null {
@@ -186,7 +200,10 @@ function mainEmbed(card: Card): Embed {
     fields.push({ name: '🔢 UPC', value: show('upc', (v) => displayUpc(v) ?? v), inline: true });
     fields.push({ name: '📅 Release Date', value: show('releaseDate', (v) => v.slice(0, 10)), inline: true });
     fields.push({ name: '🎵 Tracks', value: md.tracks.length ? String(md.tracks.length) : 'Unknown', inline: true });
-    if (md.catalogNumber) fields.push({ name: '🗂️ Cat. No.', value: escapeMd(md.catalogNumber), inline: true });
+    if (md.catalogNumber) {
+      const credit = discogsCredit(md);
+      fields.push({ name: '🗂️ Cat. No.', value: `${escapeMd(md.catalogNumber)}${credit ? `\n${credit}` : ''}`, inline: true });
+    }
     if (fieldValue(card, 'pLine')) fields.push({ name: '℗ P Line', value: truncate(show('pLine'), 1024) });
     if (fieldValue(card, 'cLine')) fields.push({ name: '© C Line', value: truncate(show('cLine'), 1024) });
   }
