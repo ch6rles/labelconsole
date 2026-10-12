@@ -65,6 +65,7 @@ Clickable::Clickable()
     setWantsKeyboardFocus (true);
     setMouseClickGrabsKeyboardFocus (false);
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    setPaintingIsUnclipped (true); // the focus ring sits outside the bounds
 }
 
 void Clickable::mouseEnter (const juce::MouseEvent&)
@@ -391,6 +392,7 @@ ValueField::ValueField (Style s) : style (std::move (s))
 {
     setWantsKeyboardFocus (true);
     setMouseCursor (juce::MouseCursor::IBeamCursor);
+    setPaintingIsUnclipped (true); // the focus ring sits outside the bounds
 }
 
 ValueField::~ValueField() = default;

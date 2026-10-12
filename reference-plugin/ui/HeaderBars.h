@@ -59,6 +59,7 @@ private:
     juce::Rectangle<float> pillBounds, abLabelBounds;
     float wordmarkWidth = 0.0f;
     bool showPill = false;
+    juce::String pillText;
 };
 
 // Header row 2 (58 px): headphone and target fields, badge, stats.

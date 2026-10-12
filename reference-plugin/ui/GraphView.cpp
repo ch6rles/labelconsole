@@ -969,40 +969,86 @@ void GraphColumn::resized()
     r -= rw + 10.0f;
 
     auto& m = host.model();
-    const auto rigText = m.snap != nullptr && m.snap->rigId.isNotEmpty() ? m.snap->rigId.toUpperCase() + text::spacedDot + m.snap->earSimulator : juce::String();
     const auto rf = mono (10.0f, 400, 0.08f);
-    const float rigW = textWidth (rf, rigText) + 1.0f;
+    const auto rigShort = m.snap != nullptr ? m.snap->rigId.toUpperCase() : juce::String();
+    const auto rigFull = rigShort.isNotEmpty() && m.snap->earSimulator.isNotEmpty() ? rigShort + text::spacedDot + m.snap->earSimulator : rigShort;
+    const auto widthOf = [&rf] (const juce::String& t) { return t.isEmpty() ? 0.0f : textWidth (rf, t) + 1.0f; };
 
-    // Legend from the left: full labels, then short ones, then none, as the
-    // column narrows (the minimum size was not drawn in the handoff).
+    // Legend: full labels or short ones (the minimum size was not drawn in
+    // the handoff).
     const auto lf = sans (11.0f);
-    float x = left;
-    for (int variant = 0; variant < 3; ++variant)
+    auto legendLabelsFor = [&m] (int variant)
+    {
+        const auto* labels = m.settings.advancedView ? (variant == 0 ? kLegendAdvanced : kLegendAdvancedShort)
+                                                     : (variant == 0 ? kLegendStandard : kLegendStandardShort);
+        juce::StringArray out;
+        for (int i = 0; i < 4; ++i)
+            out.add (juce::String::fromUTF8 (labels[i]));
+        return out;
+    };
+    auto legendWidth = [&] (int variant)
+    {
+        const float gap = variant == 0 ? 16.0f : 12.0f;
+        float w = -gap;
+        for (const auto& label : legendLabelsFor (variant))
+            w += 24.0f + 8.0f + textWidth (lf, label) + gap;
+        return w;
+    };
+    auto placeLegend = [&] (int variant, float y)
     {
         legendBounds.clear();
         legendLabels.clear();
-        x = left;
-        if (variant == 2)
-            break;
-        const auto* labels = m.settings.advancedView ? (variant == 0 ? kLegendAdvanced : kLegendAdvancedShort)
-                                                     : (variant == 0 ? kLegendStandard : kLegendStandardShort);
         const float gap = variant == 0 ? 16.0f : 12.0f;
-        for (int i = 0; i < 4; ++i)
+        float x = left;
+        for (const auto& label : legendLabelsFor (variant))
         {
-            const auto label = juce::String::fromUTF8 (labels[i]);
             const float w = 24.0f + 8.0f + textWidth (lf, label);
-            legendBounds.push_back ({ x, toolbarY, w, toolbarH });
+            legendBounds.push_back ({ x, y, w, toolbarH });
             legendLabels.add (label);
             x += w + gap;
         }
-        if (x - gap + 16.0f <= r)
-            break;
+    };
+
+    // Every graph names its rig (spec Section 2): the rig label shortens to
+    // the rig id before the legend loses words, and when the two do not fit
+    // beside the buttons the legend moves to a second row.
+    int rows = 1;
+    bool placed = false;
+    for (int variant = 0; variant < 2 && ! placed; ++variant)
+    {
+        for (const auto& rig : { rigFull, rigShort })
+        {
+            const float rigW = widthOf (rig);
+            if (left + legendWidth (variant) + 16.0f + rigW <= r)
+            {
+                placeLegend (variant, toolbarY);
+                rigLabel = rig;
+                rigBounds = { r - rigW, toolbarY, rigW, toolbarH };
+                placed = true;
+                break;
+            }
+        }
     }
-    showRig = rigText.isNotEmpty() && ! legendBounds.empty() && x + rigW <= r;
-    rigBounds = showRig ? juce::Rectangle<float> (r - rigW, toolbarY, rigW, toolbarH) : juce::Rectangle<float>();
+    if (! placed)
+    {
+        rows = 2;
+        rigLabel = left + widthOf (rigFull) <= r ? rigFull : rigShort;
+        rigBounds = { left, toolbarY, juce::jmin (widthOf (rigLabel), r - left), toolbarH };
+        legendBounds.clear();
+        legendLabels.clear();
+        for (int variant = 0; variant < 2; ++variant)
+        {
+            if (left + legendWidth (variant) <= right)
+            {
+                placeLegend (variant, toolbarY + toolbarH);
+                break;
+            }
+        }
+    }
+    showRig = rigLabel.isNotEmpty();
 
     const float bottomH = m.settings.advancedView ? 46.0f : 40.0f;
-    const float plotTop = toolbarY + toolbarH;
+    const float plotTop = toolbarY + toolbarH * (float) rows;
     plot.setBounds (juce::Rectangle<float> (0.0f, plotTop, W, H - plotTop - bottomH).toNearestInt());
     status.setBounds (juce::Rectangle<float> (left, H - 40.0f, right - left, 40.0f).toNearestInt());
     nodeStrip.setBounds (juce::Rectangle<float> (left, H - 46.0f, right - left, 46.0f).toNearestInt());
@@ -1024,8 +1070,8 @@ void GraphColumn::paint (juce::Graphics& g)
         g.restoreState();
         drawText (g, label, b.withTrimmedLeft (32.0f), lf, off ? colours::tickMinor : colours::ink3);
     }
-    if (showRig && m.snap != nullptr)
-        drawText (g, m.snap->rigId.toUpperCase() + text::spacedDot + m.snap->earSimulator, rigBounds, mono (10.0f, 400, 0.08f), colours::label);
+    if (showRig)
+        drawText (g, rigLabel, rigBounds, mono (10.0f, 400, 0.08f), colours::label, juce::Justification::centredLeft, true);
 }
 
 void GraphColumn::mouseUp (const juce::MouseEvent& e)

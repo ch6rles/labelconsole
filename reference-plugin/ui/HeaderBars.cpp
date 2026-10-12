@@ -247,11 +247,32 @@ void HeaderRow1::resized()
     const float lw = textWidth (mono (10.0f), "A/B");
     abLabelBounds = { r - lw, 10.0f, lw + 1.0f, 28.0f };
     r -= lw;
+
+    // The protection warning must stay readable at every width: it gets the
+    // longest wording that leaves the preset box its minimum width, and in
+    // the narrowest windows the preset box steps aside while it is lit.
+    constexpr float presetMin = 120.0f;
+    const float minX = leftEnd + 16.0f;
+    bool presetVisible = true;
     if (showPill)
     {
-        const float pw = 10.0f + 7.0f + 8.0f + trackedWidth (pillFont(), "OUTPUT PROTECTION ACTIVE", 10.0f, 0.05f) + 10.0f;
+        auto pillWidth = [] (const juce::String& s) { return 10.0f + 7.0f + 8.0f + trackedWidth (pillFont(), s, 10.0f, 0.05f) + 10.0f; };
+        const juce::String wordings[] = { "OUTPUT PROTECTION ACTIVE", "PROTECTION ACTIVE", "PROTECTION" };
+        const float room = r - 10.0f - minX - presetMin - 16.0f;
+        pillText = wordings[2];
+        presetVisible = false;
+        for (const auto& wording : wordings)
+        {
+            if (pillWidth (wording) <= room)
+            {
+                pillText = wording;
+                presetVisible = true;
+                break;
+            }
+        }
+        const float pw = pillWidth (pillText);
         r -= 10.0f;
-        pillBounds = { r - pw, 10.0f, pw, 28.0f };
+        pillBounds = { juce::jmax (minX, r - pw), 10.0f, pw, 28.0f };
         r -= pw;
     }
     const float rightStart = r;
@@ -262,12 +283,13 @@ void HeaderRow1::resized()
     presetBox.setShowArrows (! narrow);
     float pw = narrow ? 210.0f : 264.0f;
     float px = std::round ((W - pw) * 0.5f);
-    const float minX = leftEnd + 16.0f, maxRight = rightStart - 16.0f;
+    const float maxRight = rightStart - 16.0f;
     if (px < minX)
         px = minX;
     if (px + pw > maxRight)
-        pw = juce::jmax (120.0f, maxRight - px);
+        pw = juce::jmax (presetMin, maxRight - px);
     presetBox.setBounds (juce::Rectangle<float> (px, 10.0f, pw, 28.0f).toNearestInt());
+    presetBox.setVisible (presetVisible);
 }
 
 void HeaderRow1::paint (juce::Graphics& g)
@@ -282,7 +304,7 @@ void HeaderRow1::paint (juce::Graphics& g)
         g.fillRoundedRectangle (pillBounds, 3.0f);
         g.setColour (colours::bg);
         g.fillRect (pillBounds.getX() + 10.0f, pillBounds.getCentreY() - 3.5f, 7.0f, 7.0f);
-        drawText (g, "OUTPUT PROTECTION ACTIVE", pillBounds.withTrimmedLeft (25.0f), pillFont(), colours::bg);
+        drawText (g, pillText, pillBounds.withTrimmedLeft (25.0f), pillFont(), colours::bg);
     }
 
     g.setColour (colours::line);

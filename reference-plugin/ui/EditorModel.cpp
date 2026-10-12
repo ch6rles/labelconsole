@@ -118,6 +118,12 @@ void EditorModel::recompute()
     graph = std::move (g);
 }
 
+bool EditorModel::latencyNoticeActive() const
+{
+    const auto changed = proc.latencyChangedAtMs();
+    return changed != 0 && juce::Time::getMillisecondCounter() - changed < 8000;
+}
+
 void EditorModel::showNotice (const juce::String& message)
 {
     notice = message;
@@ -140,6 +146,12 @@ std::vector<StatusMessage> EditorModel::statusMessages() const
         out.push_back ({ StatusMessage::Kind::render, "Offline render detected. Auto-bypass is on; change it in Settings.", {} });
         return out;
     }
+    // Just raised: shown first for its lifetime, ahead of standing warnings
+    // (spec Sections 6 and 9).
+    if (latencyNoticeActive())
+        out.push_back ({ StatusMessage::Kind::info, "Latency changed; some hosts apply this when playback stops", {} });
+    if (snap != nullptr && snap->fromEmbedded)
+        out.push_back ({ StatusMessage::Kind::info, "Using the curve saved with this session", {} });
     if (snap != nullptr)
         for (const auto& w : snap->result.warnings)
             out.push_back ({ StatusMessage::Kind::alert, text::fromStd (w.message),
@@ -150,11 +162,6 @@ std::vector<StatusMessage> EditorModel::statusMessages() const
     for (const auto& e : proc.getLibrary().getLoadErrors())
         out.push_back ({ StatusMessage::Kind::alert, e, {} });
 
-    const auto changed = proc.latencyChangedAtMs();
-    if (changed != 0 && juce::Time::getMillisecondCounter() - changed < 8000)
-        out.push_back ({ StatusMessage::Kind::info, "Latency changed; some hosts apply this when playback stops", {} });
-    if (snap != nullptr && snap->fromEmbedded)
-        out.push_back ({ StatusMessage::Kind::info, "Using the curve saved with this session", {} });
     if (! settings.overlay.empty() && ! settings.advancedView)
         out.push_back ({ StatusMessage::Kind::info,
                          "User overlay active: " + juce::String ((int) settings.overlay.size()) + " node"
@@ -186,13 +193,16 @@ void EditorModel::timerCallback()
         const float db = peak > 1e-6f ? juce::Decibels::gainToDecibels (peak) : -120.0f;
         const float released = levelDb[c] - dt * 8.686f / 0.3f;
         const float newLevel = juce::jmax (db, released, -120.0f);
+        const float previousHold = holdDb[c];
         if (db >= holdDb[c] || now > holdUntil[c])
         {
             if (db >= holdDb[c])
                 holdUntil[c] = now + 1500;
             holdDb[c] = db >= holdDb[c] ? db : juce::jmax (db, holdDb[c] - dt * 20.0f);
         }
-        if (std::abs (newLevel - levelDb[c]) > 0.01f)
+        // The readout shows the held peak, which keeps falling after the
+        // level has reached the floor.
+        if (std::abs (newLevel - levelDb[c]) > 0.01f || std::abs (holdDb[c] - previousHold) > 0.01f)
             metersMoved = true;
         levelDb[c] = newLevel;
     }
@@ -236,9 +246,16 @@ void EditorModel::timerCallback()
         changed = true;
     }
     const auto latencyStamp = proc.latencyChangedAtMs();
-    if (latencyStamp != lastLatencyChange || (latencyStamp != 0 && now - latencyStamp > 8000 && now - latencyStamp < 8100))
+    const bool latencyShown = latencyNoticeActive();
+    if (latencyStamp != lastLatencyChange)
     {
         lastLatencyChange = latencyStamp;
+        statusIndex = 0; // bring the new notice to the front
+        changed = true;
+    }
+    if (latencyShown != lastLatencyShown)
+    {
+        lastLatencyShown = latencyShown;
         changed = true;
     }
     lastAmount = a;

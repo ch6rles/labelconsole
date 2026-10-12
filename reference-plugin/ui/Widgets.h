@@ -9,6 +9,16 @@
 namespace ref::ui
 {
 
+// Focus rings sit 2.5 px outside the widget, so the widgets that draw one
+// paint unclipped and repaint that margin when focus moves.
+inline void repaintWithFocusMargin (juce::Component& c)
+{
+    if (auto* parent = c.getParentComponent())
+        parent->repaint (c.getBounds().expanded (4));
+    else
+        c.repaint();
+}
+
 // Base for everything clickable: hover, pressed and keyboard-focus states
 // (proposed in the handoff: hover border #8a8a8a, pressed #161616, focus
 // ring 1px ink at 2px offset), Enter/Space activation.
@@ -29,8 +39,8 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     bool keyPressed (const juce::KeyPress&) override;
-    void focusGained (FocusChangeType) override { repaint(); }
-    void focusLost (FocusChangeType) override { repaint(); }
+    void focusGained (FocusChangeType) override { repaintWithFocusMargin (*this); }
+    void focusLost (FocusChangeType) override { repaintWithFocusMargin (*this); }
 
 protected:
     void drawFocusRing (juce::Graphics&, juce::Rectangle<float>, float radius) const;
@@ -176,8 +186,8 @@ public:
     void mouseEnter (const juce::MouseEvent&) override { repaint(); }
     void mouseExit (const juce::MouseEvent&) override { repaint(); }
     bool keyPressed (const juce::KeyPress&) override;
-    void focusGained (FocusChangeType) override { repaint(); }
-    void focusLost (FocusChangeType) override { repaint(); }
+    void focusGained (FocusChangeType) override { repaintWithFocusMargin (*this); }
+    void focusLost (FocusChangeType) override { repaintWithFocusMargin (*this); }
 
     void beginEditing();
     bool isEditing() const noexcept { return editor != nullptr; }

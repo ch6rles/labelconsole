@@ -263,6 +263,37 @@ private:
             case 14:
                 shoot ("11-linear-phase");
                 proc->setFilterMode (dsp::FilterMode::minimumPhase);
+                // The protection warning at the minimum size.
+                editor->setSize (800, 500);
+                proc->setProfile ("test_bass_rolloff");
+                proc->setAutoGain (false);
+                v.model().setParam (params::outputGain, 12.0f);
+                level = 0.6f;
+                wait (900);
+                break;
+            case 15:
+                shoot ("12-protection-minimum-size");
+                level = 0.1f;
+                proc->setAutoGain (true);
+                v.model().setParam (params::outputGain, 0.0f);
+                proc->setProfile ("audeze_mm520");
+                // A preset menu longer than the window scrolls, with its
+                // actions pinned at the bottom.
+                for (int i = 1; i <= 14; ++i)
+                {
+                    juce::String error;
+                    proc->getPresets().saveUser (proc->captureCurrentAsPreset ("User preset " + juce::String (i)), error);
+                }
+                wait (2500);
+                break;
+            case 16:
+                findChild<ui::PresetBox> (v)->menuButton.onClick();
+                wait (200);
+                break;
+            case 17:
+                shoot ("13-long-preset-menu");
+                v.closeMenu();
+                editor->setSize (1200, 700);
                 stopTimer();
                 if (onFinished)
                     onFinished();

@@ -112,6 +112,7 @@ private:
     std::vector<juce::Rectangle<float>> legendBounds;
     juce::StringArray legendLabels;
     juce::Rectangle<float> rigBounds;
+    juce::String rigLabel;
     bool showRig = true;
 };
 

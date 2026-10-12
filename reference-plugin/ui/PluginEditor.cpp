@@ -145,14 +145,34 @@ void MainView::showMenu (std::vector<MenuItem> items, MenuStyle style, juce::Com
     menu = std::make_unique<MenuPanel> (std::move (items), style);
     menuAnchor = &anchor;
 
+    // Below the anchor if it fits, else above; a menu taller than either
+    // side scrolls in the larger one, or over the anchor in short windows.
     const auto a = getLocalArea (&anchor, anchor.getLocalBounds()).toFloat();
-    const float h = menu->preferredHeight();
+    const float H = (float) getHeight();
+    const float below = H - 8.0f - (a.getBottom() + gapBelow), above = a.getY() - gapBelow - 8.0f;
+    menu->setMaxHeight (H - 16.0f);
+    float h = menu->visibleHeight();
     float x = a.getX() + xOffset;
     float y = a.getBottom() + gapBelow;
     if (x + style.width > (float) getWidth() - 8.0f)
         x = juce::jmax (8.0f, (float) getWidth() - 8.0f - style.width);
-    if (y + h > (float) getHeight() - 8.0f)
-        y = juce::jmax (8.0f, a.getY() - gapBelow - h);
+    if (h > below)
+    {
+        if (h <= above)
+        {
+            y = a.getY() - gapBelow - h;
+        }
+        else if (juce::jmax (below, above) >= 240.0f)
+        {
+            menu->setMaxHeight (juce::jmax (below, above));
+            h = menu->visibleHeight();
+            y = below >= above ? a.getBottom() + gapBelow : a.getY() - gapBelow - h;
+        }
+        else
+        {
+            y = 8.0f;
+        }
+    }
     const float m = MenuPanel::kShadowMargin;
     menu->setBounds (juce::Rectangle<float> (x - m, y - m, style.width + 2.0f * m, h + 2.0f * m).toNearestInt());
     menu->onDismiss = [this] { closeMenu(); };

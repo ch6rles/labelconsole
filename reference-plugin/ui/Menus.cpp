@@ -49,190 +49,298 @@ float MenuPanel::itemHeight (const MenuItem& m) const
 
 float MenuPanel::preferredHeight() const
 {
-    float h = 6.0f + style.bottomPad;
-    bool first = true;
-    for (const auto& m : items)
-    {
-        h += itemHeight (m);
-        if (m.kind == MenuItem::Kind::group && first)
-            h += style.groupTopPad - 6.0f;
-        first = false;
-    }
-    return h;
+    return 6.0f + contentHeight + style.bottomPad;
 }
 
 void MenuPanel::layout()
 {
     rows.clear();
-    const float x = kShadowMargin;
-    float y = kShadowMargin + 6.0f;
-    bool first = true;
-    for (int i = 0; i < (int) items.size(); ++i)
-    {
-        const auto& m = items[(size_t) i];
-        float h = itemHeight (m);
-        if (m.kind == MenuItem::Kind::group && first)
-            h += style.groupTopPad - 6.0f;
-        first = false;
-        if (m.kind == MenuItem::Kind::item)
-        {
-            rows.push_back ({ { x, y, style.width, h }, i, -1 });
-        }
-        else if (m.kind == MenuItem::Kind::actions)
-        {
-            const float cellW = style.width / 3.0f;
-            const float cellH = (h - 6.0f - 1.0f) * 0.5f;
-            for (int a = 0; a < (int) m.actions.size(); ++a)
-                rows.push_back ({ { x + cellW * (float) (a % 3), y + 6.0f + 1.0f + cellH * (float) (a / 3), cellW, cellH }, i, a });
-        }
-        y += h;
-    }
-}
-
-void MenuPanel::paint (juce::Graphics& g)
-{
-    const juce::Rectangle<float> box (kShadowMargin, kShadowMargin, style.width, preferredHeight());
-    drawShadow (g, box, 5.0f, 18.0f, 40.0f, 0.65f);
-    g.setColour (colours::menu);
-    g.fillRoundedRectangle (box, 5.0f);
-
-    juce::Path clip;
-    clip.addRoundedRectangle (box, 5.0f);
-    g.saveState();
-    g.reduceClipRegion (clip);
-
-    const auto nameFont = style.monoItems ? mono (11.0f) : sans (13.0f);
-    const auto nameFontSel = style.monoItems ? mono (11.0f, 600) : sans (13.0f, 600);
-    float y = box.getY() + 6.0f;
-    bool first = true;
+    tops.clear();
+    heights.clear();
+    topPads.clear();
+    float y = 0.0f;
     for (int i = 0; i < (int) items.size(); ++i)
     {
         const auto& m = items[(size_t) i];
         float h = itemHeight (m);
         float topPad = 6.0f;
-        if (m.kind == MenuItem::Kind::group && first)
+        if (m.kind == MenuItem::Kind::group && i == 0)
         {
             h += style.groupTopPad - 6.0f;
             topPad = style.groupTopPad;
         }
-        first = false;
-        const juce::Rectangle<float> area (box.getX(), y, style.width, h);
-
-        switch (m.kind)
-        {
-            case MenuItem::Kind::group:
-                drawText (g, m.text, { area.getX() + 14.0f, y + topPad, style.width - 28.0f, groupFont().getHeight() }, groupFont(), colours::label);
-                break;
-
-            case MenuItem::Kind::divider:
-                g.setColour (colours::divider);
-                g.fillRect (area.getX(), y + 6.0f, style.width, 1.0f);
-                break;
-
-            case MenuItem::Kind::footer:
-                drawText (g, m.text, { area.getX() + 29.0f, y + 8.0f, style.width - 43.0f, footerFont().getHeight() }, footerFont(), colours::label);
-                break;
-
-            case MenuItem::Kind::actions:
-            {
-                g.setColour (colours::divider);
-                g.fillRect (area.getX(), y + 6.0f, style.width, 1.0f);
-                const float cellW = style.width / 3.0f;
-                const float cellH = (h - 7.0f) * 0.5f;
-                for (int a = 0; a < (int) m.actions.size(); ++a)
-                {
-                    const juce::Rectangle<float> cell (area.getX() + cellW * (float) (a % 3), y + 7.0f + cellH * (float) (a / 3), cellW, cellH);
-                    bool hot = false;
-                    for (int r = 0; r < (int) rows.size(); ++r)
-                        if (rows[(size_t) r].item == i && rows[(size_t) r].action == a && (r == hoverRow || r == keyRow))
-                            hot = true;
-                    if (hot && m.actions[(size_t) a].enabled)
-                    {
-                        g.setColour (colours::rowHover);
-                        g.fillRect (cell);
-                    }
-                    g.setColour (colours::divider);
-                    if (a % 3 != 2)
-                        g.fillRect (cell.getRight() - 1.0f, cell.getY(), 1.0f, cell.getHeight());
-                    if (a / 3 == 0)
-                        g.fillRect (cell.getX(), cell.getBottom() - 1.0f, cell.getWidth(), 1.0f);
-                    drawText (g, m.actions[(size_t) a].text, cell, actionFont(),
-                              m.actions[(size_t) a].enabled ? colours::ink4 : colours::tickMinor, juce::Justification::centred);
-                }
-                break;
-            }
-
-            case MenuItem::Kind::item:
-            {
-                bool hot = false;
-                for (int r = 0; r < (int) rows.size(); ++r)
-                    if (rows[(size_t) r].item == i && (r == hoverRow || r == keyRow))
-                        hot = true;
-                if (m.selected)
-                {
-                    g.setColour (colours::rowSelected);
-                    g.fillRect (area);
-                }
-                else if (hot && m.enabled)
-                {
-                    g.setColour (colours::rowHover);
-                    g.fillRect (area);
-                }
-
-                const auto& f = m.selected ? nameFontSel : nameFont;
-                const auto nameColour = ! m.enabled ? colours::disabled : m.selected ? colours::ink : colours::ink2;
-                const float left = area.getX() + 14.0f;
-                const float right = area.getRight() - 14.0f;
-
-                if (m.description.isNotEmpty())
-                {
-                    const float titleY = y + 10.0f;
-                    if (m.selected)
-                    {
-                        g.setColour (colours::ink);
-                        g.fillEllipse (left, titleY + 6.0f, 5.0f, 5.0f);
-                    }
-                    const float textX = left + 15.0f;
-                    drawText (g, m.text, { textX, titleY, right - textX - 40.0f, f.getHeight() }, f, nameColour);
-                    if (m.v2Tag)
-                        drawV2Tag (g, { textX, titleY, right - textX, f.getHeight() }, right);
-                    else if (m.detail.isNotEmpty())
-                        drawText (g, m.detail, { textX, titleY, right - textX, f.getHeight() }, mono (10.5f),
-                                  m.selected ? colours::menuDetail : colours::muted, juce::Justification::centredRight);
-                    const auto descColour = ! m.enabled ? colours::disabled : m.selected ? colours::menuDetail : colours::muted;
-                    drawParagraph (g, m.description, { textX, titleY + f.getHeight() + 3.0f, right - textX, 200.0f }, sans (11.5f), descColour, 11.5f * 1.4f);
-                }
-                else
-                {
-                    if (m.selected)
-                    {
-                        g.setColour (colours::ink);
-                        g.fillEllipse (left, area.getCentreY() - 2.5f, 5.0f, 5.0f);
-                    }
-                    const float textX = left + 15.0f;
-                    drawText (g, m.text, { textX, area.getY(), right - textX, area.getHeight() }, f, nameColour);
-                    if (m.v2Tag)
-                        drawV2Tag (g, area, right);
-                    else if (m.detail.isNotEmpty())
-                        drawText (g, m.detail, { textX, area.getY(), right - textX, area.getHeight() }, mono (10.5f),
-                                  m.selected ? colours::menuDetail : colours::muted, juce::Justification::centredRight);
-                }
-                break;
-            }
-        }
+        tops.push_back (y);
+        heights.push_back (h);
+        topPads.push_back (topPad);
+        if (m.kind == MenuItem::Kind::item)
+            rows.push_back ({ i, -1 });
+        else if (m.kind == MenuItem::Kind::actions)
+            for (int a = 0; a < (int) m.actions.size(); ++a)
+                rows.push_back ({ i, a });
         y += h;
+    }
+    contentHeight = y;
+
+    // The trailing actions grid and footer (and dividers between them).
+    pinnedFrom = (int) items.size();
+    while (pinnedFrom > 0)
+    {
+        const auto k = items[(size_t) pinnedFrom - 1].kind;
+        if (k != MenuItem::Kind::actions && k != MenuItem::Kind::footer && k != MenuItem::Kind::divider)
+            break;
+        --pinnedFrom;
+    }
+}
+
+void MenuPanel::setMaxHeight (float h)
+{
+    maxHeight = juce::jmax (80.0f, h);
+    scrollY = 0.0f;
+    for (int i = 0; i < (int) items.size(); ++i)
+        if (items[(size_t) i].kind == MenuItem::Kind::item && items[(size_t) i].selected)
+            scrollIntoView (i);
+    repaint();
+}
+
+float MenuPanel::visibleHeight() const
+{
+    return juce::jmin (preferredHeight(), maxHeight);
+}
+
+bool MenuPanel::scrolls() const
+{
+    return preferredHeight() > maxHeight + 0.5f;
+}
+
+int MenuPanel::firstPinned() const
+{
+    return scrolls() ? pinnedFrom : (int) items.size();
+}
+
+juce::Rectangle<float> MenuPanel::box() const
+{
+    return { kShadowMargin, kShadowMargin, style.width, visibleHeight() };
+}
+
+juce::Rectangle<float> MenuPanel::scrollArea() const
+{
+    const int p = firstPinned();
+    const float pinnedH = p < (int) items.size() ? contentHeight - tops[(size_t) p] : 0.0f;
+    const auto b = box();
+    return { b.getX(), b.getY() + 6.0f, b.getWidth(), juce::jmax (0.0f, b.getHeight() - 6.0f - style.bottomPad - pinnedH) };
+}
+
+float MenuPanel::itemY (int i) const
+{
+    const int p = firstPinned();
+    const auto area = scrollArea();
+    if (i >= p)
+        return area.getBottom() + tops[(size_t) i] - tops[(size_t) p];
+    return area.getY() + tops[(size_t) i] - scrollY;
+}
+
+juce::Rectangle<float> MenuPanel::rowBounds (int r) const
+{
+    const auto& row = rows[(size_t) r];
+    const float y = itemY (row.item);
+    const float h = heights[(size_t) row.item];
+    if (row.action < 0)
+        return { kShadowMargin, y, style.width, h };
+    const float cellW = style.width / 3.0f;
+    const float cellH = (h - 6.0f - 1.0f) * 0.5f;
+    return { kShadowMargin + cellW * (float) (row.action % 3), y + 6.0f + 1.0f + cellH * (float) (row.action / 3), cellW, cellH };
+}
+
+void MenuPanel::scrollBy (float dy)
+{
+    const int p = firstPinned();
+    const float scrollable = p < (int) items.size() ? tops[(size_t) p] : contentHeight;
+    const float maxScroll = juce::jmax (0.0f, scrollable - scrollArea().getHeight());
+    const float next = juce::jlimit (0.0f, maxScroll, scrollY + dy);
+    if (next != scrollY)
+    {
+        scrollY = next;
+        repaint();
+    }
+}
+
+void MenuPanel::scrollIntoView (int i)
+{
+    if (i >= firstPinned())
+        return;
+    const float areaH = scrollArea().getHeight();
+    if (tops[(size_t) i] < scrollY)
+        scrollBy (tops[(size_t) i] - scrollY);
+    else if (tops[(size_t) i] + heights[(size_t) i] > scrollY + areaH)
+        scrollBy (tops[(size_t) i] + heights[(size_t) i] - scrollY - areaH);
+}
+
+void MenuPanel::paint (juce::Graphics& g)
+{
+    const auto b = box();
+    drawShadow (g, b, 5.0f, 18.0f, 40.0f, 0.65f);
+    g.setColour (colours::menu);
+    g.fillRoundedRectangle (b, 5.0f);
+
+    juce::Path clip;
+    clip.addRoundedRectangle (b, 5.0f);
+    g.saveState();
+    g.reduceClipRegion (clip);
+
+    const int p = firstPinned();
+    const auto area = scrollArea();
+    {
+        juce::Graphics::ScopedSaveState scrolled (g);
+        g.reduceClipRegion (area.toNearestInt());
+        for (int i = 0; i < p; ++i)
+        {
+            const float y = itemY (i);
+            if (y + heights[(size_t) i] >= area.getY() && y <= area.getBottom())
+                paintItem (g, i, { b.getX(), y, style.width, heights[(size_t) i] }, topPads[(size_t) i]);
+        }
+    }
+    for (int i = p; i < (int) items.size(); ++i)
+        paintItem (g, i, { b.getX(), itemY (i), style.width, heights[(size_t) i] }, topPads[(size_t) i]);
+
+    if (scrolls())
+    {
+        // Scroll position: a thin bar at the right edge of the rows.
+        const float scrollable = p < (int) items.size() ? tops[(size_t) p] : contentHeight;
+        const float maxScroll = juce::jmax (1.0f, scrollable - area.getHeight());
+        const float thumbH = juce::jmax (24.0f, area.getHeight() * area.getHeight() / scrollable);
+        const float thumbY = area.getY() + (area.getHeight() - thumbH) * scrollY / maxScroll;
+        g.setColour (colours::borderControl);
+        g.fillRoundedRectangle ({ b.getRight() - 5.0f, thumbY + 2.0f, 3.0f, thumbH - 4.0f }, 1.5f);
     }
     g.restoreState();
 
     g.setColour (colours::borderControl);
-    g.drawRoundedRectangle (box.reduced (0.5f), 5.0f, 1.0f);
+    g.drawRoundedRectangle (b.reduced (0.5f), 5.0f, 1.0f);
+}
+
+void MenuPanel::paintItem (juce::Graphics& g, int i, juce::Rectangle<float> area, float topPad)
+{
+    const auto& m = items[(size_t) i];
+    const float y = area.getY();
+    const auto nameFont = style.monoItems ? mono (11.0f) : sans (13.0f);
+    const auto nameFontSel = style.monoItems ? mono (11.0f, 600) : sans (13.0f, 600);
+
+    switch (m.kind)
+    {
+        case MenuItem::Kind::group:
+            drawText (g, m.text, { area.getX() + 14.0f, y + topPad, style.width - 28.0f, groupFont().getHeight() }, groupFont(), colours::label);
+            break;
+
+        case MenuItem::Kind::divider:
+            g.setColour (colours::divider);
+            g.fillRect (area.getX(), y + 6.0f, style.width, 1.0f);
+            break;
+
+        case MenuItem::Kind::footer:
+            drawText (g, m.text, { area.getX() + 29.0f, y + 8.0f, style.width - 43.0f, footerFont().getHeight() }, footerFont(), colours::label);
+            break;
+
+        case MenuItem::Kind::actions:
+        {
+            g.setColour (colours::divider);
+            g.fillRect (area.getX(), y + 6.0f, style.width, 1.0f);
+            const float cellW = style.width / 3.0f;
+            const float cellH = (area.getHeight() - 7.0f) * 0.5f;
+            for (int a = 0; a < (int) m.actions.size(); ++a)
+            {
+                const juce::Rectangle<float> cell (area.getX() + cellW * (float) (a % 3), y + 7.0f + cellH * (float) (a / 3), cellW, cellH);
+                bool hot = false;
+                for (int r = 0; r < (int) rows.size(); ++r)
+                    if (rows[(size_t) r].item == i && rows[(size_t) r].action == a && (r == hoverRow || r == keyRow))
+                        hot = true;
+                if (hot && m.actions[(size_t) a].enabled)
+                {
+                    g.setColour (colours::rowHover);
+                    g.fillRect (cell);
+                }
+                g.setColour (colours::divider);
+                if (a % 3 != 2)
+                    g.fillRect (cell.getRight() - 1.0f, cell.getY(), 1.0f, cell.getHeight());
+                if (a / 3 == 0)
+                    g.fillRect (cell.getX(), cell.getBottom() - 1.0f, cell.getWidth(), 1.0f);
+                drawText (g, m.actions[(size_t) a].text, cell, actionFont(),
+                          m.actions[(size_t) a].enabled ? colours::ink4 : colours::tickMinor, juce::Justification::centred);
+            }
+            break;
+        }
+
+        case MenuItem::Kind::item:
+        {
+            bool hot = false;
+            for (int r = 0; r < (int) rows.size(); ++r)
+                if (rows[(size_t) r].item == i && (r == hoverRow || r == keyRow))
+                    hot = true;
+            if (m.selected)
+            {
+                g.setColour (colours::rowSelected);
+                g.fillRect (area);
+            }
+            else if (hot && m.enabled)
+            {
+                g.setColour (colours::rowHover);
+                g.fillRect (area);
+            }
+
+            const auto& f = m.selected ? nameFontSel : nameFont;
+            const auto nameColour = ! m.enabled ? colours::disabled : m.selected ? colours::ink : colours::ink2;
+            const float left = area.getX() + 14.0f;
+            const float right = area.getRight() - 14.0f;
+
+            if (m.description.isNotEmpty())
+            {
+                const float titleY = y + 10.0f;
+                if (m.selected)
+                {
+                    g.setColour (colours::ink);
+                    g.fillEllipse (left, titleY + 6.0f, 5.0f, 5.0f);
+                }
+                const float textX = left + 15.0f;
+                drawText (g, m.text, { textX, titleY, right - textX - 40.0f, f.getHeight() }, f, nameColour);
+                if (m.v2Tag)
+                    drawV2Tag (g, { textX, titleY, right - textX, f.getHeight() }, right);
+                else if (m.detail.isNotEmpty())
+                    drawText (g, m.detail, { textX, titleY, right - textX, f.getHeight() }, mono (10.5f),
+                              m.selected ? colours::menuDetail : colours::muted, juce::Justification::centredRight);
+                const auto descColour = ! m.enabled ? colours::disabled : m.selected ? colours::menuDetail : colours::muted;
+                drawParagraph (g, m.description, { textX, titleY + f.getHeight() + 3.0f, right - textX, 200.0f }, sans (11.5f), descColour, 11.5f * 1.4f);
+            }
+            else
+            {
+                if (m.selected)
+                {
+                    g.setColour (colours::ink);
+                    g.fillEllipse (left, area.getCentreY() - 2.5f, 5.0f, 5.0f);
+                }
+                const float textX = left + 15.0f;
+                drawText (g, m.text, { textX, area.getY(), right - textX, area.getHeight() }, f, nameColour);
+                if (m.v2Tag)
+                    drawV2Tag (g, area, right);
+                else if (m.detail.isNotEmpty())
+                    drawText (g, m.detail, { textX, area.getY(), right - textX, area.getHeight() }, mono (10.5f),
+                              m.selected ? colours::menuDetail : colours::muted, juce::Justification::centredRight);
+            }
+            break;
+        }
+    }
 }
 
 int MenuPanel::rowAt (juce::Point<float> p) const
 {
+    const auto area = scrollArea();
+    const int pinned = firstPinned();
     for (int r = 0; r < (int) rows.size(); ++r)
-        if (rows[(size_t) r].bounds.contains (p))
+    {
+        // Rows scrolled out of the visible area cannot be hit.
+        if (rows[(size_t) r].item < pinned && ! area.contains (p))
+            continue;
+        if (rowBounds (r).contains (p))
             return r;
+    }
     return -1;
 }
 
@@ -254,10 +362,18 @@ void MenuPanel::mouseExit (const juce::MouseEvent&)
     repaint();
 }
 
+void MenuPanel::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
+{
+    if (! scrolls())
+        return;
+    scrollBy (-w.deltaY * 240.0f);
+    hoverRow = rowAt (e.position);
+    repaint();
+}
+
 void MenuPanel::mouseUp (const juce::MouseEvent& e)
 {
-    const juce::Rectangle<float> box (kShadowMargin, kShadowMargin, style.width, preferredHeight());
-    if (! box.contains (e.position))
+    if (! box().contains (e.position))
     {
         if (onDismiss)
             onDismiss();
@@ -296,6 +412,7 @@ void MenuPanel::moveFocus (int delta)
             break;
     }
     keyRow = r;
+    scrollIntoView (rows[(size_t) r].item);
     repaint();
 }
 
@@ -315,6 +432,11 @@ bool MenuPanel::keyPressed (const juce::KeyPress& k)
     if (k == juce::KeyPress::upKey)
     {
         moveFocus (-1);
+        return true;
+    }
+    if (k == juce::KeyPress::pageDownKey || k == juce::KeyPress::pageUpKey)
+    {
+        scrollBy ((k == juce::KeyPress::pageDownKey ? 1.0f : -1.0f) * scrollArea().getHeight() * 0.9f);
         return true;
     }
     if ((k == juce::KeyPress::returnKey || k == juce::KeyPress::spaceKey) && keyRow >= 0)
