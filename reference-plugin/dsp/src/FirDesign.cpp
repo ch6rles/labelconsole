@@ -13,7 +13,6 @@ LinearPhaseSizing linearPhaseSizing (double sampleRate)
     LinearPhaseSizing s;
     const double ratio = sampleRate / 48000.0;
     s.latencySamples = (int) std::lround (4096.0 * ratio);
-    s.nominalTaps = 2 * s.latencySamples;
 
     int partition = 256;
     if (ratio > 1.5)
@@ -24,6 +23,7 @@ LinearPhaseSizing linearPhaseSizing (double sampleRate)
         partition = 2048;
     s.partitionSize = partition;
     s.halfLength = s.latencySamples - partition;
+    s.taps = 2 * s.halfLength + 1;
     return s;
 }
 
@@ -50,9 +50,10 @@ std::vector<double> designLinearPhaseFir (const std::function<double (double)>& 
     for (int j = -halfLength; j <= halfLength; ++j)
     {
         // Tukey taper (cosine over the outer quarter at each end). Its narrow
-        // main lobe keeps the low end accurate: measured against the
-        // correction curve it stays within 0.02 dB from 20 Hz to 20 kHz,
-        // where Hann or Blackman-Harris smear 0.2-0.3 dB at 20 Hz.
+        // main lobe keeps the low end accurate: for curves the generator has
+        // rounded to the FIR's resolution (step 8b) it stays within 0.06 dB
+        // from 20 Hz to 20 kHz, where Hann or Blackman-Harris smear several
+        // tenths of a dB at 20 Hz.
         const double x = (double) (j + halfLength) / (taps - 1);
         constexpr double taper = 0.25;
         double w = 1.0;

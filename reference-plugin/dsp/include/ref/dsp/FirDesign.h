@@ -6,14 +6,17 @@
 namespace ref::dsp
 {
 
-// Linear Phase sizing (spec Section 6): 8,192 taps at 48 kHz, scaled with
-// the sample rate so the latency in milliseconds stays the same.
+// Linear Phase sizing (spec Section 6): the latency of an 8,192-tap filter
+// at 48 kHz (4,096 samples, 85.3 ms), scaled with the sample rate so the
+// latency in milliseconds stays the same. The convolver's partition comes
+// out of that budget, so the FIR itself is 2 * (latency - partition) + 1
+// taps: 7,681 at 48 kHz.
 struct LinearPhaseSizing
 {
-    int nominalTaps = 8192;   // what the UI reports
-    int latencySamples = 4096; // nominalTaps / 2
+    int latencySamples = 4096; // reported latency
     int partitionSize = 256;   // convolver block
     int halfLength = 3840;     // FIR half length; latency = partition + half
+    int taps = 7681;           // 2 * halfLength + 1
 };
 
 LinearPhaseSizing linearPhaseSizing (double sampleRate);

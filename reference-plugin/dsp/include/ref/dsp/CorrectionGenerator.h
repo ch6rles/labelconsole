@@ -10,7 +10,7 @@
 namespace ref::dsp
 {
 
-inline constexpr const char* kGeneratorVersion = "1.0.0";
+inline constexpr const char* kGeneratorVersion = "1.1.0";
 
 // Per-profile generator limits (spec Section 4, step 8; all tunable).
 struct GeneratorLimits

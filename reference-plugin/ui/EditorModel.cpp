@@ -110,6 +110,22 @@ void EditorModel::recompute()
     {
         matchDb = dsp::loudnessMatchGainDb (total);
         headroomDb = dsp::headroomDb (total, matchDb);
+
+        // Above 20 kHz too, as the engine does: Minimum Phase shelves keep
+        // their gain there (Linear Phase tapers to 0 dB).
+        if (snap != nullptr && snap->result.generated && settings.filterMode == dsp::FilterMode::minimumPhase)
+        {
+            auto scaled = snap->result.filters;
+            for (auto& f : scaled)
+                f.gainDb *= a;
+            const double fs = proc.getSampleRate() > 0.0 ? proc.getSampleRate() : 48000.0;
+            for (double hz = dsp::kGridMaxHz * std::exp2 (1.0 / 12.0); hz < 0.48 * fs; hz *= std::exp2 (1.0 / 12.0))
+            {
+                const double v = dsp::analogCascadeDb (scaled.data(), (int) scaled.size(), hz)
+                                + dsp::analogCascadeDb (settings.overlay.data(), (int) settings.overlay.size(), hz);
+                headroomDb = std::min (headroomDb, -(v + matchDb));
+            }
+        }
     }
     else
     {

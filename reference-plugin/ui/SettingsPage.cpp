@@ -218,7 +218,7 @@ public:
         Section filter { "FILTER", {}, {} };
         filter.rows.push_back ({ "Filter mode", "Linear Phase keeps the correction phase-neutral, at the cost of latency and possible pre-ringing. With gentle corrections the difference is small.", {}, {}, &filterMode });
         filter.rows.push_back ({ "Linear Phase at " + rateText (fs), "FIR length scales with sample rate; latency in ms stays the same.",
-                                 withThousands (sizing.nominalTaps) + " taps\n" + m.latencyText (dsp::FilterMode::linearPhase) });
+                                 withThousands (sizing.taps) + " taps\n" + m.latencyText (dsp::FilterMode::linearPhase) });
         filter.rows.push_back ({ "Sample rate", "Supported from 44.1 to 384 kHz. Filters are designed for each rate.", rateText (fs) });
         cols[1].push_back (filter);
 

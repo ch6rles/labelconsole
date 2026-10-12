@@ -1,12 +1,14 @@
 #include "ref/dsp/CorrectionGenerator.h"
 
 #include "ref/dsp/Biquad.h"
+#include "ref/dsp/FirDesign.h"
 #include "ref/dsp/Format.h"
 #include "ref/dsp/LeastSquares.h"
 #include "ref/dsp/Loudness.h"
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace ref::dsp
 {
@@ -119,9 +121,15 @@ LmProblem makeProblem (const FitLayout& layout, const GridCurve& target, const G
         prob.upper.push_back (std::log2 (fHi));
         prob.step.push_back (1e-3);
 
-        prob.params.push_back (std::clamp (f.gainDb, -15.0, 12.0));
-        prob.lower.push_back (-15.0);
-        prob.upper.push_back (12.0);
+        // Shelves stay inside the correction's own limits: a shelf beyond
+        // them has to be cancelled by a broad bell, and that pair is hard to
+        // realise near Nyquist and leaves the shelf's excess above 20 kHz,
+        // where the bell has faded.
+        const bool shelf = f.type == FilterType::lowShelf || f.type == FilterType::highShelf;
+        const double gLo = shelf ? lim.maxCutDb : -15.0, gHi = shelf ? lim.maxBoostDb : 12.0;
+        prob.params.push_back (std::clamp (f.gainDb, gLo, gHi));
+        prob.lower.push_back (gLo);
+        prob.upper.push_back (gHi);
         prob.step.push_back (1e-3);
 
         if (! layout.qFixed[i])
@@ -196,6 +204,62 @@ void optimise (FitLayout& layout, const GridCurve& target, const GeneratorLimits
     const auto prob = makeProblem (layout, target, lim);
     const auto res = solveLevenbergMarquardt (prob, iterations, 1e-6);
     unpack (layout, res.params, layout.filters);
+}
+
+// Step 8b. The Linear Phase FIR spans about 80 ms either side of its centre
+// at every rate, so it resolves about 6 Hz: it cannot follow a hard corner
+// in the bass, such as where the boost limit bites on a bass roll-off (it
+// would miss the curve by up to 0.6 dB there). Round such corners, and only
+// those, until the FIR reproduces the curve within 0.06 dB, so both filter
+// modes realise the same curve (spec Section 12, filter accuracy). The
+// rounding moves the curve toward what the FIR plays anyway.
+void roundForLinearPhase (GridCurve& c, const GeneratorLimits& lim)
+{
+    constexpr double fs = 48000.0, tolerance = 0.06, relaxation = 1.8;
+    const int half = linearPhaseSizing (fs).halfLength;
+    int count = 0; // grid points checked: the FIR resolves everything finer above 2 kHz
+    while (count < kGridSize && gridFrequency (count) < 2000.0)
+        ++count;
+
+    std::vector<double> error ((size_t) count), weight ((size_t) count);
+    for (int iteration = 0; iteration < 40; ++iteration)
+    {
+        const auto h = designLinearPhaseFir ([&] (double hz) { return sampleCorrectionExtended (c, hz, lim.maxCutDb, lim.maxBoostDb); }, fs, half);
+
+        double worst = 0.0;
+        for (int i = 0; i < count; ++i)
+        {
+            // Zero-phase response of the symmetric FIR (cosine recurrence).
+            const double w = 2.0 * std::numbers::pi * gridFrequency (i) / fs;
+            const double k = 2.0 * std::cos (w);
+            double cPrev = 1.0, cCur = std::cos (w), sum = h[(size_t) half];
+            for (int n = 1; n <= half; ++n)
+            {
+                sum += 2.0 * h[(size_t) (half + n)] * cCur;
+                const double next = k * cCur - cPrev;
+                cPrev = cCur;
+                cCur = next;
+            }
+            error[(size_t) i] = 20.0 * std::log10 (std::max (1e-9, std::abs (sum))) - c[(size_t) i];
+            worst = std::max (worst, std::abs (error[(size_t) i]));
+        }
+        if (worst <= tolerance)
+            return;
+
+        // Move toward the FIR's own response where it misses, tapering over
+        // 1/6 octave around each miss so no new corner appears.
+        std::fill (weight.begin(), weight.end(), 0.0);
+        for (int i = 0; i < count; ++i)
+        {
+            const double v = std::clamp ((std::abs (error[(size_t) i]) - 0.5 * tolerance) / (0.5 * tolerance), 0.0, 1.0);
+            if (v <= 0.0)
+                continue;
+            for (int j = std::max (0, i - 8); j < std::min (count, i + 9); ++j)
+                weight[(size_t) j] = std::max (weight[(size_t) j], v * (1.0 - std::abs (j - i) / 9.0));
+        }
+        for (int i = 0; i < count; ++i)
+            c[(size_t) i] = std::clamp (c[(size_t) i] + relaxation * weight[(size_t) i] * error[(size_t) i], lim.maxCutDb, lim.maxBoostDb);
+    }
 }
 
 GridCurve modelCurve (const std::vector<FilterSpec>& fs)
@@ -423,6 +487,7 @@ CorrectionResult generateCorrection (const CurveSource& measurementIn, const Cur
     for (auto& v : corr)
         v = std::clamp (v, lim.maxCutDb, lim.maxBoostDb);
     limitSlope (corr, lim.maxSlopeDbPerOctave);
+    roundForLinearPhase (corr, lim);
     res.correction = corr;
     res.largestBoostDb = std::max (0.0, *std::max_element (corr.begin(), corr.end()));
 

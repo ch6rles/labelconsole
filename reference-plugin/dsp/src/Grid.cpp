@@ -81,7 +81,12 @@ double sampleCorrectionExtended (const GridCurve& c, double hz, double minDb, do
     double v;
     if (hz < kGridMinHz)
     {
-        const double slopePerOct = (sampleGridCurve (c, kGridMinHz * std::exp2 (0.25)) - c.front()) / 0.25;
+        // Continues the slope at 20 Hz and levels off by 10 Hz. The slope is
+        // limited so the curve never reaches the limits on the way: a clamp
+        // there would put a corner just below 20 Hz that the Linear Phase FIR
+        // smears into the audible band.
+        double slopePerOct = (sampleGridCurve (c, kGridMinHz * std::exp2 (0.25)) - c.front()) / 0.25;
+        slopePerOct = std::clamp (slopePerOct, std::min (0.0, 2.0 * (c.front() - maxDb)), std::max (0.0, 2.0 * (c.front() - minDb)));
         const double o = std::max (-1.0, std::log2 (std::max (hz, 1e-3) / kGridMinHz));
         v = c.front() + slopePerOct * (o + 0.5 * o * o);
     }

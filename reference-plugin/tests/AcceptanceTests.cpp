@@ -202,6 +202,114 @@ TEST_CASE ("acceptance: Minimum Phase stays accurate with high-frequency overlay
     CHECK_MSG (worst <= 0.1, "overlay cascade off by " + std::to_string (worst) + " dB");
 }
 
+TEST_CASE ("acceptance: filter accuracy for generated corrections with bass roll-offs and treble peaks, at partial Amounts")
+{
+    // Corrections the two bundled curves do not exercise: a bass roll-off
+    // that drives the boost limit (a hard corner in the curve) and treble
+    // peaks and dips near Nyquist at 44.1 and 48 kHz.
+    const auto target = reftest::loadTarget ("neutral@1.csv");
+    const auto base = reftest::loadProfile ("audeze_mm500");
+    std::mt19937 rng (21);
+    std::uniform_real_distribution<double> u (0.0, 1.0);
+    auto lu = [&] (double lo, double hi) { return std::exp2 (std::log2 (lo) + u (rng) * (std::log2 (hi) - std::log2 (lo))); };
+
+    for (int trial = 0; trial < 5; ++trial)
+    {
+        std::vector<FilterSpec> deviation {
+            { FilterType::highPass, lu (25.0, 80.0), 0.0, 0.5 + 0.4 * u (rng) },
+            { FilterType::bell, lu (1500.0, 4000.0), -6.0 + 12.0 * u (rng), lu (0.5, 2.0) },
+            { FilterType::bell, lu (5000.0, 11000.0), 3.0 + 7.0 * u (rng), lu (1.5, 5.0) },
+            { FilterType::bell, lu (5000.0, 11000.0), -(3.0 + 7.0 * u (rng)), lu (1.5, 5.0) },
+            { FilterType::highShelf, lu (8000.0, 14000.0), -6.0 + 9.0 * u (rng), 0.7071 },
+        };
+        auto m = base;
+        for (size_t i = 0; i < m.curve.freqHz.size(); ++i)
+            m.curve.db[i] += analogCascadeDb (deviation.data(), (int) deviation.size(), m.curve.freqHz[i]);
+        const auto corr = generateCorrection (m, target);
+        CHECK (corr.generated);
+
+        for (double fs : kSupportedSampleRates)
+        {
+            char msg[200];
+
+            // Linear Phase, through the convolver, at 100% and 55%.
+            for (double amount : { 1.0, 0.55 })
+            {
+                auto set = FilterSet::build (reftest::configFor (corr, FilterMode::linearPhase, fs, amount));
+                const auto ir = impulseResponse (*set, nextPowerOfTwo ((int) (2.0 * fs)));
+                const Spectrum spec (ir, fs);
+                double worst = 0.0, worstHz = 0.0;
+                for (int i = 0; i < 300; ++i)
+                {
+                    const double hz = spec.binHz (20.0 * std::pow (1000.0, i / 299.0));
+                    const double err = std::abs (spec.db (hz) - amount * sampleCorrectionExtended (corr.correction, hz, -12.0, 6.0));
+                    if (err > worst)
+                    {
+                        worst = err;
+                        worstHz = hz;
+                    }
+                }
+                std::snprintf (msg, sizeof (msg), "trial %d, Linear Phase at %.1f kHz, %d%%: %.3f dB off at %.0f Hz", trial, fs / 1000.0, (int) std::lround (amount * 100.0), worst, worstHz);
+                CHECK_MSG (worst <= 0.1, msg);
+            }
+
+            // Minimum Phase at every 5% of Amount, from its coefficients.
+            auto set = FilterSet::build (reftest::configFor (corr, FilterMode::minimumPhase, fs));
+            double worst = 0.0, worstHz = 0.0, worstAmount = 0.0;
+            for (int a = 1; a <= 20; ++a)
+            {
+                const double amount = a / 20.0;
+                auto scaled = corr.filters;
+                for (auto& f : scaled)
+                    f.gainDb *= amount;
+                for (int i = 0; i < 300; ++i)
+                {
+                    const double hz = 20.0 * std::pow (1000.0, i / 299.0);
+                    const double err = std::abs (set->realisedResponseDb (amount, hz) - analogCascadeDb (scaled.data(), (int) scaled.size(), hz));
+                    if (err > worst)
+                    {
+                        worst = err;
+                        worstHz = hz;
+                        worstAmount = amount;
+                    }
+                }
+            }
+            std::snprintf (msg, sizeof (msg), "trial %d, Min Phase at %.1f kHz: %.3f dB off at %.0f Hz, Amount %d%%", trial, fs / 1000.0, worst, worstHz, (int) std::lround (worstAmount * 100.0));
+            CHECK_MSG (worst <= 0.1, msg);
+        }
+    }
+}
+
+TEST_CASE ("acceptance: Minimum Phase high-pass overlay nodes stay accurate near Nyquist")
+{
+    for (double fs : { 44100.0, 48000.0 })
+    {
+        for (double hz : { 3300.0, 6000.0, 10000.0 })
+        {
+            for (double q : { 0.5, 0.7071, 1.0 })
+            {
+                const FilterSpec hp { FilterType::highPass, hz, 0.0, q };
+                FilterSetConfig cfg;
+                cfg.mode = FilterMode::minimumPhase;
+                cfg.sampleRate = fs;
+                cfg.overlay = { hp };
+                auto set = FilterSet::build (cfg);
+                double worst = 0.0;
+                for (int i = 0; i < 400; ++i)
+                {
+                    const double f = 20.0 * std::pow (1000.0, i / 399.0);
+                    const double analog = analogMagnitudeDb (hp, f);
+                    if (analog > -40.0) // the stop band far down does not matter
+                        worst = std::max (worst, std::abs (set->realisedResponseDb (1.0, f) - analog));
+                }
+                char msg[120];
+                std::snprintf (msg, sizeof (msg), "high-pass %.0f Hz Q %.2f at %.1f kHz: %.3f dB off", hz, q, fs / 1000.0, worst);
+                CHECK_MSG (worst <= 0.1, msg);
+            }
+        }
+    }
+}
+
 TEST_CASE ("acceptance: bypass is bit-exact (Linear Phase: after the reported delay)")
 {
     for (auto mode : { FilterMode::minimumPhase, FilterMode::linearPhase })
@@ -291,7 +399,7 @@ TEST_CASE ("acceptance: level match, pink noise A vs B within 0.3 dB (BS.1770)")
 
 TEST_CASE ("acceptance: measured latency equals reported latency")
 {
-    for (double fs : { 44100.0, 48000.0, 96000.0, 192000.0 })
+    for (double fs : kSupportedSampleRates)
     {
         for (auto mode : { FilterMode::minimumPhase, FilterMode::linearPhase })
         {
@@ -560,11 +668,21 @@ TEST_CASE ("acceptance: smoothing, Amount and Output swept in 10 ms leave no dis
     for (auto mode : { FilterMode::minimumPhase, FilterMode::linearPhase })
     {
         const double fs = 48000.0;
+        const bool linear = mode == FilterMode::linearPhase;
         Engine e;
-        prepareWith (e, fs, 32, reftest::configFor (reftest::mm520Studio(), mode, fs));
+        prepareWith (e, fs, 32, reftest::configFor (reftest::mm520Studio(), mode, fs, linear ? 0.0 : 1.0));
         Signal s ((size_t) fs);
         for (size_t i = 0; i < s.l.size(); ++i)
             s.l[i] = s.r[i] = (float) (0.1 * std::sin (2.0 * 3.14159265358979 * 100.0 * i / fs));
+
+        // Linear Phase bakes Amount into its FIR, so the worker rebuilds it
+        // while Amount moves (it polls every 20 ms; here every 10 blocks,
+        // about 7 ms, to exercise more hand-overs), each set crossfading
+        // from the one before.
+        std::vector<std::pair<size_t, std::unique_ptr<FilterSet>>> rebuilds;
+        if (linear)
+            for (size_t block : { 300, 310, 320 })
+                rebuilds.emplace_back (block, FilterSet::build (reftest::configFor (reftest::mm520Studio(), mode, fs, std::min (1.0, (double) (block - 299) / 15.0))));
 
         // Sweep in 15 blocks of 32 samples = 10 ms, from 0% / -24 dB to 100% / +12 dB.
         EngineParams p;
@@ -579,8 +697,12 @@ TEST_CASE ("acceptance: smoothing, Amount and Output swept in 10 ms leave no dis
                 p.amount = t;
                 p.outputGainDb = -24.0 + 36.0 * t;
             }
+            for (auto& [at, set] : rebuilds)
+                if (at == block && set != nullptr)
+                    e.submit (std::move (set));
             float* ch[2] = { s.l.data() + off, s.r.data() + off };
             e.process (ch, 2, 32, p);
+            e.collectGarbage();
         }
 
         // Cubic-prediction residual: a smooth signal is predicted almost

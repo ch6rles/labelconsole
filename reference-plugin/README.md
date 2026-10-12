@@ -139,7 +139,8 @@ reference-profile-tool verify my_mm520.json
 The profile stores the mean and the per-frequency spread; the correction is
 generated when it loads (validate, resample to 1/48 octave, normalise 500 Hz–2 kHz,
 variable smoothing, spread weighting, treble averaging above 9 kHz, clamp to
-+6/−12 dB, fit ≤ 2 shelves and 10 bells with Q ≤ 3). Only use measurements you own
++6/−12 dB, round bass corners to what the Linear Phase FIR can resolve, fit ≤ 2
+shelves and 10 bells with Q ≤ 3). Only use measurements you own
 or are licensed to use, and a target defined on the same rig.
 
 ## Building from source
@@ -169,7 +170,7 @@ Automated, in CI on every platform:
 
 | Row | Result |
 | --- | --- |
-| Filter accuracy | Both modes, all 8 rates 44.1–384 kHz: within 0.1 dB of the design, 20 Hz–20 kHz |
+| Filter accuracy | Both modes, all 8 rates 44.1–384 kHz: within 0.1 dB of the design, 20 Hz–20 kHz, for the bundled curves and for generated corrections with bass roll-offs and treble peaks, at every 5% of Amount |
 | Bypass | Bit-exact; Linear Phase bit-exact after the reported delay |
 | Amount 0% | Null against bypass below −120 dBFS |
 | Level match | Pink noise A vs B within 0.3 dB (BS.1770), both modes, 100% and 50% |
@@ -196,13 +197,25 @@ rights checklist in Section 11.
 * **Match gain** is K-weighted over the whole 20 Hz–20 kHz grid rather than
   100 Hz–10 kHz, so it matches what the BS.1770 pink-noise acceptance test hears.
 * **Minimum Phase accuracy.** Each biquad uses a matched-magnitude design with a
-  least-squares numerator, and the cascade is refined per sample rate so it stays
-  within 0.1 dB of the analogue design up to 20 kHz at 44.1 kHz.
-* **Linear Phase.** 8,192 taps at 48 kHz scaled with rate; Tukey window; latency
-  includes the convolver's partition, so the reported 85.3 ms is exact. New filter
-  sets take over the running convolver's history, so Amount changes crossfade
-  without gaps. Ultrasonic taper above 20 kHz applies to Linear Phase; Minimum
-  Phase shelves hold their gain above 20 kHz.
+  least-squares numerator. At each sample rate the cascade is refined toward its
+  analogue design for the worst frequency, not the average, at every 1/16 of
+  Amount; at 44.1 and 48 kHz it gets one extra digital-only shelf (0 dB in the
+  design) to absorb the last differences near Nyquist. Fitted shelves stay inside
+  the +6/−12 dB limits, so the fit never pairs an oversized shelf with a broad bell
+  that cancels it.
+* **Linear Phase.** The latency is that of an 8,192-tap filter at 48 kHz (85.3 ms),
+  scaled with the rate. The convolver's partition comes out of that budget, so the
+  FIR itself has 7,681 taps at 48 kHz, as Settings shows, and the reported latency
+  is exact. Tukey window. New filter sets take over the running convolver's
+  history, so Amount changes crossfade without gaps. Above 20 kHz the correction
+  tapers to 0 dB.
+* **Bass corners.** The FIR resolves about 6 Hz, so it cannot follow the hard
+  corner the boost limit puts into a correction for headphones with a bass
+  roll-off (it missed by up to 0.6 dB at 20–60 Hz). The generator rounds such
+  corners, and only those, until the FIR reproduces the curve within 0.06 dB
+  (generator 1.1.0). Both modes realise that same curve.
+* **Headroom** covers the realised response up to Nyquist, not only to 20 kHz, so
+  the correction plus match gain stays at or below 0 dB above the audio band too.
 * **Balance** follows the usual convention (turning right moves the image right by
   trimming the left channel) and the readout names the attenuated side.
 * **Protection hold** is 2 s (proposed in the handoff). The A/B key is **A**.

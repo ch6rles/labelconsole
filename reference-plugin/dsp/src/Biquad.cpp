@@ -200,7 +200,7 @@ BiquadCoeffs designMatched (const FilterSpec& s, double fs)
         const double sB0 = std::sqrt (B0), sB1 = std::sqrt (B1);
         const double W = 0.5 * (sB0 + sB1);
         const double disc = W * W + B2;
-        if (disc < -1e-12)
+        if (disc < -1e-9 * (W * W + std::abs (B2)))
             return false;
         const double b0 = 0.5 * (W + std::sqrt (std::max (disc, 0.0)));
         if (! (b0 > 0.0) || ! std::isfinite (b0))
@@ -283,7 +283,30 @@ BiquadCoeffs designMatched (const FilterSpec& s, double fs)
                     v -= M[i][j] * d[first + j];
                 d[first + i] = v / M[i][i];
             }
-            const double c0 = d[0], c1 = d[1] / pMax, c2 = d[2] / (pMax * pMax);
+            double c0 = d[0], c1 = d[1] / pMax, c2 = d[2] / (pMax * pMax);
+            if (first == 1 && c1 < 0.0)
+            {
+                // The best high-pass fit often wants a slightly negative
+                // linear term, which has no real factorisation. The closest
+                // one that has is k (1 - z^-1)^2: linear term 0, the
+                // quadratic term fitted alone.
+                double sx = 0.0, sxx = 0.0;
+                for (int k = 0; k < K; ++k)
+                {
+                    const double f = fLo * std::pow (fHi / fLo, k / (K - 1.0));
+                    double p0, p1, p2;
+                    phi (2.0 * pi * f / fs, p0, p1, p2);
+                    const double target = analogMagnitudeSquared (s, f) * (A0 * p0 + A1 * p1 + A2 * p2);
+                    if (! (target > 1e-24))
+                        continue;
+                    const double u = p1 / pMax;
+                    const double x = u * u / target;
+                    sx += x;
+                    sxx += x * x;
+                }
+                c1 = 0.0;
+                c2 = sxx > 0.0 ? sx / sxx / (pMax * pMax) : c2;
+            }
             const double B0 = c0, B2 = -0.25 * c2, B1 = c0 + c1 + c2;
             if (std::isfinite (B1) && factor (B0, B1, B2, result))
                 return result;

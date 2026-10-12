@@ -98,6 +98,9 @@ private:
 // A single matched biquad cannot follow an analogue curve right up to
 // 20 kHz at 44.1 kHz; the cascade as a whole can (spec Section 12, filter
 // accuracy within 0.1 dB). Returns the refined specs to design digitally.
-std::vector<FilterSpec> refineCascadeForRate (const std::vector<FilterSpec>& analogue, double sampleRate);
+// `startFrom` (same filters, same order) seeds the search, so refinements
+// of the same cascade at neighbouring Amounts land on neighbouring answers.
+std::vector<FilterSpec> refineCascadeForRate (const std::vector<FilterSpec>& analogue, double sampleRate,
+                                              const std::vector<FilterSpec>& startFrom = {});
 
 } // namespace ref::dsp
