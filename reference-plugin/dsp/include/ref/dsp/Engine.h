@@ -48,6 +48,11 @@ public:
 
     void process (float* const* channels, int numChannels, int numSamples, const EngineParams&) noexcept;
 
+    // Clears the input history and filter states (host reset on transport
+    // stop or locate). Any thread; the audio thread applies it at the start
+    // of its next block.
+    void requestReset() noexcept { resetRequested.store (true, std::memory_order_release); }
+
     // Latency of the set currently running (0 until the first set arrives).
     int activeLatency() const noexcept { return activeLatencySamples.load (std::memory_order_relaxed); }
 
@@ -71,6 +76,7 @@ private:
     int warmUpLength (const FilterSet&) const noexcept;
     void continueWarmUp (int budget) noexcept;
     void retire (FilterSet*) noexcept;
+    void clearState() noexcept;
     void processChunk (float* const* channels, int numChannels, int offset, int numSamples, const EngineParams&) noexcept;
 
     double fs = 48000.0;
@@ -107,6 +113,8 @@ private:
     double dipGain = 1.0, dipStep = 1.0;
 
     bool firstBlock = true;
+    bool snapGains = true; // the next real-time block starts its smoothers at their targets
+    std::atomic<bool> resetRequested { false };
     double goodAmount = 1.0, goodBalanceDb = 0.0, goodOutputDb = 0.0; // last finite parameter values
 
     std::atomic<int> activeLatencySamples { 0 };

@@ -25,6 +25,8 @@ public:
     //==========================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
+    // Host reset (transport stop or locate): no audio from before it plays on.
+    void reset() override { engine.requestReset(); }
     bool isBusesLayoutSupported (const BusesLayout&) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     void processBlockBypassed (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;

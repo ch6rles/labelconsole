@@ -83,6 +83,8 @@ void Engine::prepare (double sampleRate, int maxBlockSize, int numChannels)
     dipGain = 1.0;
 
     firstBlock = true;
+    snapGains = true;
+    resetRequested.store (false);
     activeLatencySamples.store (0);
     peaks[0].store (0.0f);
     peaks[1].store (0.0f);
@@ -221,6 +223,37 @@ void Engine::adoptPending() noexcept
     }
 }
 
+void Engine::clearState() noexcept
+{
+    for (auto& h : history)
+        std::fill (h.begin(), h.end(), 0.0f);
+
+    retire (previous);
+    previous = nullptr;
+    if (incoming != nullptr)
+    {
+        retire (current);
+        current = incoming;
+        incoming = nullptr;
+        delaySamples = current->latencySamples();
+        activeLatencySamples.store (delaySamples, std::memory_order_relaxed);
+    }
+    if (current != nullptr)
+        current->reset();
+    dip = Dip::none;
+    dipGain = 1.0;
+
+    // Silent history: a reset set is already warm.
+    if (warming != nullptr)
+    {
+        warming->reset();
+        warmPos = historyWrite;
+    }
+
+    firstBlock = true;
+    snapGains = true;
+}
+
 void Engine::process (float* const* channels, int numChannels, int numSamples, const EngineParams& params) noexcept
 {
     if (maxBlock == 0 || numSamples <= 0)
@@ -228,6 +261,9 @@ void Engine::process (float* const* channels, int numChannels, int numSamples, c
 
     ScopedFlushDenormals noDenormals;
     numChannels = std::clamp (numChannels, 1, 2);
+
+    if (resetRequested.exchange (false, std::memory_order_acq_rel))
+        clearState();
 
     for (int off = 0; off < numSamples; off += maxBlock)
         processChunk (channels, numChannels, off, std::min (maxBlock, numSamples - off), params);
@@ -258,7 +294,19 @@ void Engine::processChunk (float* const* ch, int numCh, int off, int len, const 
         return history[(size_t) c][(size_t) ((w0 + i - delaySamples) & historyMask)];
     };
 
-    // Offline render with auto-bypass: bit-exact pass-through, nothing else.
+    // A NaN from a host or a damaged preset must not reach the filters: keep
+    // the last good value (std::clamp passes NaN through).
+    if (std::isfinite (p.amount))
+        goodAmount = std::clamp (p.amount, 0.0, 1.0);
+    if (std::isfinite (p.balanceDb))
+        goodBalanceDb = std::clamp (p.balanceDb, -6.0, 6.0);
+    if (std::isfinite (p.outputGainDb))
+        goodOutputDb = std::clamp (p.outputGainDb, -24.0, 12.0);
+    const double amountTarget = goodAmount;
+
+    double* calPtr[2] = { calBuf[0].data(), calBuf[1].data() };
+
+    // Offline render with auto-bypass: bit-exact pass-through.
     if (p.renderBypass)
     {
         if (previous != nullptr)
@@ -276,26 +324,34 @@ void Engine::processChunk (float* const* ch, int numCh, int off, int len, const 
         }
         dip = Dip::none;
         dipGain = 1.0;
+
+        // The filters keep running on the input (unheard), so a host that
+        // returns to real time without preparing again continues from the
+        // current audio, not from what played before the render.
+        if (current != nullptr)
+        {
+            for (int c = 0; c < numCh; ++c)
+                for (int i = 0; i < len; ++i)
+                    calBuf[(size_t) c][(size_t) i] = sanitize (ch[c][off + i]);
+            current->process (calPtr, numCh, len, nullptr, amountTarget);
+        }
+        lastAmount = amountTarget;
+
         for (int c = 0; c < numCh; ++c)
             for (int i = 0; i < len; ++i)
                 ch[c][off + i] = dry (c, i);
-        bypassFade.snap (true);
+        bypassFade.snap (true); // fades from the dry signal when the render ends
         abFade.snap (p.calibrated);
+        snapGains = true;
         return;
     }
 
-    // A NaN from a host or a damaged preset must not reach the filters: keep
-    // the last good value (std::clamp passes NaN through).
-    if (std::isfinite (p.amount))
-        goodAmount = std::clamp (p.amount, 0.0, 1.0);
-    if (std::isfinite (p.balanceDb))
-        goodBalanceDb = std::clamp (p.balanceDb, -6.0, 6.0);
-    if (std::isfinite (p.outputGainDb))
-        goodOutputDb = std::clamp (p.outputGainDb, -24.0, 12.0);
-    const double amountTarget = goodAmount;
+    const bool snap = firstBlock || snapGains;
+    snapGains = false;
+    if (snap)
+        amountSmoother.reset (amountTarget);
     if (firstBlock)
     {
-        amountSmoother.reset (amountTarget);
         abFade.snap (p.calibrated);
         bypassFade.snap (p.bypass);
     }
@@ -317,7 +373,6 @@ void Engine::processChunk (float* const* ch, int numCh, int off, int len, const 
     lastAmount = amount;
 
     // Calibrated side.
-    double* calPtr[2] = { calBuf[0].data(), calBuf[1].data() };
     for (int c = 0; c < numCh; ++c)
         for (int i = 0; i < len; ++i)
             calBuf[(size_t) c][(size_t) i] = sanitize (ch[c][off + i]);
@@ -375,7 +430,7 @@ void Engine::processChunk (float* const* ch, int numCh, int off, int len, const 
     {
         calTarget[c] = dbToGain (matchDb + headDb + outDb + trim[c]);
         rawTarget[c] = dbToGain (headDb + outDb + trim[c]);
-        if (firstBlock)
+        if (snap)
         {
             calGain[c].reset (calTarget[c]);
             rawGain[c].reset (rawTarget[c]);
@@ -429,7 +484,13 @@ void Engine::processChunk (float* const* ch, int numCh, int off, int len, const 
                 y = ka * gc[c] * cal + (1.0 - ka) * gr[c] * raw;
 
             if (p.protection)
-                y = ProtectionClipper::process (y, engaged);
+            {
+                // Reported only when the clipped signal is what plays, not
+                // while Bypass sends the input out unchanged.
+                bool clipped = false;
+                y = ProtectionClipper::process (y, clipped);
+                engaged = engaged || (clipped && bypassPos < 1.0);
+            }
 
             float out;
             if (bypassPos >= 1.0)

@@ -457,6 +457,104 @@ TEST_CASE ("robustness: non-finite parameters keep the last good value")
     }
 }
 
+TEST_CASE ("state: nothing from before an offline render or a host reset plays after it")
+{
+    auto sine = [] (size_t n, float level)
+    {
+        Signal s (n);
+        for (size_t i = 0; i < n; ++i)
+            s.l[i] = level * (float) std::sin (2.0 * 3.14159265358979 * 440.0 * (double) i / 48000.0);
+        s.r = s.l;
+        return s;
+    };
+    auto peakOf = [] (const Signal& s)
+    {
+        float peak = 0.0f;
+        for (size_t i = 0; i < s.l.size(); ++i)
+            peak = std::max ({ peak, std::abs (s.l[i]), std::abs (s.r[i]) });
+        return peak;
+    };
+
+    for (auto mode : { FilterMode::minimumPhase, FilterMode::linearPhase })
+    {
+        const auto cfg = reftest::configFor (reftest::mm520Studio(), mode, 48000.0);
+        const std::string name = mode == FilterMode::minimumPhase ? "Min Phase" : "Linear Phase";
+
+        // Real time, then a silent offline render, then real time again
+        // without a new prepare (VST3 hosts switch the mode per block).
+        Engine e;
+        prepareWith (e, 48000.0, 256, cfg);
+        EngineParams p;
+        auto music = sine (48000, 0.5f);
+        run (e, music, p, 256);
+        p.renderBypass = true;
+        auto render = sine (48000, 0.0f);
+        run (e, render, p, 256);
+        p.renderBypass = false;
+        auto after = sine (24000, 0.0f);
+        run (e, after, p, 256);
+        CHECK_MSG (peakOf (after) < 1e-6f, name + ": audio from before the render plays after it");
+
+        // Host reset (transport stop or locate) with no silence in between.
+        Engine f;
+        prepareWith (f, 48000.0, 256, cfg);
+        EngineParams q;
+        auto before = noise (48000, 0.5f, 11);
+        run (f, before, q, 256);
+        f.requestReset();
+        auto quiet = sine (24000, 0.0f);
+        run (f, quiet, q, 256);
+        CHECK_MSG (peakOf (quiet) == 0.0f, name + ": audio from before a reset plays after it");
+
+        // Starting with an offline render: once real time resumes and the
+        // 20 ms fade from the dry signal is over, the output equals that of
+        // an engine that ran in real time throughout.
+        Engine g, ref;
+        prepareWith (g, 48000.0, 256, cfg);
+        prepareWith (ref, 48000.0, 256, cfg);
+        EngineParams r;
+        r.outputGainDb = -3.0;
+        auto a = noise (48000, 0.3f, 13);
+        auto b = a;
+        for (size_t off = 0; off < a.l.size(); off += 256)
+        {
+            const int n = (int) std::min<size_t> (256, a.l.size() - off);
+            r.renderBypass = off < 24000;
+            float* ga[2] = { a.l.data() + off, a.r.data() + off };
+            g.process (ga, 2, n, r);
+            r.renderBypass = false;
+            float* rb[2] = { b.l.data() + off, b.r.data() + off };
+            ref.process (rb, 2, n, r);
+        }
+        float diff = 0.0f;
+        for (size_t i = 24000 + 2048; i < a.l.size(); ++i)
+            diff = std::max ({ diff, std::abs (a.l[i] - b.l[i]), std::abs (a.r[i] - b.r[i]) });
+        CHECK_MSG (diff < 1e-6f, name + ": output after a render differs by " + std::to_string (diff));
+    }
+}
+
+TEST_CASE ("protection: not reported while Bypass plays the input unchanged")
+{
+    Engine e;
+    prepareWith (e, 48000.0, 256, reftest::configFor (reftest::mm520Studio(), FilterMode::minimumPhase, 48000.0));
+    EngineParams p;
+    p.bypass = true;
+    p.autoGain = false;
+    p.outputGainDb = 6.0;
+    Signal s (48000);
+    for (size_t i = 0; i < s.l.size(); ++i)
+        s.l[i] = 0.8f * (float) std::sin (2.0 * 3.14159265358979 * 1000.0 * (double) i / 48000.0);
+    s.r = s.l;
+    const auto input = s;
+    run (e, s, p, 256);
+    CHECK (s.l == input.l);
+    CHECK (e.protectionEvents() == 0);
+
+    p.bypass = false;
+    run (e, s, p, 256);
+    CHECK (e.protectionEvents() > 0);
+}
+
 TEST_CASE ("acceptance: smoothing, Amount and Output swept in 10 ms leave no discontinuity above -80 dBFS")
 {
     for (auto mode : { FilterMode::minimumPhase, FilterMode::linearPhase })
