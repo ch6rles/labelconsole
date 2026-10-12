@@ -148,7 +148,8 @@ With **Daily readings** (Settings → Discord, off by default), Label Console al
 
    Use the `applications.commands` scope for both.
 5. **Register the commands.** Settings → Discord → Register commands. It registers only the install types switched on in step 4, so run it again after changing them, or after changing the bot token.
-6. **Optional sources** (Settings → Integrations):
+6. **MusicBrainz** needs no key. It requires a User-Agent that names the app and a way to contact you. The app sends `LabelConsole/0.1 ( <APP_URL> )`; set `HTTP_USER_AGENT` to add an email. Register the use with MetaBrainz (free tiers: [discord-providers.md](discord-providers.md)).
+7. **Optional sources** (Settings → Integrations):
    - **SpotScraper:** stream counts and Spotify credits.
    - **Discogs** personal access token: catalogue numbers, company credits and credits by UPC.
    - **Spotify Web API:** markets and copyright lines.

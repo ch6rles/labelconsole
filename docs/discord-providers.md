@@ -6,7 +6,7 @@ The plan's provider review (§7 scorecard, §9 compliance, §12 risks), done on 
 
 | Provider | Coverage on cards | Access and cost | Terms for this use | Provenance |
 |---|---|---|---|---|
-| **MusicBrainz** | ISRC, UPC, release, date, label, ℗/© lines (as relationships), credits | No key. **1 request a second** per IP, with a User-Agent that names the app and a contact | Core data is CC0 (public domain). Commercial use of the live API is expected to be paid: from $100/month ("supporter" tiers), or self-host a mirror from the free dumps | Record links on every card |
+| **MusicBrainz** | ISRC, UPC, release, date, label, ℗/© lines (as relationships), credits | No key. **1 request a second** per IP, with a User-Agent that names the app and a contact (the app sends `LabelConsole/0.1 ( <APP_URL> )`) | Core data is CC0 (public domain). Companies are asked to register as supporters: $0 tiers exist (non-commercial, non-profit, "Stealth Start-Up": not publicly offering a service); the paid tiers (from $100/month) describe public products. Or self-host a mirror from the free dumps | Record links on every card |
 | **Deezer** | Search, ISRC, UPC, label, date, artwork, 30-second preview, availability | No key, no published rate limit (the app keeps to 50 per 5 s) | **Non-commercial, private use only**. Other uses need Deezer's approval. A visible Deezer logo is required. Preview audio must not be stored or made downloadable | Track and album links |
 | **iTunes Search** | ℗ line, release date, by UPC | No key, about 20 calls a minute | Framed as promoting the store. Caching text metadata is encouraged. Previews (not used) must be streamed with a store badge | Album links |
 | **Spotify Web API** (label's own key) | ISRC, UPC, ℗/© lines, markets; `label` is gone for new apps | Development mode only (extended access needs 250k monthly users): the owner needs Premium, 5 users | Bans products "targeted for use by businesses", storing content beyond temporary caching, and "compilations or databases". Content must be credited to Spotify and linked back | Track and album links |
@@ -48,7 +48,12 @@ A source that isn't kept still shows on every card and in Extended Info. Only it
    - ask Deezer for approval (developers.deezer.com);
    - or accept the risk for an internal tool;
    - or move text search to MusicBrainz and iTunes, which is slower and finds less.
-2. **MusicBrainz.** A label's use counts as commercial: become a supporter, from $100/month, or run a mirror (which also removes the one-request-a-second limit).
+2. **MusicBrainz.** Register at [metabrainz.org](https://metabrainz.org/supporters/account-type) and describe the use. Their $0 tiers are:
+   - Non-commercial / Personal;
+   - Non-profit;
+   - "Stealth Start-Up", for services not publicly offered.
+
+   This app is a private tool for one label's staff, with a few hundred lookups a month, not offered to the public. Every paid tier describes a public product. MetaBrainz decides, so ask them. Running a mirror also avoids fees and removes the one-request-a-second limit, but needs a machine with a few hundred GB of disk.
 3. **Spotify Web API.** The developer policy rules out business tools, and development mode no longer returns the label. Consider leaving it unconnected and relying on the other sources.
 4. **Apple Music API.** Not permitted for this use. The iTunes Search API, which needs no key, covers the ℗ line and release date.
 

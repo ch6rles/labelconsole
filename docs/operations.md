@@ -75,7 +75,7 @@ Set in the environment (see `.env.example`). The app refuses to start if a requi
 | `WORKER_AGENT_CONCURRENCY` | | Concurrent agent runs per worker process (default 8) |
 | `AGENT_CONCURRENCY_PER_ORG` | | Agent runs one label may have going at once (default 4) |
 | `WORKER_HEALTH_PORT` | | Worker's `/healthz` port (default 9091) |
-| `HTTP_USER_AGENT` | | Sent to public APIs (MusicBrainz requires a descriptive one) |
+| `HTTP_USER_AGENT` | `LabelConsole/0.1 ( <APP_URL> )` | Sent to public APIs. MusicBrainz requires the app name and a way to contact you; the default uses your console's address. Add an email if you like |
 | `LOG_LEVEL` | | pino level |
 
 Also read directly: `DB_POOL_MAX` / `DB_SYSTEM_POOL_MAX` (connection pools), `DB_APP_ROLE` (if the app role name differs from `DATABASE_URL`'s user), `LC_QUEUE_PREFIX` (Redis key prefix), `LC_MIGRATIONS_DIR` (set in the worker image), `DATABASE_SUPERUSER_URL` (setup and the restore drill only), `LC_DEV_SEED` (development seed only).

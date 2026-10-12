@@ -49,7 +49,11 @@ const EnvSchema = z.object({
   /** Platform SpotScraper key (Spotify play counts, credits, ISRC search), used when a label hasn't added its own. */
   SPOTSCRAPER_API_KEY: z.string().optional().or(z.literal('').transform(() => undefined)),
   /** Descriptive User-Agent required by MusicBrainz and polite for every public API. */
-  HTTP_USER_AGENT: z.string().default('LabelConsole/0.1 (+https://labelconsole.app)'),
+  /**
+   * Sent to public APIs. MusicBrainz requires one that names the app and a way
+   * to contact its operator; left unset, it is built from APP_URL.
+   */
+  HTTP_USER_AGENT: z.string().default(''),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   /** Seed data is only ever written when this is set and NODE_ENV is not production. */
   LC_DEV_SEED: z.string().optional(),
@@ -77,10 +81,13 @@ export function env(): Env {
       const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n  ');
       throw new Error(`Invalid environment configuration:\n  ${issues}`);
     }
-    cached = parsed.data;
+    cached = { ...parsed.data, HTTP_USER_AGENT: parsed.data.HTTP_USER_AGENT || defaultUserAgent(parsed.data.APP_URL) };
   }
   return cached;
 }
+
+/** `LabelConsole/0.1 ( https://console.example.com )`: MusicBrainz's format, with this deployment's address as the contact. */
+export const defaultUserAgent = (appUrl: string) => `LabelConsole/0.1 ( ${appUrl.replace(/\/$/, '')} )`;
 
 /** Test hook: forget the cached env so a test can change process.env. */
 export function resetEnvCache() {

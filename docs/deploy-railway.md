@@ -144,6 +144,15 @@ The app stays on Railway. Its worker, database and Redis need servers that are a
 
 The Railway address keeps working as well.
 
+## The Discord app
+
+Nothing extra runs on Railway: the website answers Discord, and the worker does the lookups.
+- `APP_URL` must be the public https address on both services (Discord accepts only https).
+- The Interactions Endpoint URL you give Discord is `https://<your address>/api/discord/interactions`.
+- MusicBrainz needs no key. The app identifies itself as `LabelConsole/0.1 ( <APP_URL> )`; set `HTTP_USER_AGENT` on both services if you want to add an email.
+
+The setup steps (Discord Developer Portal, registering commands, linking accounts) are in [discord.md](discord.md).
+
 ## Deploying updates
 
 After new code is pushed to the branch, open each service (**web**, then **worker**) and check that its latest deployment shows the newest commit message. If it doesn't, press **Cmd+K** (Ctrl+K on Windows) on the project canvas and choose **Deploy Latest Commit**, or use the **⋮** menu on the service. **Redeploy** on an old deployment rebuilds that same old commit, not the newest one.

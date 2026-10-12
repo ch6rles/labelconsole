@@ -614,7 +614,7 @@ These need the owner. Nothing paid was added without asking.
 - **Artist portal** logins (a later phase in the spec).
 - **Discord app data providers** (details in [discord-providers.md](discord-providers.md)):
   - **Deezer:** its terms allow non-commercial, private use only. Ask for approval, accept the risk, or move text search off Deezer.
-  - **MusicBrainz:** commercial use is expected to pay (from $100/month), or run a mirror.
+  - **MusicBrainz:** register with MetaBrainz and ask for a $0 tier (it's a private staff tool, not a public product). Or run a mirror.
   - **Spotify Web API:** its policy rules out business tools.
   - **Apple Music API:** not permitted for catalogue lookups.
 

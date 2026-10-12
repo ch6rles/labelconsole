@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { defaultUserAgent, env, resetEnvCache } from './env';
 import { DeadlineError } from './errors';
 import { fetchJson, withBudget } from './http';
 import { tryAcquire } from './ratelimit';
@@ -50,5 +51,24 @@ describe('time budgets', () => {
       return withBudget({ queueMs: 10_000, totalMs: 10_000 }, () => fetchJson('https://api.example.test/ok', { provider: 'example' }));
     }).catch((e: unknown) => e)) as DeadlineError;
     expect(err).toBeInstanceOf(DeadlineError);
+  });
+});
+
+describe('user agent', () => {
+  it('names the app and this deployment’s address unless one is set, as MusicBrainz requires', () => {
+    expect(defaultUserAgent('https://labelconsole.example.com/')).toBe('LabelConsole/0.1 ( https://labelconsole.example.com )');
+    const before = process.env.HTTP_USER_AGENT;
+    try {
+      delete process.env.HTTP_USER_AGENT;
+      resetEnvCache();
+      expect(env().HTTP_USER_AGENT).toBe(`LabelConsole/0.1 ( ${env().APP_URL} )`);
+      process.env.HTTP_USER_AGENT = 'Custom/1.0 ( me@example.com )';
+      resetEnvCache();
+      expect(env().HTTP_USER_AGENT).toBe('Custom/1.0 ( me@example.com )');
+    } finally {
+      if (before === undefined) delete process.env.HTTP_USER_AGENT;
+      else process.env.HTTP_USER_AGENT = before;
+      resetEnvCache();
+    }
   });
 });
