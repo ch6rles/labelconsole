@@ -89,6 +89,8 @@ public:
     static bool runningStandalone();
 
 private:
+    WorkerRequest makeRequest() const;
+    std::shared_ptr<const CalibrationSnapshot> snapshotForSave();
     void pushRequest();
     void processWith (juce::AudioBuffer<float>&, bool forceBypass) noexcept;
 

@@ -129,7 +129,7 @@ juce::AudioProcessorEditor* ReferenceProcessor::createEditor()
 }
 
 //==============================================================================
-void ReferenceProcessor::pushRequest()
+WorkerRequest ReferenceProcessor::makeRequest() const
 {
     WorkerRequest r;
     {
@@ -140,12 +140,39 @@ void ReferenceProcessor::pushRequest()
         r.overlay = settings.overlay;
         r.embedded = embedded;
         r.libraryGeneration = libraryGeneration;
+    }
+    r.sampleRate = currentSampleRate.load();
+    return r;
+}
+
+void ReferenceProcessor::pushRequest()
+{
+    {
+        const juce::ScopedLock sl (settingsLock);
         autoGainFlag.store (settings.autoGain);
         protectionFlag.store (settings.monitorProtection);
         autoBypassOfflineFlag.store (settings.autoBypassOffline);
     }
-    r.sampleRate = currentSampleRate.load();
-    worker.setRequest (r);
+    worker.setRequest (makeRequest());
+}
+
+std::shared_ptr<const CalibrationSnapshot> ReferenceProcessor::snapshotForSave()
+{
+    // The worker regenerates asynchronously, so right after a session load or
+    // a profile change its snapshot can still be the previous one. Save the
+    // curve that belongs to the current settings.
+    const auto request = makeRequest();
+    auto belongs = [&request] (const std::shared_ptr<const CalibrationSnapshot>& x)
+    {
+        return x != nullptr && x->result.generated && x->profileId == request.profileId && x->targetKey == request.targetKey;
+    };
+    if (auto snap = worker.getSnapshot(); belongs (snap))
+        return snap;
+    if (belongs (request.embedded))
+        return request.embedded;
+    std::shared_ptr<const CalibrationSnapshot> fresh;
+    worker.withLibraryExclusive ([&] { fresh = CalibrationWorker::generate (library, request); });
+    return belongs (fresh) ? fresh : nullptr;
 }
 
 void ReferenceProcessor::setProfile (const juce::String& profileId)
@@ -358,7 +385,7 @@ void ReferenceProcessor::getStateInformation (juce::MemoryBlock& destData)
     root.setProperty ("generatorVersion", juce::String (dsp::kGeneratorVersion), nullptr);
     root.appendChild (apvts.copyState(), nullptr);
     root.appendChild (state::settingsToTree (getSettings()), nullptr);
-    if (auto snap = worker.getSnapshot(); snap != nullptr && snap->result.generated)
+    if (auto snap = snapshotForSave())
         root.appendChild (state::snapshotToTree (*snap), nullptr);
 
     if (auto xml = root.createXml())

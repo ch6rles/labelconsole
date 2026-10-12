@@ -68,7 +68,8 @@ public:
 private:
     void adoptPending() noexcept;
     void warmUp (FilterSet&) noexcept;
-    void startUsing (FilterSet*) noexcept;
+    int warmUpLength (const FilterSet&) const noexcept;
+    void continueWarmUp (int budget) noexcept;
     void retire (FilterSet*) noexcept;
     void processChunk (float* const* channels, int numChannels, int offset, int numSamples, const EngineParams&) noexcept;
 
@@ -78,6 +79,12 @@ private:
     FilterSet* current = nullptr;
     FilterSet* previous = nullptr; // fading out
     FilterSet* incoming = nullptr; // waiting for the dip to reach silence
+    // A set with the same latency being warmed a slice per block while the
+    // current one plays on; it takes over (crossfaded) once it has caught up
+    // with the input, so a rebuild never costs a burst of work in one
+    // callback (warming 85 ms of input at 384 kHz takes longer than a block).
+    FilterSet* warming = nullptr;
+    int warmPos = 0;
     std::atomic<FilterSet*> pending { nullptr };
     SpscPointerQueue<FilterSet, 64> retired;
 

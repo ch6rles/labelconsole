@@ -37,6 +37,7 @@ Engine::~Engine()
     delete current;
     delete previous;
     delete incoming;
+    delete warming;
     delete pending.exchange (nullptr);
     collectGarbage();
 }
@@ -51,7 +52,8 @@ void Engine::prepare (double sampleRate, int maxBlockSize, int numChannels)
     delete previous;
     delete incoming;
     delete current;
-    previous = incoming = current = nullptr;
+    delete warming;
+    previous = incoming = current = warming = nullptr;
     collectGarbage();
 
     const auto sizing = linearPhaseSizing (fs);
@@ -110,10 +112,8 @@ float Engine::takePeak (int channel) noexcept
     return peaks[std::clamp (channel, 0, 1)].exchange (0.0f, std::memory_order_relaxed);
 }
 
-void Engine::warmUp (FilterSet& s) noexcept
+int Engine::warmUpLength (const FilterSet& s) const noexcept
 {
-    s.reset();
-
     int samples;
     if (s.mode() == FilterMode::linearPhase)
     {
@@ -124,8 +124,29 @@ void Engine::warmUp (FilterSet& s) noexcept
     {
         samples = (int) (0.085 * fs);
     }
-    samples = std::min (samples, historyMask - maxBlock);
+    return std::min (samples, historyMask - maxBlock);
+}
 
+void Engine::continueWarmUp (int budget) noexcept
+{
+    double* ptrs[2] = { prevBuf[0].data(), prevBuf[1].data() };
+    int todo = std::min (budget, (historyWrite - warmPos) & historyMask);
+    while (todo > 0)
+    {
+        const int len = std::min (maxBlock, todo);
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < len; ++i)
+                prevBuf[(size_t) c][(size_t) i] = sanitize (history[(size_t) c][(size_t) ((warmPos + i) & historyMask)]);
+        warming->process (ptrs, 2, len, nullptr, lastAmount);
+        warmPos = (warmPos + len) & historyMask;
+        todo -= len;
+    }
+}
+
+void Engine::warmUp (FilterSet& s) noexcept
+{
+    s.reset();
+    const int samples = warmUpLength (s);
     const int start = historyWrite - samples;
     double* ptrs[2] = { prevBuf[0].data(), prevBuf[1].data() };
     for (int off = 0; off < samples; off += maxBlock)
@@ -138,48 +159,66 @@ void Engine::warmUp (FilterSet& s) noexcept
     }
 }
 
-void Engine::startUsing (FilterSet* s) noexcept
-{
-    if (current == nullptr || ! s->takeStateFrom (*current))
-        warmUp (*s);
-}
-
 void Engine::adoptPending() noexcept
 {
     if (previous != nullptr || dip != Dip::none)
         return; // finish the transition in progress first
 
     auto* p = pending.exchange (nullptr, std::memory_order_acq_rel);
-    if (p == nullptr)
-        return;
-
-    if (p->sampleRate() != fs)
+    if (p != nullptr && p->sampleRate() != fs)
     {
         retire (p); // built for a rate we are no longer running at
+        p = nullptr;
+    }
+
+    if (p != nullptr)
+    {
+        // A newer set replaces one still warming.
+        retire (warming);
+        warming = nullptr;
+
+        if (current == nullptr)
+        {
+            // Nothing is playing yet: warm it now and start.
+            warmUp (*p);
+            current = p;
+            delaySamples = p->latencySamples();
+            activeLatencySamples.store (delaySamples, std::memory_order_relaxed);
+            return;
+        }
+
+        if (p->latencySamples() != current->latencySamples())
+        {
+            // Latency changes: dip to silence, swap (warming there), come back.
+            incoming = p;
+            dip = Dip::fadingOut;
+            return;
+        }
+
+        if (p->takeStateFrom (*current))
+        {
+            // Linear Phase hands over the convolver's state: switch at once.
+            previous = current;
+            current = p;
+            setFade.snap (false);
+            return;
+        }
+
+        // Warm it over the next blocks, from the same history warmUp() uses.
+        p->reset();
+        warming = p;
+        warmPos = (historyWrite - warmUpLength (*p)) & historyMask;
         return;
     }
 
-    if (current == nullptr)
+    // The set warming in the background has caught up with the input.
+    if (warming != nullptr && ((historyWrite - warmPos) & historyMask) == 0)
     {
-        warmUp (*p);
-        current = p;
-        delaySamples = p->latencySamples();
-        activeLatencySamples.store (delaySamples, std::memory_order_relaxed);
-        return;
-    }
-
-    if (p->latencySamples() == current->latencySamples())
-    {
-        startUsing (p);
         previous = current;
-        current = p;
+        current = warming;
+        warming = nullptr;
         setFade.snap (false);
-        return;
     }
-
-    // Latency changes: dip to silence, swap, come back.
-    incoming = p;
-    dip = Dip::fadingOut;
 }
 
 void Engine::process (float* const* channels, int numChannels, int numSamples, const EngineParams& params) noexcept
@@ -209,6 +248,10 @@ void Engine::processChunk (float* const* ch, int numCh, int off, int len, const 
             h[(size_t) ((w0 + i) & historyMask)] = src[i];
     }
     historyWrite = (w0 + len) & historyMask;
+
+    // Bounded work per block: at most four blocks' worth (or 2048 samples).
+    if (warming != nullptr)
+        continueWarmUp (std::max (4 * len, 2048));
 
     auto dry = [this, w0] (int c, int i) noexcept
     {

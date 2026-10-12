@@ -140,6 +140,25 @@ int main()
         check (c.getSnapshot() != nullptr && c.getSnapshot()->fromEmbedded, "embedded curve not used for a removed profile");
         check (maxDiff (outA, outC) == 0.0f, "embedded-curve output differs");
 
+        std::printf ("[ RUN ] state: saving straight after a load keeps the embedded curve\n");
+        {
+            // Saved before the worker has caught up with the loaded session.
+            ref::ReferenceProcessor loaded;
+            loaded.setStateInformation (missing.getData(), (int) missing.getSize());
+            const auto resaved = stateOf (loaded);
+            ref::ReferenceProcessor again;
+            again.setStateInformation (resaved.getData(), (int) resaved.getSize());
+            check (maxDiff (outA, render (again, input)) == 0.0f, "curve lost when saving right after a load");
+
+            ref::ReferenceProcessor switched;
+            configure (switched, mode);
+            switched.setProfile ("audeze_mm520");
+            const auto switchedState = stateOf (switched);
+            auto xml = juce::AudioProcessor::getXmlFromBinary (switchedState.getData(), (int) switchedState.getSize());
+            const auto saved = juce::ValueTree::fromXml (*xml).getChildWithName ("EMBEDDED");
+            check (saved.isValid() && saved["profileId"].toString() == "audeze_mm520", "saved curve is not the selected profile's");
+        }
+
         std::printf ("[ RUN ] state: changed profile falls back to the embedded curve\n");
         const auto changed = edited (state, [] (juce::ValueTree& t) { t.getChildWithName ("EMBEDDED").setProperty ("profileSha", "0000", nullptr); });
         ref::ReferenceProcessor d;
