@@ -74,6 +74,13 @@ target_compile_definitions(Reference PUBLIC
     JUCE_MODAL_LOOPS_PERMITTED=0
     JUCE_STRICT_REFCOUNTEDPOINTER=1)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # JUCE hides JACK clients that share the app's own client name (by
+    # default the product name), which would hide a loopback sink the user
+    # named REFERENCE.
+    target_compile_definitions(Reference PRIVATE "JUCE_JACK_CLIENT_NAME=\"REFERENCE app\"")
+endif()
+
 if(REF_CUSTOM_STANDALONE)
     # Compiled into the shared code; guarded by JucePlugin_Build_Standalone.
     target_compile_definitions(Reference PUBLIC JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1)

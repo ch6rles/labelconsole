@@ -77,8 +77,10 @@ public:
             {
                 juce::AudioBuffer<float> view (ch, 2, len);
                 midi.clear();
-                const juce::ScopedLock sl (bridge.processor.getCallbackLock());
-                if (bridge.processor.isSuspended())
+                // Never wait on the audio thread: if anything holds the
+                // processor's lock, this chunk is silent instead.
+                const juce::ScopedTryLock sl (bridge.processor.getCallbackLock());
+                if (! sl.isLocked() || bridge.processor.isSuspended())
                     view.clear();
                 else
                     bridge.processor.processBlock (view, midi);
